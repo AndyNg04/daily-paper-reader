@@ -6,81 +6,80 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-05-31
-- 运行时间：2026-05-31 21:01:49 UTC
+- 最新运行日期：2026-06-01
+- 运行时间：2026-06-01 22:25:47 UTC
 - 运行状态：成功
-- 本次总论文数：19
-- 精读区：7
+- 本次总论文数：20
+- 精读区：8
 - 速读区：12
 
 ### 今日简报（AI）
-今日精读两篇9分论文，分别聚焦进化增强多智能体强化学习在协同空战中的应用，以及人类感知类人机器人ergoCub的共享具身智能优化。
-
-最值得关注的方向：进化策略与多智能体强化学习结合可显著提升复杂战术决策能力，而人类感知机器人系统正突破物理交互的通用性瓶颈。
-
-建议普通读者优先精读这两篇高分文章，速读材料可作为多模态交互与编程实践参考。
-- 详情：[/202605/31/README](/202605/31/README)
+今日共推荐20篇论文，精读8篇、速读12篇，两篇9.0高分论文聚焦人机对齐与策略安全。最值得关注的是《Rationalize》通过共享语义推理对齐AI与人类，《Safe Equilibrium》优化策略博弈的安全性。建议优先精读这两篇高分论文，速读可从门槛式学习、配置器可用性分析、可扩展多智能体强化学习中选取方向。
+- 详情：[/202606/01/README](/202606/01/README)
 
 ### 精读区论文标签
-1. [Evolutionary Enhanced Multi-Agent Reinforcement Learning for Cooperative Air Combat](/202605/31/2605.25091v1-evolutionary-enhanced-multi-agent-reinforcement-learning-for-cooperative-air-combat)  
+1. [Rationalize: Shared Semantic Reasoning for Human-AI Alignment](/202606/01/2605.30632v1-rationalize-shared-semantic-reasoning-for-human-ai-alignment)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：直接提出共享语义推理框架用于人类-AI对齐
+2. [Safe Equilibrium Policy Optimization for Strategic Agent Policies](/202606/01/2605.30854v1-safe-equilibrium-policy-optimization-for-strategic-agent-policies)  
    标签：评分：9.0/10、query:social-rl
-   evidence：进化多智能体强化学习用于合作空战
-2. [Towards Shared Embodied Intelligence in Humanoid Robots through Optimization Development and Testing of the Human Aware ergoCub Robot](/202605/31/2605.26991v1-towards-shared-embodied-intelligence-in-humanoid-robots-through-optimization-development-and-testing-of-the-human-aware-ergocub-robot)  
+   evidence：社会强化学习用于多智能体合作，包含对合谋和利用的惩罚
+3. [TUX: Measuring Human--AI Tacit Understanding](/202606/01/2605.30930v1-tux-measuring-human--ai-tacit-understanding)  
    标签：评分：9.0/10、query:human-ai
-   evidence：面向物理协作的人类感知机器人架构
-3. [GrowLoop: Self-Evolving Conversation Evaluation Seeded by Human](/202605/31/2605.28882v1-growloop-self-evolving-conversation-evaluation-seeded-by-human)  
+   evidence：人机默契理解测量
+4. [Extending the UXR Point of View Playbook: Triangulating Insights in Complex Developer Domains](/202606/01/2605.31104v1-extending-the-uxr-point-of-view-playbook-triangulating-insights-in-complex-developer-domains)  
    标签：评分：9.0/10、query:human-ai
-   evidence：人类引导的自演化对话评估方法
-4. [Beyond Recall: Behavioral Specification as an Interpretive Layer for AI Personalization](/202605/31/2605.28969v1-beyond-recall-behavioral-specification-as-an-interpretive-layer-for-ai-personalization)  
+   evidence：AI代理用户体验研究方法
+5. [Generative AI in developing User Experience Research Point of View: A NotebookLM case study](/202606/01/2605.31125v1-generative-ai-in-developing-user-experience-research-point-of-view-a-notebooklm-case-study)  
    标签：评分：9.0/10、query:human-ai
-   evidence：通过行为规范实现AI个性化以对齐用户意图
-5. [Habermolt: Delegating Deliberation to AI Representatives](/202605/31/2605.24413v1-habermolt-delegating-deliberation-to-ai-representatives)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：AI代理代表人类用户进行审议，一种新的人机协作范式
-6. [Habermolt: Delegating Deliberation to AI Representatives](/202605/31/2605.24413v2-habermolt-delegating-deliberation-to-ai-representatives)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：AI代理审议用于人机协作
-7. [HyLaT: Efficient Multi-Agent Communication via Hybrid Latent-Text Protocol](/202605/31/2605.25421v1-hylat-efficient-multi-agent-communication-via-hybrid-latent-text-protocol)  
-   标签：评分：8.0/10、query:social-rl
-   evidence：用于多智能体合作的混合通信协议
+   evidence：直接以生成式AI案例研究用户体验研究，涵盖AI用户体验
+6. [Comparing LLM-Based Conversational and Graphical Interfaces for Industrial Decision Tasks: An Exploratory Mixed-Methods Study](/202606/01/2605.31224v1-comparing-llm-based-conversational-and-graphical-interfaces-for-industrial-decision-tasks-an-exploratory-mixed-methods-study)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：直接比较基于LLM的对话界面与图形界面在工业决策任务中的用户体验
+7. [Social welfare optimisation under institutional reward and punishment](/202606/01/2605.31330v1-social-welfare-optimisation-under-institutional-reward-and-punishment)  
+   标签：评分：9.0/10、query:social-rl
+   evidence：社会困境中奖励和惩罚的社会福利优化
+8. [Dreaming Of Others: Latent Teammate Modeling In World Models For Multi-Agent Reinforcement Learning](/202606/01/2605.31361v1-dreaming-of-others-latent-teammate-modeling-in-world-models-for-multi-agent-reinforcement-learning)  
+   标签：评分：9.0/10、query:social-rl
+   evidence：在世界模型中对队友建模以促进合作多智能体社会交互
 
 ### 速读区论文标签
-1. [IPIBench: Evaluating Interactive Proactive Intelligence of MLLMs under Continuous Streams](/202605/31/2605.27074v1-ipibench-evaluating-interactive-proactive-intelligence-of-mllms-under-continuous-streams)  
+1. [Cost of Structural Learning Under Censored Feedback: A Threshold-Bandit Approach](/202606/01/2605.27076v1-cost-of-structural-learning-under-censored-feedback-a-threshold-bandit-approach)  
+   标签：评分：8.0/10、query:social-rl
+   evidence：带审查反馈和阈值激活合作的多智能体老虎机
+2. [Usability Analysis of Configurator User Interfaces with Multimodal Large Language Models](/202606/01/2605.29456v1-usability-analysis-of-configurator-user-interfaces-with-multimodal-large-language-models)  
    标签：评分：8.0/10、query:human-ai
-   evidence：评估多模态大模型在连续流中的交互式主动智能
-2. [EgoBench: An Interactive Egocentric Multimodal Benchmark for Tool-Using Agents](/202605/31/2605.27820v1-egobench-an-interactive-egocentric-multimodal-benchmark-for-tool-using-agents)  
+   evidence：使用多模态大语言模型进行配置器用户界面可用性分析
+3. [Scalable Constrained Multi-Agent Reinforcement Learning via State Augmentation and Consensus for Separable Dynamics](/202606/01/2605.30461v1-scalable-constrained-multi-agent-reinforcement-learning-via-state-augmentation-and-consensus-for-separable-dynamics)  
+   标签：评分：8.0/10、query:social-rl
+   evidence：带社会共识的约束多智能体强化学习
+4. [Computer-Aided Tagging on Wikimedia Commons: Designing for Human-AI Collaboration in Open Knowledge Work](/202606/01/2605.30800v1-computer-aided-tagging-on-wikimedia-commons-designing-for-human-ai-collaboration-in-open-knowledge-work)  
    标签：评分：8.0/10、query:human-ai
-   evidence：包含模拟用户反馈的交互式工具使用智能体基准
-3. [From Prompting to Verification: How Experience Shapes Vibe Coding Practices](/202605/31/2605.24521v1-from-prompting-to-verification-how-experience-shapes-vibe-coding-practices)  
-   标签：评分：7.0/10、query:human-ai
-   evidence：关于AI编程工具用户体验差异的研究
-4. [Decoupled Delay Compensation: Enhancing Pre-trained MARL Policies via Learned Dynamics Filtering](/202605/31/2605.26286v1-decoupled-delay-compensation-enhancing-pre-trained-marl-policies-via-learned-dynamics-filtering)  
+   evidence：开放知识工作中的人-AI协作设计
+5. [Enhancing Human-Likeness in Reinforcement Learning Agents via Hierarchical Macro Action Quantization](/202606/01/2605.30928v1-enhancing-human-likeness-in-reinforcement-learning-agents-via-hierarchical-macro-action-quantization)  
+   标签：评分：8.0/10、query:human-ai
+   evidence：增强RL代理的人类拟真性以改善人机协作
+6. [A Persona-Based Evaluation Framework for Pluralistic Alignment in Generative AI](/202606/01/2605.31021v1-a-persona-based-evaluation-framework-for-pluralistic-alignment-in-generative-ai)  
+   标签：评分：8.0/10、query:human-ai
+   evidence：基于角色的多样性对齐评估框架，可评估不同用户视角下的AI系统体验
+7. [Personalized to Persuade: The Effects of Contextualization and Warmth on Trust and Reliance in Conversational AI](/202606/01/2605.31275v1-personalized-to-persuade-the-effects-of-contextualization-and-warmth-on-trust-and-reliance-in-conversational-ai)  
+   标签：评分：8.0/10、query:human-ai
+   evidence：上下文化和温暖度对对话式AI助手信任与依赖的影响
+8. [Multi-Agent Coordination Adaptation via Structure-Guided Orchestration](/202606/01/2605.25746v1-multi-agent-coordination-adaptation-via-structure-guided-orchestration)  
    标签：评分：7.0/10、query:social-rl
-   evidence：通过延迟补偿增强预训练多智能体强化学习策略在真实世界条件下的表现
-5. [JobBench: Aligning Agent Work With Human Will](/202605/31/2605.26329v1-jobbench-aligning-agent-work-with-human-will)  
+   evidence：基于概率结构学习的多智能体协调适应
+9. [AI-Assisted Systematization for Evaluating GenAI Systems](/202606/01/2605.26001v1-ai-assisted-systematization-for-evaluating-genai-systems)  
    标签：评分：7.0/10、query:human-ai
-   evidence：评估AI智能体与人类意愿对齐的基准
-6. [Personal Visual Memory from Explicit and Implicit Evidence](/202605/31/2605.28806v1-personal-visual-memory-from-explicit-and-implicit-evidence)  
+   evidence：AI辅助系统化评估生成式AI系统，与评估AI用户体验相关
+10. [Beyond Trajectory-Level Attribution: Graph-Based Credit Assignment for Agentic Reinforcement Learning](/202606/01/2605.26684v1-beyond-trajectory-level-attribution-graph-based-credit-assignment-for-agentic-reinforcement-learning)  
+   标签：评分：7.0/10、query:social-rl
+   evidence：基于图的信用分配方法用于智能体任务中的群体强化学习
+11. [COLLEAGUE.SKILL: Automated AI Skill Generation via Expert Knowledge Distillation](/202606/01/2605.31264v1-colleagueskill-automated-ai-skill-generation-via-expert-knowledge-distillation)  
    标签：评分：7.0/10、query:human-ai
-   evidence：个人视觉记忆增强个性化AI智能体的用户体验
-7. [Toward Enactive Artificial Intelligence](/202605/31/2605.24238v1-toward-enactive-artificial-intelligence)  
+   evidence：自动化追踪到技能蒸馏，用于构建以人为本的协作AI代理
+12. [AgentHijack: Benchmarking Computer Use Agent Robustness to Common Environment Corruptions](/202606/01/2605.25707v1-agenthijack-benchmarking-computer-use-agent-robustness-to-common-environment-corruptions)  
    标签：评分：6.0/10、query:human-ai
-   evidence：强调主动感知与交互的生成式AI方法
-8. [PANDO: Efficient Multimodal AI Agents via Online Skill Distillation](/202605/31/2605.24785v2-pando-efficient-multimodal-ai-agents-via-online-skill-distillation)  
-   标签：评分：6.0/10、query:human-ai
-   evidence：通过技能库和缓存感知提示提升多模态web代理效率
-9. [Multi-Agent Systems are Mixtures of Experts: Who Becomes an Influencer?](/202605/31/2605.25929v1-multi-agent-systems-are-mixtures-of-experts-who-becomes-an-influencer)  
-   标签：评分：6.0/10、query:human-ai
-   evidence：多智能体系统协作与意见动态研究
-10. [UnityMAS-O: A General RL Optimization Framework for LLM-Based Multi-Agent Systems](/202605/31/2605.26646v1-unitymas-o-a-general-rl-optimization-framework-for-llm-based-multi-agent-systems)  
-   标签：评分：6.0/10、query:social-rl
-   evidence：面向LLM多智能体系统的通用强化学习优化框架
-11. [MUSE-Autoskill: Self-Evolving Agents via Skill Creation, Memory, Management, and Evaluation](/202605/31/2605.27366v1-muse-autoskill-self-evolving-agents-via-skill-creation-memory-management-and-evaluation)  
-   标签：评分：6.0/10、query:human-ai
-   evidence：面向LLM智能体的技能中心框架，支持交互设计
-12. [MINDGAMES: A Live Arena for Evaluating Social and Strategic Reasoning in Multi-Agent LLMs](/202605/31/2605.29512v1-mindgames-a-live-arena-for-evaluating-social-and-strategic-reasoning-in-multi-agent-llms)  
-   标签：评分：6.0/10、query:social-rl
-   evidence：用于评估LLM智能体社交与战略推理的多智能体竞技场，与多智能体社交交互RL相关
+   evidence：代理鲁棒性基准影响用户体验
 
 
 <div class="dpr-home-promo-card">
