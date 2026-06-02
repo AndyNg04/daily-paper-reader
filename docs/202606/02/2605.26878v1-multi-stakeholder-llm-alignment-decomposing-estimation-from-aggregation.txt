@@ -1,0 +1,2082 @@
+Title: Multi-Stakeholder LLM Alignment: Decomposing Estimation from Aggregation
+
+URL Source: https://arxiv.org/pdf/2605.26878v1
+
+Published Time: Wed, 27 May 2026 01:02:10 GMT
+
+Number of Pages: 17
+
+Markdown Content:
+# Multi-Stakeholder LLM Alignment: Decomposing Estimation from Aggregation 
+
+Lulu Zheng 1, Wenjin Yang 1, Xiangwen Zhang 1, Rong Yin 2,Yulan Hu 1*, Zheng Pan 1, Xin Li 1
+
+> 1
+
+AMAP, Alibaba Group 2Beihang University 
+
+> {zll522441,yangwenjin.ywj,xwzhang,huyulan,panzheng.pan,beilai.bl}@alibaba-inc.com, yinrong@buaa.edu.cn
+
+Abstract 
+
+Multi-stakeholder tasks require one output to satisfy users with conflicting preferences. Holistic LLM judges conflate utility estima-tion and utility aggregation, yielding unstable implicit weights. We show empirically and the-oretically that this aggregation-specific weight-ing noise can create large score shifts when stakeholder satisfaction is dispersed; in our ex-periments, these weight-induced shifts also in-crease with stakeholder count. We propose DECOMP R: counterfactual-calibrated weights are fixed from query structure before candidate scoring, while per-role utilities are estimated independently, removing candidate-dependent weight drift and reducing estimation noise. 
+
+1 Introduction 
+
+Large language models (LLMs) have achieved re-markable success in code generation, mathemati-cal reasoning, and open-ended dialogue (OpenAI, 2023; Qwen Team, 2025; Guo et al., 2025). Much of this progress, however, targets scenarios where the agent serves a single user whose preferences define a clear optimization objective. Many real tasks—group travel planning, multi-party negoti-ation, committee resource allocation—instead re-quire one agent to produce a single joint response for multiple stakeholders whose preferences may conflict. Aligning LLMs for such tasks often relies on reinforcement learning (Ouyang et al., 2022; Shao et al., 2024; Guo et al., 2025), which requires a re-ward signal specifying what counts as a good joint response. Since these tasks are open-ended and lack verifiable ground truth, the reward is typically supplied by LLM-as-Judge (Zheng et al., 2023) or learned reward models (Ouyang et al., 2022). LLM judges are known to exhibit evaluation biases and instability even outside multi-stakeholder settings,  
+
+> *Corresponding author.
+
+including position bias in pairwise comparisons (Zheng et al., 2023; Wang et al., 2024c), adversar-ial vulnerabilities in absolute scoring (Raina et al., 2024), and intra-rater score inconsistency across repeated runs (Haldar and Hockenmaier, 2025). Multi-stakeholder evaluation compounds this prob-lem: the judge must perform both estimation (how well is each stakeholder served?) and aggregation 
+
+(how should competing utilities be weighted?) in a single pass, thereby producing implicitly assigned aggregation weights that can shift across calls. As Figure 1 illustrates, repeated evaluations of the same plan can instantiate different implicit weights and produce inconsistent rewards. We refer to this as weighting noise : an aggregation-specific error in which the judge’s implicit stake-holder weights shift across evaluations, reweight-ing utilities. Its score impact is amplified when stakeholder satisfactions are dispersed and may in-crease with stakeholder count (§3). Our theory shows how such shifts can corrupt within-group response ranking and mislead GRPO-style policy gradients (§4). We address this with D ECOMP R, whose key mechanism is counterfactual-calibrated aggregation : each stakeholder’s weight is fixed from query structure as a proxy for expected sacri-fice, while per-role grounded evaluation estimates utilities independently. In summary, we formalize the multi-stakeholder alignment problem, show empirically and the-oretically that LLM-judge reward inconsistency in this setting arises in part from aggregation-specific weighting noise, and propose D ECOMP Rto address this problem through counterfactual-calibrated estimation–aggregation separation. 
+
+2 Related Work 
+
+2.1 Reward Evaluation for Open-Ended Tasks 
+
+LLM-as-Judge (Zheng et al., 2023) enables reward estimation without verifiable ground truth, but ex-1
+
+> arXiv:2605.26878v1 [cs.AI] 26 May 2026
+
+One Agent Plans for Multiple Stakeholders       
+
+> Balancing & Compromising
+> LLM Agent
+> Elder
+> minimal walking
+> dietary needs
+> Adventurer
+> extreme sports
+> flexible budget
+> Parent
+> child -safe
+> budget <= $500
+> 1
+> Safety vs. Adventure
+> Budget vs. Access
+> Preference Conflict
+> 2
+
+LLM Judge Inconsistency           
+
+> Shared
+> Plan
+> Profiles
+> 𝒑 𝒊
+> Implicitly infers each stakeholder's utility and weight
+> Weight
+> 𝒘 𝒊
+> Shared T ravel Plan
+> mild adventure
+> child -safe
+> budget <= $500
+> low walking
+> Trial 1
+> w1 Adventurer = 0.86
+> w2Parent = 0.07
+> w3Elder = 0.07
+> Score
+
+4.7 Score 
+
+9.1 Score 
+
+7.9                         
+
+> Same plan, same judge in 3trials
+> Unstable implicit weights → large reward shifts
+> Utility
+> 𝒖 𝒊
+> diet -aware dining
+> LLM Judge
+> Trial 2Trial 3
+> w1 Adventurer =0. 05
+> w2Parent =0. 88
+> w3Elder =0.0 7
+> w1 Adventurer =0. 07
+> w2Parent =0.0 8
+> w3Elder =0. 85
+
+Figure 1: (Left) A single LLM agent synthesizes conflicting stakeholder preferences into one shared plan. (Right) A holistic LLM judge implicitly assigns per-stakeholder utilities ui and weights wi; repeated evaluations of the same plan yield different implicit weights and thus different scalar rewards. 
+
+hibits well-documented inconsistencies: position bias (Wang et al., 2024c), verbosity bias (Saito et al., 2023), self-preference bias (Panickssery et al., 2024), and intra-rater instability (Haldar and Hock-enmaier, 2025). Structured approaches improve reliability in two ways: explicit scoring criteria— rubrics (Hashemi et al., 2024), checklists (Lee et al., 2025), and chain-of-thought scoring (Liu et al., 2023)—decompose evaluation into quality dimen-sions , while trained evaluators—fine-tuned judges or generative reward models (Zhu et al., 2025; Zhang et al., 2025)—replace direct prompting with supervised scoring models. These methods primar-ily address estimation noise: making a specified scoring criterion or learned evaluator more reliable. Multi-stakeholder rewards add a separate aggrega-tion problem: the judge must decide how to weigh competing stakeholders, a trade-off these methods leave implicit. 
+
+2.2 Multi-Objective Alignment 
+
+Multi-objective alignment decomposes reward into predefined quality dimensions or controllable at-tributes (e.g., helpfulness, safety) and navigates their trade-offs via multi-attribute feedback (Dong et al., 2023; Wang et al., 2024d), multi-objective reward models (Wang et al., 2024b,a), reward-conditioned generation (Yang et al., 2024), or pol-icy merging (Rame et al., 2023; Zhou et al., 2024; Jang et al., 2024). Our setting differs in that the aggregation axes are people —varying in number, identity, and constraints per query—whose prefer-ences may directly conflict. This requires query-specific aggregation and creates the weighting-noise problem we formalize in §4. 
+
+2.3 GRPO and Reward Noise 
+
+GRPO (Shao et al., 2024; Guo et al., 2025) com-putes advantages via group-relative normalization, making gradient direction depend entirely on rela-tive reward quality within each group. Recent work shows that group-relative advantages can be biased by prompt difficulty (Yang et al., 2026), that noisy or corrupted rewards require explicit correction to avoid biased gradients (El Mansouri et al., 2025), and that multi-objective GRPO is vulnerable to reward hacking by disproportionately optimizing higher-variance reward components (Ichihara et al., 2025). These works study how GRPO responds to noise once a reward signal is given. We ask a prior question: whether the LLM-judge signal itself is reliable for multi-stakeholder tasks, why its vari-ance arises, and how to reduce it before it enters GRPO. 2n=2 n=3 n=5 n=8                                                                                                                          
+
+> Judge Quality σ2
+> Rep σ2
+> Sem σ2
+> Rep σ2
+> Sem σ2
+> Rep σ2
+> Sem σ2
+> Rep σ2
+> Sem Growth S/R
+> Qwen3.5-Plus Low 0.20 0.52 0.18 0.26 0.21 0.30 0.16 0.21 0.40 1.29 Medium 0.15 0.59 0.63 0.68 0.67 0.73 0.25 0.46 0.78 1.87 High 0.18 0.27 0.25 0.30 0.28 0.57 0.19 0.46 1.71 2.43 Gemini-3-Flash Low 0.00 0.93 0.00 0.12 0.00 0.18 0.00 0.15 0.16 ∞
+> Medium 0.00 0.25 0.00 0.81 0.00 1.72 0.00 1.67 6.67 ∞
+> High 0.00 0.64 0.00 0.64 0.00 1.49 0.00 1.46 2.27 ∞
+> DeepSeek-V4-Flash Low 0.43 1.14 0.57 0.45 0.37 0.51 0.26 0.39 0.34 1.54 Medium 0.47 1.10 1.06 1.52 1.77 1.46 1.31 1.32 1.20 1.01 High 0.50 0.68 1.14 1.09 0.91 1.72 0.49 1.22 1.81 2.49
+> All (Med+High) 0.22 0.59 0.53 0.84 0.62 1.28 0.42 1.10 1.87 2.64
+> All (Low) 0.21 0.86 0.25 0.28 0.19 0.33 0.14 0.25 0.29 1.80
+
+Table 1: σ2 
+
+> Rep
+
+= exact-repeat variance; σ2 
+
+> Sem
+
+= presentation-induced reward inconsistency, measured as score variance over semantics-preserving variants of the same response; Growth = σ2
+
+> Sem n=8
+
+/σ2
+
+> Sem n=2
+
+; S/R = σ2
+
+> Sem
+
+/σ2 
+
+> Rep
+
+at n=8 .Gemini-3-Flash: σ2
+
+> Rep
+
+=0 at T =0 .
+
+3 Empirical Analysis: Multi-Stakeholder Reward Consistency 
+
+Multi-stakeholder planning lacks verifiable ground truth, so RL training must rely on LLM judges or reward models to provide the learning signal. We empirically investigate whether current LLM judges can provide a consistent reward signal for this setting—where a single plan must reconcile heterogeneous and sometimes conflicting stake-holder preferences. 
+
+Setup. We construct 60 seed responses from real multi-stakeholder travel-planning queries, span-ning stakeholder counts n ∈ { 2, 3, 5, 8} and three quality levels (high/medium/low). For each seed we generate 55 semantics-preserving variants (11 variant families × 5 versions) via rule-based trans-forms (order permutation, formatting controls) and LLM-based rewrites (causal-direction flipping, evi-dence relocation, paraphrase, topic repositioning), all preserving itinerary content, constraint satisfac-tion, and plan quality. A human evaluator would assign these variants the same score; we define 
+
+σ2 
+
+> Sem
+
+as the score variance across variants for the same seed response. We additionally collect 5 ex-act repeats of the unchanged input as a noise base-line, yielding σ2
+
+> Rep
+
+, the judge’s intrinsic stochas-ticity. Their ratio σ2
+
+> Sem
+
+/σ 2 
+
+> Rep
+
+> 1 indicates that surface presentation adds variance beyond intrinsic noise. All evaluations use greedy decoding ( T =0 )across three state-of-the-art LLM judges: Qwen3.5-Plus (Qwen Team, 2026), Gemini-3-Flash (Google, 2025), and DeepSeek-V4-Flash (DeepSeek-AI, 2026). Full details are in Appendix A. 
+
+3.1 Score Instability Scales with Stakeholder Count 
+
+Table 1 shows that score variance scales with stakeholder count for medium- and high-quality responses: pooled Growth =1 .87 , with Gemini reaching 6.67 ×. At n=8 , the Sem/Rep ratio reaches 2.64 for medium+high responses: merely changing how stakeholders are discussed—their ordering, where evidence is placed—causes 2.6×
+
+more score variation than the judge’s own stochas-ticity. Low-quality responses show no such scaling (Growth =0 .29 ), likely due to a floor effect: scores cluster near the bottom of the scale ( μ≈2.5–3.2), leaving the judge little room to vary. This is es-pecially concerning for GRPO, which relies on within-group reward comparisons: unstable scores for medium- and high-quality responses—the can-didates GRPO must distinguish among—can flip which responses are reinforced. Not all variant types contribute equally: dis-course changes tied to stakeholder presentation (causal framing, evidence placement, coverage or-der) produce the largest variance growth as n in-creases, while low-level formatting changes show little growth (Appendix A.4). The instability is thus stakeholder-specific, not generic surface noise. 
+
+3.2 The Stability–Expressiveness Trade-off in Structured Scoring 
+
+We next test whether structured evaluation proto-cols can reduce this presentation-induced variance. We compare direct holistic scoring with three struc-tured protocols (Appendix A.2): Rubric scoring over fixed dimensions with fixed weights (Hashemi 3Method n=2 n=3 n=5 n=8 Growth                          
+
+> Direct 0.45 0.72 1.61 1.57 3.50 Rubric 0.70 0.65 0.79 0.82 1.18 Checklist 1.10 1.06 1.47 2.22 2.01 Decomposed (adaptive) 0.61 0.87 0.88 0.96 1.58 Decomposed (uniform) 0.60 0.81 0.83 0.72 1.20
+
+Table 2: σ2 
+
+> Sem
+
+by evaluation method (Gemini-3-Flash, 
+
+T =0 , medium+high only). 
+
+et al., 2024), Checklist with binary verification and programmatic aggregation (Lee et al., 2025), and 
+
+Decomposed scoring in two variants— adaptive ,where the judge assigns per-stakeholder weights 
+
+wi and satisfactions ˆui, and uniform , a diagnostic recomputation using wi=1 /n with the same ˆui. All use Gemini-3-Flash at T =0 (σ2
+
+> Rep
+
+=0 ) so that all observed variance is purely presentation-induced. We focus on medium- and high-quality responses— the quality range most relevant to GRPO, where the policy must distinguish among competitive can-didates. The key insight is that structure helps reduce presentation-induced variance, but online judge-adaptive stakeholder weighting reintroduces aggre-gation instability. Rubric (Growth 1.18) and De-composed with fixed uniform weights (1.20) are most stable, while the controlled decomposed com-parison shows that judge-assigned adaptive weights increase Growth from 1.20 to 1.58 using the same 
+
+ˆui. These stable baselines are not sufficient as final rewards: Rubric aggregates generic quality dimen-sions rather than stakeholder utilities, and uniform weights ignore query-specific constraint asymme-try. This motivates a two-stage design: estimate per-stakeholder satisfaction online, but anchor non-uniform aggregation weights outside the scoring call. We next quantify the resulting weight-induced score shifts. 
+
+3.3 Weight Drift: The Cost of Adaptive Aggregation 
+
+We isolate the instability introduced by online stakeholder-weight assignment. For each variant group, we normalize the resulting weight-induced score shift by the within-group final-score standard deviation σ, making it comparable to the reward differences used for GRPO ranking. Decomposed (adaptive) asks the judge to output per-stakeholder weight wi and satisfaction ˆui, scor-ing P 
+
+> i
+
+wi ˆui. Since the query is unchanged across variants, the target aggregation weights under any                                     
+
+> nwCV ˆuCV Mean |∆Rw|
+> σP95 |∆Rw|
+> σ
+> Shift Range
+> σwVar% 20.050 0.236 2.6% 10.9% 18.2% 1.9 30.066 0.143 9.4% 27.9% 51.4% 6.0 50.067 0.201 10.7% 37.7% 61.4% 7.4 80.106 0.183 14.4% 37.9% 81.2% 5.3
+
+Table 3: Weight drift as a fraction of within-group score spread (Gemini-3-Flash, T =0 ). σ: mean within-group standard deviation of the final score, computed per vari-ant group then averaged over groups with the same n.CV =σ/μ . w Var%: fraction of total score variance ex-plained by weight drift. 
+
+fixed reward definition should remain fixed. We use the variant-mean ¯wi as reference and measure the score shift from weight drift: 
+
+∆Rw = X
+
+> i
+
+(wi − ¯wi)ˆ ui. (1) 
+
+Multiplier effect. Table 3 normalizes weight-induced score shifts by the within-group score standard deviation σ, directly showing how much of the advantage signal weight drift can corrupt. Weight drift contributes modestly to average vari-ance ( w Var% =2 –7% ), yet at n=8 it typically shifts a response’s score by 14% of σ (mean), with 38% at the 95th percentile and up to 81% 
+
+in the worst case (shift range). The mechanism is multiplicative: even small weight fluctuations (w CV ≤0.11 ) are multiplied by cross-stakeholder satisfaction differences, so their score impact grows with the spread of ˆui rather than with weight vari-ance alone. Appendix Table 9 gives the concrete breakdown for one such case. These magnitudes imply that weight noise alone can flip the sign of GRPO advantages for response pairs whose reward gaps lie within a one-standard-deviation band. The next section analyzes how weight noise enters reward variance and which fac-tors amplify its effect. 
+
+4 Theoretical Analysis: Decomposing Judge Variance 
+
+Section 3 documented what happens: LLM-as-a-Judge scoring is inconsistent despite structured methods. This section analyzes why and how it affects GRPO : §4.1–4.2 trace the inconsis-tency to the judge’s unstable implicit weighting of stakeholders—an aggregation error amplified by utility dispersion—and §4.3 shows when this error corrupts GRPO’s advantage signal. The semantics-preserving variants in Section 3 hold R∗(y) fixed, 4so their score spread estimates the judge-error scale 
+
+σ2 
+
+> ξ
+
+; GRPO is affected when this same-response noise is large relative to the true reward-gap spread within a sampled group. 
+
+4.1 Variance Decomposition 
+
+Let u∗ 
+
+> i
+
+(y) ∈ [0 , 1] 1 be stakeholder i’s latent satis-faction and w∗ 
+
+> i
+
+fixed target weights with P 
+
+> i
+
+w∗ 
+
+> i
+
+=1. We analyze the ideal cardinal welfare reward (Harsanyi, 1955): 
+
+R∗(y) = 
+
+> n
+
+X
+
+> i=1
+
+w∗ 
+
+> i
+
+· u∗ 
+
+> i
+
+(y) (2) We model a holistic judge as implicitly estimat-ing both utilities and weights: 
+
+ˆR(y) = X
+
+> i
+
+(w∗ 
+
+> i
+
++ ηi)( u∗ 
+
+> i
+
+(y) + δi) + ϵ, 
+
+where δi is utility-estimation noise, ηi is implicit weight drift, and ϵ is residual score-level noise. Normalization gives P 
+
+> i
+
+ηi = 0 .
+
+Theorem 1 (Three-Term Variance Decomposition) .
+
+Assume zero-mean noise ( E[δi] = E[ηi] = E[ϵ] = 0), independence across the three noise groups (δ ⊥ η ⊥ ϵ), and independence within {δi}; the ηi
+
+may be correlated. Then: 
+
+Var[ ˆR(y)] = X
+
+> i
+
+(w∗ 
+
+> i
+
+)2σ2
+
+> δi
+
+| {z }
+
+> Term I: Estimation
+
++ Var[ P 
+
+> i
+
+ηiu∗ 
+
+> i
+
+]
+
+| {z }
+
+> Term II: Aggregation
+
++ σ2
+
+> ϵ
+
+|{z} 
+
+> Term III: Shared
+
++ X
+
+> i
+
+σ2 
+
+> ηi
+
+σ2
+
+> δi
+
+| {z }
+
+> Ccross
+
+(3) 
+
+(Proof in Appendix B.1.) 
+
+Insight. Term I is reducible via structured eval-uation (§3.2). Term II captures an aggregation-specific error: unless the aggregation rule is fixed, zero-sum weight drift ηi is multiplied by utility dif-ferences, so its score impact is amplified when stakeholder satisfactions are dispersed (as mea-sured in Table 3). This is the key distinction from single-user noise: multi-stakeholder reward vari-ance includes a component tied to weight noise that is absent in single-reward settings.       
+
+> 1The empirical utility heads report scores on a [1 ,10] scale; we linearly normalize to [0 ,1] for this theoretical notation. Variance and SNR scale by the corresponding constant factor.
+
+4.2 Conditional Scaling and Irreducibility 
+
+We next characterize how Term II (weighting noise) depends jointly on weight-drift variance, cross-stakeholder utility dispersion, and stakeholder count. 
+
+Proposition 1 (Conditional Scaling of Term II) .
+
+For n ≥ 2, assume exchangeable zero-sum weight noise: P 
+
+> i
+
+ηi = 0 , Var[ ηi] = σ2 
+
+> η
+
+(n) for all i, and a common off-diagonal covariance. Then: Term II = nn − 1 σ2 
+
+> η
+
+(n)
+
+> n
+
+X
+
+> i=1
+
+(u∗ 
+
+> i
+
+− ¯u)2
+
+= n2
+
+n − 1 σ2 
+
+> η
+
+(n)Var i[u∗ 
+
+> i
+
+].
+
+where ¯u = 1
+
+> n
+
+P 
+
+> i
+
+u∗ 
+
+> i
+
+and Var i[u∗ 
+
+> i
+
+] ≜ 1
+
+> n
+
+P
+
+> i
+
+(u∗ 
+
+> i
+
+−
+
+¯u)2 is across-stakeholder variance for a fixed re-sponse. (Proof in Appendix B.2.) 
+
+Insight. Proposition 1 shows that Term II has three necessary factors: weight instability σ2 
+
+> η
+
+(n),utility dispersion Var i[u∗ 
+
+> i
+
+], and the stakeholder-count factor n2/(n − 1) . If the judge’s implicit weights do not drift, Term II vanishes. If all stake-holders have equal utility ( Var i[u∗ 
+
+> i
+
+]=0 ), zero-sum weight drift is score-invariant. When both weight drift and utility heterogeneity are present, shifting weight toward relatively satisfied or underserved stakeholders changes the scalar reward, with the magnitude scaled by n2/(n−1) . Fixed stakeholder weights remove this channel by setting ηi=0 . Struc-tured evaluation can reduce utility-estimation noise (Term I), but it leaves aggregation noise (Term II) whenever the judge still chooses the weights online. Empirically, the weight-induced shift range grows from 0.15 ( n=2 ) to 0.61 ( n=8 ) in Table 3. Ap-pendix B.2 derives the symmetric scaling formula and shows how the same mechanism extends to general weight-drift covariance. 
+
+4.3 When Weighting Noise Corrupts GRPO 
+
+GRPO updates are driven by each candidate’s re-ward gap from the group mean. In the noise-free target, candidate j should be updated according to its true reward gap ∆∗ 
+
+> j
+
+= R∗ 
+
+> j
+
+− ¯R∗ (or the stan-dardized gap ∆∗ 
+
+> j
+
+/sd k(R∗
+
+> k
+
+)). In practice, the judge observes ˆRj = R∗ 
+
+> j
+
++ ξj , so GRPO uses the noisy gap 
+
+ˆ∆j = ˆRj − ¯ˆR = ∆ ∗ 
+
+> j
+
++ ( ξj − ¯ξ). (4) Here ∆∗ 
+
+> j
+
+is the true reward gap we want GRPO to use: the within-group quality difference between 5candidate j and the group mean. The second term, 
+
+ξj − ¯ξ, is the group-centered random error in-duced by the LLM-judge inconsistency studied in Section 3: even the same semantic response can receive different scores under presentation changes. This error turns the true reward gap into the noisy reward gap ˆ∆j and can flip the advantage sign when it is comparable to ∆∗ 
+
+> j
+
+. We summarize this reliability as: 
+
+SNR ≜ Var j [∆ ∗ 
+
+> j
+
+]/σ 2 
+
+> ξ
+
+. (5) Thus SNR compares the true reward-gap signal against the judge-error scale that creates the noisy reward gap. As σ2 
+
+> ξ
+
+grows, this noise more easily overwhelms the reward-gap signal that GRPO uses for ranking. 
+
+Proposition 2 (Advantage Sign Correctness) . Un-der independent Gaussian reward errors with vari-ance σ2 
+
+> ξ
+
+, the probability that GRPO assigns the correct advantage sign to a response one standard deviation from the group mean is: 
+
+P (correct sign ) = Φ 
+
+√SNR 
+
+p1 − 1/G 
+
+!
+
+(6) Combining this with Proposition 1, aggregation noise harms GRPO when Term II is non-negligible: it increases σ2 
+
+> ξ
+
+most in high-dispersion stakeholder groups, reducing SNR exactly where trade-offs are hardest. In the conditional limit where Term II is the leading noise source and σ2 
+
+> η
+
+(n)Var i[u∗ 
+
+> i
+
+] does not shrink with n, SNR( n) = O(1 /n ); substitut-ing into Eq. 6 gives: 
+
+P (correct sign ) = 12 + O(1 /√n). (7) Thus, weighting noise can turn group-relative ad-vantages into a noisy proxy for true quality, pushing GRPO updates toward judge-induced aggregation shifts rather than the intended reward. This mo-tivates D ECOMP R: fix aggregation outside online judge calls so the online weight-drift channel is removed by construction. The derivation and nu-merical thresholds are given in Appendix B.4. 
+
+5 DECOMP R: Counterfactual-Calibrated Decomposed Reward 
+
+§4 shows that one source of holistic reward insta-bility is that the judge’s implicit trade-off rule can change across candidate responses. Our method, DECOMP R, addresses this with counterfactual-calibrated offline query-level aggregation and on-line grounded per-role utility estimation (Figure 2). 
+
+5.1 Counterfactual-Calibrated Aggregation (Removing Online Weight Drift) 
+
+We remove online weight drift by fixing aggre-gation weights once per query. The calibration follows a counterfactual-sacrifice intuition from bargaining theory (Kalai and Smorodinsky, 1975): stakeholders who lose more from joining the shared task, relative to their solo ideal, should receive higher aggregation priority. Conceptually, with solo plan ysolo  
+
+> i
+
+and joint reference plan yjoint :
+
+∆cf  
+
+> i
+
+= Ui(ysolo  
+
+> i
+
+) − Ui(yjoint ), (8) These weights may not be uniquely correct, but they incorporate stakeholder fairness into the of-fline fixed aggregation rule before any candidate response is scored. In implementation, we do not explicitly com-pute the counterfactual utility gap in Eq. 8, since this would require costly solo and joint planning estimates. Instead, we use demand difficulty as a lightweight proxy: stakeholders whose require-ments are harder to satisfy receive larger weights. This follows the same intuition as Eq. 8: hard-to-satisfy needs should not be silently sacrificed. Con-cretely, an offline parser estimates difficulty from restrictive hard constraints, dense soft preferences, and direct conflicts; fixed rules then compute: 
+
+di = X
+
+> c∈Chard
+> i
+
+α(c) + γ X
+
+> c∈Csoft
+> i
+
+α(c) + βs conflict  
+
+> i
+
+(9) where Chard  
+
+> i
+
+and Csoft  
+
+> i
+
+are parsed constraints, α(c)
+
+is a fixed restrictiveness score, sconflict  
+
+> i
+
+summa-rizes pairwise tensions involving stakeholder i, and 
+
+γ, β ∈ (0 , 1) are fixed discounts. All quantities are computed from the query and profiles only, before any candidate response is scored. The resulting di
+
+is a deterministic proxy for E[∆ cf  
+
+> i
+
+| q, p 1: n], not a candidate score. We then normalize these query-level difficulty scores into weights: 
+
+wi = exp( di/τ w)
+
+Pnj=1 exp( dj /τ w) (10) where τw controls differentiation ( τw → ∞ recov-ers uniform; τw → 0 concentrates on the hardest stakeholder). Since di and wi are fixed for a given query, candidate-dependent weight drift is removed even if the calibrated weights are only approximate. 
+
+Illustrative example. Table 4 shows how cali-brated weights expose failures hidden by uniform 6query + profiles             
+
+> q, p 1: n
+> candidate response
+> y
+> 1. Offline Counterfactual Weights
+> di=P
+> c∈Chard
+> i
+> α(c)+γP
+> c∈Csoft
+> i
+> α(c) + βs conflict
+> i
+> wi=softmax( di/τ w)
+> 2. Online Per-role Utility Estimation
+> ˆui(y)=Eval grounded (pi, y )
+> hard/soft checks + judge; role isolation
+> ˆR(y) = X
+> i
+> wiˆui(y)
+> scalar reward for GRPO
+> wiˆui
+
+Figure 2: Overview of D ECOMP R: offline query-level weights remove candidate-dependent weight drift, online per-role utilities reduce estimation error, and fixed aggregation produces the scalar reward for GRPO. 
+
+Stakeholder di wu 
+
+> i
+
+wc 
+
+> i
+
+ˆui Sacrifice 
+
+A (4 hard + 2 soft) 5.0 0.33 0.67 0.40 50% B (0 hard + 2 soft) 1.0 0.33 0.09 0.95 3% C (2 hard + 2 soft) 3.0 0.33 0.24 0.80 11% 
+
+ˆRuniform = 0 .72 ˆRcalib = 0.55 
+
+Table 4: Toy three-traveler calibration ( γ=0 .5, τw=2 ). Values are illustrative; implementation uses the query-level difficulty proxy di rather than computing solo op-tima online. 
+
+aggregation: the hardest stakeholder receives more weight, so underserving that stakeholder lowers the reward. 
+
+5.2 Online Per-Role Grounded Estimation (Reducing Term I) 
+
+Given a candidate response y, D ECOMP R estimates each stakeholder’s utility independently: 
+
+ˆui(y) = Eval grounded (pi, y ). (11) The evaluator only asks whether y satisfies pro-file pi, rather than asking one judge to balance all stakeholders at once. This per-role isolation is de-signed to keep the estimation task in the simpler 
+
+n=1 regime, avoiding the context and attention load of holistic multi-stakeholder judging. Within each role, signals are layered by decreas-ing determinism: tool-verified facts ( σ2=0 ), pro-grammatic constraint checks ( σ2≈0), LLM-judged soft preferences, and a residual subjective checklist with weight at most 20% . Thus most reward mass comes from deterministic or low-variance compo-nents.                                   
+
+> Aggregation n=2 n=3 n=5 n=8 Growth
+> Adaptive (judge wi)0.61 0.87 0.88 0.96 1.58 Uniform ( wi=1 /n )0.60 0.81 0.83 0.72 1.20 DECOMP R ( τw=3 )0.63 0.80 0.92 0.78 1.24 DECOMP R ( τw=5 )0.64 0.79 0.88 0.75 1.18 DECOMP R ( τw=8 )0.65 0.79 0.86 0.73 1.14
+
+Table 5: σ2 
+
+> Sem
+
+under different fixed aggregation weights (same ˆui from decomposed evaluation). Growth = 
+
+σ2
+
+> Sem n=8
+
+/σ2
+
+> Sem n=2
+
+. τw controls weight differentiation (Eq. 10). 
+
+6 Experiments 
+
+We first verify that D ECOMP R’s aggregation de-sign reduces reward variance (§6.1), then evaluate whether this translates to better plan quality in end-to-end GRPO training (§6.2). 
+
+6.1 Reward Consistency 
+
+Using the same setup as §3.2, we recompute decom-posed scores under different fixed weight schemes while holding ˆui unchanged, isolating the effect of aggregation weights on reward stability. Table 5 shows that any per-query fixed weight eliminates candidate-dependent weight drift, but the degree of n-scaling reduction depends on weight concentration P 
+
+> i
+
+w2 
+
+> i
+
+. Adaptive weights (Growth =1 .58 ) allow drift across variants; uniform weights (Growth =1 .20 ) minimize P 
+
+> i
+
+w2 
+
+> i
+
+=1 /n but lose query-specific differentiation. D ECOMP R with 
+
+τw=5 achieves Growth =1 .18 , close to uniform stability while preserving meaningful constraint-based prioritization; τw=8 is slightly more sta-ble (Growth =1 .14 ) but closer to uniform weight-ing. The temperature τw controls the stability– expressiveness trade-off: smaller τw concentrates 7Group Utility ↑ Group Fairness ↑ Pref. Completeness ↑                                                                          
+
+> Reward Easy Med Hard All Easy Med Hard All Easy Med Hard All
+> DECOMP R5.94 7.35 7.85 7.07 60.10 49.58 39.84 49.82 24 19 15 19
+> Direct 5.34 6.68 7.42 6.50 58.52 45.20 35.82 46.42 22 17 15 18 Rubric 5.49 6.30 7.14 6.31 59.76 44.69 35.86 46.61 22 17 14 18 Checklist 5.21 6.25 7.38 6.28 58.14 44.82 36.51 46.23 21 17 15 17 Base Model 5.11 6.19 7.20 6.17 60.50 46.52 37.69 48.11 23 18 14 18
+> Table 6: MR-TravelBench results (650 tasks ×3 trials, Easy/Medium/Hard = 200/250/200 tasks). D ECOMP Rachieves the highest Group Utility (+8.8% vs Direct, +12.0% vs Rubric) and Group Fairness (+7.3% vs Direct), with the advantage growing on Hard tasks (+5.8% Group Utility, +11.2% Group Fairness vs Direct). Base Model is the pre-RL reference.
+
+weight on high-difficulty stakeholders (more ex-pressive but amplifies their estimation noise); larger 
+
+τw approaches uniform (more stable but loses stake-holder differentiation). 
+
+6.2 End-to-End Training 
+
+We next evaluate whether the variance reduction translates to better downstream plan quality when used as the GRPO reward signal. 
+
+Setup. We use Qwen3-30B-A3B-Thinking-2507 (Qwen Team, 2025) as the base policy model: after supervised fine-tuning on expert trajectories gener-ated by Qwen3.5-Plus, it undergoes GRPO training on 6,000 queries with the four scoring methods from §3.2 (Direct, Rubric, Checklist, D ECOMP Rwith τw=5 ) as reward functions. We additionally include the base model (without RL) as a reference. Best checkpoint is selected within 400 steps; eval-uation uses MR-TravelBench (Cheng et al., 2026) (650 held-out tasks × 3 trials). Additional training details are in Appendix C. Table 6 shows that D ECOMP R achieves the best performance on all core metrics. All GRPO configurations improve Group Utility over the Base Model (6.17), confirming that RL train-ing is effective; however, Direct, Rubric, and Checklist rewards all reduce Group Fairness be-low the Base Model (48.11), suggesting that noisy reward signals may encourage GRPO to opti-mize utility at the expense of equity. Only D E-
+
+> COMP
+
+R improves both simultaneously (Group Utility =7 .07 , Group Fairness =49 .82 ), consistent with the counterfactual-calibrated weighting that prevents the agent from satisfying only the easy-to-serve travelers. Among GRPO methods, Checklist performs worst on Group Utility (6.28) and Pref-erence Completeness (17), consistent with its high presentation-induced variance (Growth =2 .01 in §3.2): binary checks that flip under surface changes produce a noisy reward that misleads GRPO. The advantage increases with task difficulty : on Hard tasks—where conflicts are more severe and satisfaction dispersion is expected to be higher— DECOMP R outperforms Direct by +5.8% in utility and +11.2% in fairness. This aligns with our theo-retical analysis: the multiplier effect of weight drift is most damaging in high-dispersion scenarios (§4), and fixing aggregation outside the judge provides the largest benefit where it matters most. 
+
+7 Conclusion 
+
+This work identifies a central difficulty in multi-stakeholder LLM-judge evaluation: rewards be-come unreliable when a single judge call estimates stakeholder utilities and decides cross-stakeholder weights. Our theory and experiments show that this coupling creates weighting noise , whose score im-pact grows with satisfaction dispersion and stake-holder count. Structured scoring reduces utility-estimation noise but leaves this online aggregation channel intact. DECOMP R addresses this through estimation-aggregation separation : online grounded estima-tion measures per-role utilities, while offline coun-terfactual calibration fixes auditable aggregation weights before candidate scoring. More broadly, multi-stakeholder reward model-ing remains underexplored relative to single-user settings. We hope this work encourages more sys-tematic study of how LLM systems should evaluate, aggregate, and learn from competing human pref-erences. 
+
+Limitations 
+
+Our work focuses on the multi-party travel plan-ning domain as a representative case of multi-8stakeholder alignment. While we believe the theoretical insights generalize to other multi-stakeholder settings (e.g., negotiation, collaborative writing, group recommendation), empirical vali-dation in these domains remains for future work. Additionally, our programmatic verification layers rely on the availability of structured tool APIs; in domains where such tools are unavailable, a larger fraction of reward signal would necessarily depend on LLM-based estimation. Finally, existing bench-marks for multi-stakeholder planning are scarce, which limits the scale of end-to-end GRPO training experiments we can conduct; constructing richer multi-party benchmarks and running full-scale RL validation is an important direction for future work. 
+
+References 
+
+Xiang Cheng, Yulan Hu, Lulu Zheng, Zheng Pan, Xin Li, and Yong Liu. 2026. Grouptravelbench: Bench-marking llm agents on multi-person travel planning. 
+
+arXiv preprint arXiv:2605.25200 .DeepSeek-AI. 2026. Deepseek-v4 technical report. Technical report, DeepSeek-AI. Yi Dong, Zhilin Wang, Makesh Narsimhan Sreedhar, Xianchao Wu, and Oleksii Kuchaiev. 2023. Steerlm: Attribute conditioned SFT as an (user-steerable) al-ternative to RLHF. In Findings of the Association for Computational Linguistics: EMNLP 2023 , pages 11275–11288, Singapore. Association for Computa-tional Linguistics. Omar El Mansouri, Fathinah Asma Izzati, Mohamed El Amine Seddik, and Salem Lahlou. 2025. Noise-corrected GRPO: From noisy rewards to unbiased gradients. arXiv preprint arXiv:2510.18924 .Google. 2025. Gemini 3 flash: Frontier intelligence built for speed. Technical report, Google. Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Peiyi Wang, Qihao Zhu, Runxin Xu, Ruoyu Zhang, Shirong Ma, Xiao Bi, and 1 others. 2025. DeepSeek-R1 incentivizes reasoning in LLMs through reinforce-ment learning. Nature , 645(8081):633–638. Rajarshi Haldar and Julia Hockenmaier. 2025. Rat-ing roulette: Self-inconsistency in LLM-as-a-judge frameworks. In Findings of the Association for Com-putational Linguistics: EMNLP 2025 , pages 24986– 25004, Suzhou, China. Association for Computa-tional Linguistics. John C. Harsanyi. 1955. Cardinal welfare, individual-istic ethics, and interpersonal comparisons of utility. 
+
+Journal of Political Economy , 63(4):309–321. Helia Hashemi, Jason Eisner, Corby Rosset, Benjamin Van Durme, and Chris Kedzie. 2024. LLM-Rubric: A multidimensional, calibrated approach to automated evaluation of natural language texts. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) ,pages 13806–13834. Yuki Ichihara, Yuu Jinnai, Tetsuro Morimura, Mitsuki Sakamoto, Ryota Mitsuhashi, and Eiji Uchibe. 2025. MO-GRPO: Mitigating reward hacking of group rela-tive policy optimization on multi-objective problems. 
+
+arXiv preprint arXiv:2509.22047 .Joel Jang, Seungone Kim, Bill Yuchen Lin, Yizhong Wang, Jack Hessel, Luke Zettlemoyer, Hannaneh Hajishirzi, Yejin Choi, and Prithviraj Ammanabrolu. 2024. Personalized soups: Personalized large lan-guage model alignment via post-hoc parameter merg-ing. In Adaptive Foundation Models: Evolving AI for Personalized and Efficient Learning Workshop at NeurIPS 2024 .Ehud Kalai and Meir Smorodinsky. 1975. Other solu-tions to Nash’s bargaining problem. Econometrica ,43(3):513–518. Yukyung Lee, JoongHoon Kim, Jaehee Kim, Hyowon Cho, Jaewook Kang, Pilsung Kang, and Najoung Kim. 2025. CheckEval: A reliable LLM-as-a-judge framework for evaluating text generation using check-lists. In Proceedings of the 2025 Conference on Em-pirical Methods in Natural Language Processing ,pages 15771–15798, Suzhou, China. Association for Computational Linguistics. Yang Liu, Dan Iter, Yichong Xu, Shuohang Wang, Ruochen Xu, and Chenguang Zhu. 2023. G-eval: Nlg evaluation using gpt-4 with better human align-ment. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing .OpenAI. 2023. GPT-4 technical report. arXiv preprint arXiv:2303.08774 .Long Ouyang, Jeff Wu, Xu Jiang, Diogo Almeida, Car-roll L. Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, John Schulman, Jacob Hilton, Fraser Kelton, Luke Miller, Maddie Simens, Amanda Askell, Peter Welinder, Paul Christiano, Jan Leike, and Ryan Lowe. 2022. Training language models to follow instructions with human feedback. In Advances in Neural Information Processing Systems .Arjun Panickssery, Samuel R. Bowman, and Shi Feng. 2024. Llm evaluators recognize and favor their own generations. In Advances in Neural Information Pro-cessing Systems .Qwen Team. 2025. Qwen3 technical report. arXiv preprint arXiv:2505.09388 .Qwen Team. 2026. Qwen3.5: Towards native multi-modal agents. 
+
+9Vyas Raina, Adian Liusie, and Mark Gales. 2024. Is LLM-as-a-judge robust? investigating universal ad-versarial attacks on zero-shot LLM assessment. In 
+
+Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing , pages 7499–7517, Miami, Florida, USA. Association for Computational Linguistics. Alexandre Rame, Guillaume Couairon, Mustafa Shukor, Corentin Dancette, Jean-Baptiste Gaya, Laure Soulier, and Matthieu Cord. 2023. Rewarded soups: Towards pareto-optimal alignment by interpolating weights fine-tuned on diverse rewards. In Advances in Neural Information Processing Systems .Keita Saito, Akifumi Wachi, Koki Wataoka, and Youhei Akimoto. 2023. Verbosity bias in preference labeling by large language models. In Instruction Tuning and Instruction Following Workshop at NeurIPS 2023 .Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, Y.K. Li, Y. Wu, and Daya Guo. 2024. Deepseekmath: Pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 .Haoxiang Wang, Yong Lin, Wei Xiong, Rui Yang, Shizhe Diao, Shuang Qiu, Han Zhao, and Tong Zhang. 2024a. Arithmetic control of LLMs for di-verse user preferences: Directional preference align-ment with multi-objective rewards. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) ,pages 8642–8655, Bangkok, Thailand. Association for Computational Linguistics. Haoxiang Wang, Wei Xiong, Tengyang Xie, Han Zhao, and Tong Zhang. 2024b. Interpretable preferences via multi-objective reward modeling and mixture-of-experts. In Findings of the Association for Compu-tational Linguistics: EMNLP 2024 , pages 10582– 10592, Miami, Florida, USA. Association for Com-putational Linguistics. Peiyi Wang, Lei Li, Liang Chen, Zefan Cai, Dawei Zhu, Binghuai Lin, Yunbo Cao, Lingpeng Kong, Qi Liu, Tianyu Liu, and Zhifang Sui. 2024c. Large lan-guage models are not fair evaluators. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) ,pages 9440–9450, Bangkok, Thailand. Association for Computational Linguistics. Zhilin Wang, Yi Dong, Olivier Delalleau, Jiaqi Zeng, Gerald Shen, Daniel Egert, Jimmy J. Zhang, Makesh Narsimhan Sreedhar, and Oleksii Kuchaiev. 2024d. Helpsteer2: Open-source dataset for training top-performing reward models. In Advances in Neu-ral Information Processing Systems: Datasets and Benchmarks Track .Fengkai Yang, Zherui Chen, Xiaohan Wang, Xi-aodong Lu, Jiajun Chai, Guojun Yin, Wei Lin, Shuai Ma, Fuzhen Zhuang, Deqing Wang, Yaodong Yang, Jianxin Li, and Yikun Ban. 2026. Your group-relative advantage is biased. arXiv preprint arXiv:2601.08521 .Rui Yang, Xiaoman Pan, Feng Luo, Shuang Qiu, Han Zhong, Dong Yu, and Jianshu Chen. 2024. Rewards-in-context: Multi-objective alignment of foundation models with dynamic preference adjustment. In Pro-ceedings of the 41st International Conference on Machine Learning , volume 235 of Proceedings of Machine Learning Research , pages 56276–56297. PMLR. Lunjun Zhang, Arian Hosseini, Hritik Bansal, Mehran Kazemi, Aviral Kumar, and Rishabh Agarwal. 2025. Generative verifiers: Reward modeling as next-token prediction. In Proceedings of the International Con-ference on Learning Representations .Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin, Zhuohan Li, Dacheng Li, Eric P. Xing, Hao Zhang, Joseph E. Gonzalez, and Ion Stoica. 2023. Judging llm-as-a-judge with mt-bench and chatbot arena. In 
+
+Advances in Neural Information Processing Systems .Zhanhui Zhou, Jie Liu, Jing Shao, Xiangyu Yue, Chao Yang, Wanli Ouyang, and Yu Qiao. 2024. Beyond one-preference-fits-all alignment: Multi-objective di-rect preference optimization. In Findings of the As-sociation for Computational Linguistics: ACL 2024 ,pages 10586–10613, Bangkok, Thailand. Association for Computational Linguistics. Lianghui Zhu, Xinggang Wang, and Xinlong Wang. 2025. JudgeLM: Fine-tuned large language models are scalable judges. In Proceedings of the Interna-tional Conference on Learning Representations .
+
+A Multi-Stakeholder Reward Consistency Experiment Details 
+
+Scope. This appendix section supports the reward-consistency analysis in §3. We study multi-stakeholder travel planning, where a single itinerary must satisfy multiple travelers with heterogeneous constraints such as budget limits, dietary restric-tions, mobility needs, safety constraints, and activ-ity preferences. The response content is fixed, and only semantics-preserving presentation variants are scored. 
+
+Base responses. We use five real multi-stakeholder travel queries, each expanded to n ∈{2, 3, 5, 8} stakeholders. For each query– n pair, we construct one high-, medium-, and low-quality response, yielding 5 × 4 × 3 = 60 seed responses. 
+
+Quality bands. High-quality responses satisfy hard constraints, maintain credible travel infor-mation, preserve time feasibility, and cover stake-10 holder needs in a balanced way. Medium-quality re-sponses are broadly feasible but contain one or two compromises, questionable details, or under-served stakeholders. Low-quality responses contain hard-constraint violations, hallucinated or implausible travel details, or time-line conflicts. These quality bands are pre-constructed and used only as group-ing variables; the consistency experiment does not generate additional quality-changing variants. 
+
+A.1 Response Construction and Semantics-Preserving Variants Generation. For each base response, we first use DeepSeek-V4-Flash with tool calls to extract a structured JSON metadata file recording all fac-tual content (locations, times, prices, activities), per-stakeholder constraint satisfaction status, and trade-off decisions. Rule-based variants (e.g., or-der permutations, evidence placement, formatting changes) operate directly on this metadata to guar-antee semantic preservation. LLM-based rewrites are also performed by DeepSeek-V4-Flash, con-ditioned on the metadata file so that the rewrite cannot introduce information beyond—or omit in-formation present in—the structured record. 
+
+Semantic-preservation constraints. All vari-ants preserve five invariants: (i) itinerary facts such as locations, times, prices, transportation, and activ-ities; (ii) each hard or soft constraint’s satisfaction status; (iii) the stakeholder set; (iv) the semantic strength of satisfaction or violation claims; and (v) the response quality band. Variants change only response presentation. 
+
+Variant families. For each base response, we generate eleven semantics-preserving variant fami-lies with five versions per family. The exact-repeat baseline is collected separately and is not counted as a variant family. 
+
+Exact-repeat baseline. Each base response is also scored five times with the exact same input (no rewriting). These repeats estimate intrinsic judge noise ( σ2
+
+> Rep
+
+). 
+
+Scale. Each base response yields 60 scoring in-puts ( 11 variant families × 5 versions + 5 exact repeats). With 60 seeds, this gives 60 ×60 = 3 ,600 
+
+scoring inputs per judge model and scoring method. 
+
+Example. We illustrate with a real 3-stakeholder query (Xiamen →Fuzhou weekend trip, budget 
+
+≤500 CNY/person). The three travelers are: user1 (photography, prefers quiet spots), user2 (limited mobility, no hiking), and user3 (tight schedule, wants popular check-in spots). A stakeholder sec-tion order variant permutes only the discussion order:           
+
+> Original: user1 (photographer) →user2 (mobil-ity) →user3 (check-in)
+> Variant: user3 (check-in) →user1 (photogra-pher) →user2 (mobility)
+
+The itinerary, constraint satisfaction, and all fac-tual content remain identical. Yet this reordering alone causes score shifts of up to 2.0 points on the deterministic Gemini judge (3.5 →5.5) and a 4.8-point spread on DeepSeek (3.5–8.3 across five permutations), demonstrating that who is discussed first influences the judge’s holistic assessment even when all other content is fixed. 
+
+A.2 Judge Scoring Protocols 
+
+We evaluate four scoring protocols of increasing structural decomposition. All protocols share a verification-oriented system prompt that enforces evidence-based assessment: the judge must (i) dis-tinguish between surface mention and concrete ex-ecutable arrangements, (ii) independently verify budget totals by summing itemized costs rather than accepting self-reported figures, and (iii) cross-check transit times against distance plausibility. All outputs use structured JSON for deterministic pars-ing. 
+
+Direct (holistic). The judge conducts a chain-of-thought analysis along five predefined aspects— hard-constraint satisfaction, information credibility, timeline feasibility, inter-stakeholder fairness, and actionability—then produces a single scalar score 
+
+R ∈ [1 .0, 10 .0] . Explicit scoring anchors map qual-itative assessments to numeric ranges (e.g., 9.0– 10.0: all constraints satisfied with fully credible information; 3.0–4.9: hard-constraint violations or substantial fabrication). The judge must output per-aspect evidence prior to the final score, ensur-ing the holistic judgment is grounded in verifiable observations. 
+
+Rubric (dimension-decomposed). The judge in-dependently scores five predefined quality dimen-sions (Table 8), each on [1 .0, 10 .0] with dimension-specific anchors. The final score is the determin-istic weighted sum R = P5 
+
+> d=1
+
+αd · sd, where 
+
+αd are fixed weights and sd are per-dimension scores. This protocol tests whether decomposing 11 Variant family Method Operation 
+
+Multi-stakeholder-specific 
+
+Stakeholder section order Rule Permute per-stakeholder coverage sections in the response. Satisfaction summary order Rule Permute stakeholder entries in the satisfaction summary. Causal direction LLM Flip trade-off framing between cause →effect and effect →cause. Under-served evidence placement LLM Relocate under-served stakeholder evidence to different positions (be-fore/after itinerary, interleaved, etc.). Shared-benefit attribution Rule Reorder multi-stakeholder attribution when a shared item serves multiple users. 
+
+General presentation controls 
+
+Trade-off order Rule Permute conflict-explanation paragraphs without changing claims. Paraphrase LLM Rewrite wording with synonymous expressions; preserve all facts. Format conversion Rule Convert among prose, bullet lists, numbered lists, and markdown tables. Section header Rule Replace section headings with synonymous labels (e.g., “Budget” →
+
+“Cost”). Low-level formatting Rule Change whitespace, bullet style, emphasis markers only. Topic position LLM Move non-stakeholder topical sections to different locations in the response. 
+
+Table 7: Semantics-preserving variant families. Rule : deterministic transforms operating on extracted metadata (order permutation, formatting changes). LLM : DeepSeek-V4-Flash rewrites conditioned on structured metadata to prevent fact drift. Five variants per family per response; exact repeats are a separate baseline.                    
+
+> Dimension Weight αdEvaluation focus
+> Constraint satisfaction 0.30 Per-user hard constraints verified item-by-item; budget independently summed Information credibility 0.25 POI existence, price plausibility, tran-sit time–distance consistency Timeline feasibility 0.20 Schedule coherence, transit time ac-counting, activity density Fairness 0.15 Dedicated time slots per user; compen-sation for compromised stakeholders Conflict resolution 0.10 Specificity of resolution strategies; presence of creative win-win solutions
+
+Table 8: Rubric dimensions and fixed aggregation weights. Each dimension is scored on [1 .0, 10 .0] with explicit anchors (e.g., constraint satisfaction: 10 = all satisfied, 6 = one minor violation, 2 = three or more violations). 
+
+the evaluation into orthogonal quality axes reduces presentation-induced variance by constraining the judge’s attention. 
+
+Checklist (binary verification). The judge an-swers a set of binary verification questions orga-nized into five weighted categories: (A) per-user hard-constraint checks ( ω = 2 .5 per item), (B) in-formation credibility ( ω = 2 .0), (C) timeline logic (ω = 1 .5), (D) fairness ( ω = 1 .5), and (E) action-ability ( ω = 1 .0). Each item requires cited evi-dence from the plan. The final score is computed deterministically: 
+
+R =
+
+P 
+
+> b
+
+ab · ωb
+
+P 
+
+> b
+
+ωb
+
+× 9 + 1 , R ∈ [1 , 10] (12) where ab ∈ { 0, 1} is the binary answer and ωb the item weight. Crucially, Category A is instantiated per-stakeholder (3 items × n users), so checklist length grows linearly with n.
+
+Decomposed (adaptive). The judge indepen-dently evaluates each stakeholder i through a struc-tured pipeline: (a) extracting hard constraints and soft preferences from the user profile, (b) verify-ing each constraint against the plan with cited ev-idence, (c) assessing credibility of POIs relevant to that user, and (d) assigning a satisfaction score 
+
+ˆui ∈ [1 .0, 10 .0] with explicit anchors. The judge additionally generates adaptive importance weights 
+
+wi based on constraint severity (safety-related con-straints receive highest weight; vague preferences receive lowest), subject to P 
+
+> i
+
+wi = 1 . The final score is R = P 
+
+> i
+
+wi ˆui. This protocol serves dual purposes: as a structured scoring method and as a diagnostic instrument for measuring weight insta-bility (§3.3). 
+
+Decomposed (uniform). To isolate the effect of weight drift from satisfaction estimation noise, we additionally report a post-hoc recomputation us-ing uniform weights wi = 1/n applied to the 
+
+same ˆui values produced by the adaptive protocol. This baseline requires no additional judge calls—it simply replaces the adaptive weights with equal weights in the aggregation formula R = 1
+
+> n
+
+P 
+
+> i
+
+ˆui.The comparison between adaptive and uniform vari-ants (Table 2) directly quantifies the variance con-tribution of weight assignment. 
+
+Judge models and decoding. We use three judge families: Qwen3.5-Plus (Qwen Team, 2026), Gemini-3-Flash (Google, 2025), and DeepSeek-12 V4-Flash (DeepSeek-AI, 2026). All use greedy decoding ( T =0 ) and structured JSON output. Gem-ini at T =0 is fully deterministic (identical inputs produce identical scores), providing a controlled setting in which all observed score variance is at-tributable solely to input presentation differences rather than sampling stochasticity. 
+
+A.3 Reward Consistency Metrics 
+
+For an experimental unit s =(base response , n, quality ), variant family t,variant version b, and exact repeat r, let 
+
+score( s, t, b ) be the parsed scalar judge score. 
+
+Semantic-variant variance. 
+
+σ2
+
+> Sem
+
+(s) = Var t,b [score( s, t, b )] . (13) This measures presentation-induced reward incon-sistency: σ2
+
+> Sem
+
+(s) = 0 means the judge gives iden-tical scores to all semantics-preserving variants of the same response, while larger values mean the score is sensitive to wording, ordering, or evidence placement. 
+
+Exact-repeat variance. 
+
+σ2
+
+> Rep
+
+(s) = Var r[score( s, repeat , r )] . (14) 
+
+Coefficient of variation and scaling. 
+
+CV( s) = 
+
+q
+
+σ2
+
+> Sem
+
+(s)Mean Sem (s) ,
+
+Growth = σ2
+
+> Sem
+
+(n = 8) 
+
+σ2
+
+> Sem
+
+(n = 2) .
+
+We also report σ2
+
+> Sem
+
+/σ 2
+
+> Rep
+
+; values above one indicate that semantics-preserving presentation changes induce more score variance than exact re-peated scoring. 
+
+Decomposed-diagnostic metrics. For Decom-posed (adaptive) outputs, we measure CV( wi),
+
+CV(ˆ ui), and the weight-induced score shift 
+
+∆Rw = P
+
+> i
+
+(wi − ¯wi)ˆ ui, where ¯wi is the mean adaptive weight within the same query–quality– n
+
+semantic-variant group. 
+
+A.4 Variance Breakdown by Variant Type 
+
+Table 10 decomposes σ2 
+
+> Sem
+
+by variant family (all three judges, direct scoring, T =0 ). Two patterns stand out. First, variants that alter stakeholder salience or trade-off framing tend to produce the largest high-n variance: causal_direction (0.93 at Stakeholder wactual ¯w ∆w ˆui ∆w × ˆui                          
+
+> User 1 0.100 0.126 −0.027 8.0 −0.212 User 2 0.100 0.139 −0.040 8.0 −0.316 User 3 0.300 0.228 +0.072 1.0 +0.072 User 4 0.300 0.251 +0.049 2.0 +0.098 User 5 0.200 0.255 −0.055 6.0 −0.330 Total shift −0.688
+
+Table 9: Weight-induced score shift in a high-dispersion variant ( n=5 , high quality). Adaptive weights move mass away from high-ˆui stakeholders and toward low-
+
+ˆui stakeholders, producing a −0.69 aggregation shift. 
+
+n=8 ), underserved_evidence_placement (0.90), 
+
+stakeholder_coverage_order (0.85), and trade-off_explanation_order (Growth =1 .58 ). Second, low-level controls such as low_level_formatting 
+
+(Growth =1 .02 ) and section_header_variant 
+
+(Growth =1 .07 ) show much weaker scaling with n.This suggests that the n-dependent variance growth documented in §3.1 is driven less by generic formatting and more by presentation changes that affect the judge’s implicit weighting of stakeholder interests and trade-offs. 
+
+B Theory Details for Section 4 
+
+B.1 Proof of Theorem 1 (Decomposition) 
+
+Proof. Substituting ˆwi = w∗ 
+
+> i
+
++ηi and ˆui = u∗ 
+
+> i
+
++δi
+
+into the holistic judge model ˆR(y) = P 
+
+> i
+
+ˆwi ˆui + ϵ:
+
+ˆR(y) = X
+
+> i
+
+(w∗ 
+
+> i
+
++ ηi)( u∗ 
+
+> i
+
++ δi) + ϵ
+
+= P 
+
+> i
+
+w∗ 
+
+> i
+
+u∗
+
+> i
+
+| {z }
+
+> R∗(y)
+
++ P 
+
+> i
+
+w∗ 
+
+> i
+
+δi
+
+| {z }
+
+> (I)
+
++ P 
+
+> i
+
+ηiu∗
+
+> i
+
+| {z }
+
+> (II)
+
++ P 
+
+> i
+
+ηiδi
+
+| {z }
+
+> cross
+
++ϵ
+
+Since R∗(y) is a constant for fixed y, all noise terms have zero mean ( E[δi] = E[ηi] = E[ϵ] = 0 ), and the estimation noise, weight noise, and residual noise are mutually independent, the pairwise co-variance terms among (I), (II), the interaction term, and ϵ vanish: 
+
+Var[ ˆR(y)] = Var[ P 
+
+> i
+
+w∗ 
+
+> i
+
+δi]
+
+| {z }
+
+> Term I
+
++ Var[ P 
+
+> i
+
+ηiu∗ 
+
+> i
+
+]
+
+| {z }
+
+> Term II
+
++ Var[ P 
+
+> i
+
+ηiδi]
+
+| {z }
+
+> Ccross
+
++ σ2
+
+> ϵ
+
+|{z} 
+
+> Term III
+
+(15) Term I = P
+
+> i
+
+(w∗ 
+
+> i
+
+)2σ2 
+
+> δi
+
+by mutual independence of δi. Term II is left in general form, as ηi may 13 Variant family n=2 n=3 n=5 n=8 Growth                                                                  
+
+> Multi-stakeholder-specific
+> stakeholder_coverage_order —0.76 0.71 0.85 —satisfaction_summary_order —0.73 0.79 0.55 —causal_direction 0.75 0.89 1.18 0.93 1.24 shared_benefit_attribution 0.49 0.56 0.77 0.54 1.11 underserved_evidence_placement 0.76 0.60 1.34 0.90 1.18
+> General presentation controls
+> tradeoff_explanation_order 0.39 0.54 0.95 0.62 1.58 generic_paraphrase 0.68 0.69 0.82 0.84 1.23 format_conversion 0.56 0.50 0.80 0.68 1.22 section_header_variant 0.55 0.69 0.77 0.58 1.07 low_level_formatting 0.51 0.54 0.87 0.52 1.02 topic_position 0.75 1.19 0.86 0.64 0.86 exact_repeat (baseline) 0.26 0.54 0.49 0.34 1.33
+> ALL (semantic) 0.64 0.68 0.96 0.86 1.34
+
+Table 10: σ2 
+
+> Sem
+
+by variant family (all three judges, direct scoring, T =0 ). Growth = σ2(n=8) /σ 2(n=2) . “—” indicates the variant is undefined for n=2 (requires ≥3 stakeholders). The exact_repeat row estimates intrinsic judge noise σ2
+
+> Rep
+
+; ALL aggregates the eleven semantic variant families. 
+
+be correlated through the normalization constraint P 
+
+> i
+
+ˆwi = 1 (expanded in Proposition 1). For Ccross ,by the independence assumption δ ⊥ η (Theo-rem 1), δi is independent of all ηj , and E[δi]=0 
+
+eliminates cross-i terms: 
+
+Var[ P 
+
+> i
+
+ηiδi] = X
+
+> i
+
+E[η2 
+
+> i
+
+] E[δ2 
+
+> i
+
+] = X
+
+> i
+
+σ2 
+
+> ηi
+
+σ2 
+
+> δi
+
+.
+
+(16) This yields Eq. 3. An equivalent derivation uses the Law of Total Variance, conditioning on the implicit weights η =(η1, . . . , η n):
+
+Var( ˆR) = Eη[Var( ˆR | η)] 
+
+| {z }
+
+> Terms I + III + cross
+
++ Var η(E[ ˆR | η]) 
+
+| {z }
+
+> Term II
+
+(17) Here, 
+
+Eη[Var( ˆR | η)] = Eη
+
+P 
+
+> i
+
+(w∗ 
+
+> i
+
++ ηi)2σ2 
+
+> δi
+
++ σ2
+
+> ϵ
+
+
+
+= P
+
+> i
+
+(w∗ 
+
+> i
+
+)2σ2 
+
+> δi
+
++ P 
+
+> i
+
+σ2 
+
+> ηi
+
+σ2 
+
+> δi
+
++ σ2 
+
+> ϵ
+
+, (18) recovering Term I, the interaction term, and Term III. The inner expectation E[ ˆR | η] =P
+
+> i
+
+(w∗ 
+
+> i
+
++ ηi)u∗ 
+
+> i
+
+varies only through ηi, recovering Term II as the variance of the aggregation step. 
+
+B.2 Proof of Proposition 1 (Scaling) Full Derivation of Proposition 1. The weight drift ηi satisfies P 
+
+> i
+
+ηi = 0 (normalization con-straint: P 
+
+> i
+
+ˆwi = P 
+
+> i
+
+w∗ 
+
+> i
+
+= 1 ). Proposition 1 assumes exchangeable zero-sum drift for n ≥ 2:
+
+Var( ηi) = σ2 
+
+> η
+
+(n) for all i and a common off-diagonal covariance Cov( ηi, η j ) = cη for i̸ = j.Since P 
+
+> i
+
+ηi = 0 holds identically (not merely in expectation), the variance of this constant is zero. Expanding under exchangeability: 
+
+0 = Var[ P 
+
+> i
+
+ηi] = X
+
+> i
+
+Var[ ηi] + X
+
+> i̸=j
+
+Cov( ηi, η j )= nσ 2 
+
+> η
+
+(n) + n(n − 1) cη, (19) so cη = −σ2 
+
+> η
+
+(n)/(n − 1) . Expanding Term II using the standard variance formula for a linear combination: Term II = Var[ P 
+
+> i
+
+ηiu∗ 
+
+> i
+
+]= X
+
+> i
+
+X
+
+> j
+
+u∗ 
+
+> i
+
+u∗ 
+
+> j
+
+Cov( ηi, η j )= X
+
+> i
+
+(u∗ 
+
+> i
+
+)2Var( ηi)+ X
+
+> i̸=j
+
+u∗ 
+
+> i
+
+u∗ 
+
+> j
+
+Cov( ηi, η j )= σ2 
+
+> η
+
+(n) X
+
+> i
+
+(u∗ 
+
+> i
+
+)2
+
+− σ2 
+
+> η
+
+(n)
+
+n − 1
+
+X
+
+> i̸=j
+
+u∗ 
+
+> i
+
+u∗
+
+> j
+
+14 Using the identity P 
+
+> i̸=j
+
+u∗ 
+
+> i
+
+u∗ 
+
+> j
+
+= (P 
+
+> i
+
+u∗ 
+
+> i
+
+)2 −
+
+P
+
+> i
+
+(u∗ 
+
+> i
+
+)2 to eliminate the off-diagonal sum: 
+
+= σ2 
+
+> η
+
+(n) X
+
+> i
+
+(u∗ 
+
+> i
+
+)2
+
+− σ2 
+
+> η
+
+(n)
+
+n − 1
+
+(P 
+
+> i
+
+u∗ 
+
+> i
+
+)2 − P
+
+> i
+
+(u∗ 
+
+> i
+
+)2
+
+= σ2 
+
+> η
+
+(n)
+
+
+
+1 + 1
+
+> n−1
+
+ X 
+
+> i
+
+(u∗ 
+
+> i
+
+)2
+
+− σ2 
+
+> η
+
+(n)
+
+n − 1 (P 
+
+> i
+
+u∗ 
+
+> i
+
+)2
+
+= n σ 2 
+
+> η
+
+(n)
+
+n − 1
+
+·
+
+"X
+
+> i
+
+(u∗ 
+
+> i
+
+)2 − (P 
+
+> i
+
+u∗ 
+
+> i
+
+)2
+
+n
+
+#
+
+Recognizing the bracketed expression as the (un-normalized) variance P
+
+> i
+
+(u∗ 
+
+> i
+
+− ¯u)2 = P
+
+> i
+
+(u∗ 
+
+> i
+
+)2 − 
+
+> 1
+> n
+
+(P 
+
+> i
+
+u∗ 
+
+> i
+
+)2, and applying Var i[u∗ 
+
+> i
+
+] ≜ 1
+
+> n
+
+P
+
+> i
+
+(u∗ 
+
+> i
+
+−
+
+¯u)2:
+
+= n σ 2 
+
+> η
+
+(n)
+
+n − 1
+
+X
+
+> i
+
+(u∗ 
+
+> i
+
+− ¯u)2
+
+= n2
+
+n − 1 σ2 
+
+> η
+
+(n) Var i[u∗ 
+
+> i
+
+]. (20) Here ¯u = 1
+
+> n
+
+P 
+
+> i
+
+u∗ 
+
+> i
+
+. The formula exposes three factors: weight-drift variance σ2 
+
+> η
+
+(n), utility disper-sion Var i[u∗ 
+
+> i
+
+], and the count factor n2/(n − 1) .Term II vanishes if either weight drift or utility dispersion is zero; if either is small, the term is proportionally small. For fixed utility dispersion, the n-dependence is governed by nσ 2 
+
+> η
+
+(n), so the term grows only when per-stakeholder drift does not shrink fast enough and remains bounded when 
+
+σ2 
+
+> η
+
+(n) = O(1 /n ).
+
+Remark on exchangeability. The exchangeable model is a symmetric specialization. Without ex-changeability, let Ση = Cov( η); the zero-sum con-straint implies Ση1 = 0 . Then Term II = ( u∗)⊤Σηu∗ = ( u∗ − ¯u1)⊤Ση(u∗ − ¯u1).
+
+(21) Thus the qualitative condition is unchanged: ag-gregation noise vanishes when weight drift is zero or when stakeholder utilities are constant, and oth-erwise depends on the alignment between utility dispersion and the covariance directions of weight drift. Proposition 1 is the exchangeable special case, where Ση = nn−1 σ2 
+
+> η
+
+(n)( I − 11 ⊤/n ).
+
+Relation to Term I. For any fixed target weights 
+
+w∗ 
+
+> i
+
+with P 
+
+> i
+
+w∗ 
+
+> i
+
+= 1 :Term I =
+
+> n
+
+X
+
+> i=1
+
+(w∗ 
+
+> i
+
+)2σ2 
+
+> δi
+
+. (22) Under uniform weights ( w∗ 
+
+> i
+
+= 1 /n ) and homoge-neous estimation noise ( σ2 
+
+> δi
+
+= σ2 
+
+> δ
+
+(n)), this sim-plifies to σ2 
+
+> δ
+
+(n)/n . Thus Term I reflects averaged utility-estimation noise, while Term II reflects ag-gregation noise multiplied by satisfaction disper-sion. This is why Term II can create large local score shifts in high-dispersion groups even when satisfaction estimation explains most average vari-ance. 
+
+B.3 Irreducibility Analysis Why Term II persists. A holistic judge that out-puts a scalar ˆR for a multi-stakeholder response can be modeled as implicitly computing weights 
+
+ˆwi (the marginal influence of each stakeholder’s satisfaction on the final score). These weights encode a normative judgment—whose needs mat-ter more—for which there is no objective target to infer from the response alone. In stochastic LLM judging, when no explicit constraint fixes 
+
+ˆwi = w∗ 
+
+> i
+
+, repeated evaluations can yield varying implicit weights. Under the symmetric noise model of Proposition 1, Cov( η) has rank n−1 (the full zero-sum subspace), so any non-constant satisfac-tion vector ( Var i[u∗ 
+
+> i
+
+] > 0) has a nonzero projection onto the weight-noise subspace and yields a posi-tive Term II. 
+
+Rubric and Checklist. These methods structure the estimation task by decomposing it into dimen-sions (accuracy, feasibility, constraint satisfaction, etc.). However, these dimensions cut across stake-holders rather than between them. When scoring “constraint satisfaction” for a 4-person group, the judge still implicitly decides whose constraints mat-ter more, pushing aggregation one level deeper. Formally, within each dimension d, the judge com-putes ˆRd = P 
+
+> i
+
+ˆwi|d · ˆui,d with stochastic ˆwi|d,preserving Term II at the sub-dimension level. 
+
+Ensemble/Repeated Sampling. Averaging M
+
+independent judge calls reduces stochastic variance by 1/M : Var[ ¯RM ] = Var[ ˆR]/M . As M → ∞ ,the stochastic component of Term II vanishes, but 
+
+¯RM converges to the judge’s expected aggregation rule, E[ ˆR] = P 
+
+> i
+
+E[ ˆ wi]u∗ 
+
+> i
+
+, which need not equal 15 the designer’s intended P 
+
+> i
+
+w∗ 
+
+> i
+
+u∗ 
+
+> i
+
+. The resulting bias cannot be removed by averaging. 
+
+Debate/Deliberation. Multi-agent debate can surface reasoning that a single judge might miss, potentially reducing σ2 
+
+> δ
+
+. However, unless the pro-tocol explicitly separates per-role estimation from cross-role aggregation, the final arbiter still pro-duces a holistic score through implicit stakeholder weights, so Term II persists. 
+
+B.4 Proof of Proposition 2 (Advantage Sign Correctness) B.4.1 Part 1: Derivation of Eq. 6 Setup. Consider a GRPO group of G candidate responses with target rewards R∗ 
+
+> j
+
+and group mean 
+
+¯R∗ = 1
+
+> G
+
+PGk=1 R∗
+
+> k
+
+. The true reward gap for can-didate j is 
+
+∆∗ 
+
+> j
+
+= R∗ 
+
+> j
+
+− ¯R∗. (23) The judge observes a noisy reward 
+
+ˆRj = R∗ 
+
+> j
+
++ ξj , (24) where the reward errors are independent Gaussian variables ξj ∼ N (0 , σ 2 
+
+> ξ
+
+). GRPO uses the group-relative observed gap 
+
+ˆ∆j = ˆRj − ¯ˆR
+
+= ( R∗ 
+
+> j
+
+− ¯R∗) + ( ξj − ¯ξ)= ∆ ∗ 
+
+> j
+
++ ζj , (25) where ζj = ξj − ¯ξ is the group-centered random error . Thus ˆ∆j is a noisy reward gap: the desired signal ∆∗ 
+
+> j
+
+plus judge instability. 
+
+Noise after group centering. Since ¯ξ =
+
+> 1
+> G
+
+PGk=1 ξk, the group-centered error expands as 
+
+ζj = ξj − ¯ξ
+
+= ξj − 1
+
+G
+
+> G
+
+X
+
+> k=1
+
+ξk
+
+= ξj − 1
+
+G
+
+ξj + X 
+
+> k̸=j
+
+ξk
+
+
+
+=
+
+
+
+1 − 1
+
+G
+
+
+
+ξj − 1
+
+G
+
+X 
+
+> k̸=j
+
+ξk. (26) For independent errors, all covariance terms vanish. Hence 
+
+Var( ζj ) = Var 
+
+
+
+1 − 1
+
+G
+
+
+
+ξj − 1
+
+G
+
+X 
+
+> k̸=j
+
+ξk
+
+
+
+=
+
+
+
+1 − 1
+
+G
+
+2
+
+Var( ξj ) + 1
+
+G2
+
+X 
+
+> k̸=j
+
+Var( ξk)= (1 − 1 
+
+> G
+
+)2σ2 
+
+> ξ
+
++ ( G − 1) 1 
+
+> G2
+
+σ2
+
+> ξ
+
+= σ2 
+
+> ξ
+
+(1 − 1/G ). (27) Because ζj is a linear combination of independent Gaussian errors, 
+
+ζj ∼ N  0, σ 2 
+
+> ξ
+
+(1 − 1/G ) . (28) 
+
+Sign correctness. Assume first that ∆∗ 
+
+> j
+
+> 0; the case ∆∗ 
+
+> j
+
+< 0 is symmetric. GRPO assigns the cor-rect advantage sign when the observed gap remains positive: 
+
+P (correct sign) = P ( ˆ∆j > 0) = P (∆ ∗ 
+
+> j
+
++ ζj > 0) = P (ζj > −∆∗ 
+
+> j
+
+). (29) Standardize the centered noise as 
+
+Zj = ζj
+
+σξ
+
+p1 − 1/G ∼ N (0 , 1) . (30) Then 
+
+P (correct sign) = P Zj > − ∆∗
+
+> j
+
+σξ
+
+p1 − 1/G 
+
+!
+
+= Φ ∆∗
+
+> j
+
+σξ
+
+p1 − 1/G 
+
+!
+
+. (31) For ∆∗ 
+
+> j
+
+< 0, the same expression holds with |∆∗ 
+
+> j
+
+|.
+
+Evaluating at a typical response. To obtain a single summary statistic, evaluate a response whose true reward gap has magnitude one group standard deviation: 
+
+|∆∗ 
+
+> j
+
+| =
+
+q
+
+Var j [∆ ∗ 
+
+> j
+
+]. (32) Using the SNR definition in Eq. 5, SNR =Var j [∆ ∗ 
+
+> j
+
+]/σ 2 
+
+> ξ
+
+, gives 
+
+P (correct sign ) = Φ 
+
+√SNR 
+
+p1 − 1/G 
+
+!
+
+. (33) This represents an optimistic estimate: the major-ity of responses in a group lie closer to the mean (|∆∗ 
+
+> j
+
+| < sd ) and experience correspondingly higher sign-flip rates. 16 B.4.2 Part 2: Conditional SNR Scaling with Stakeholder Count 
+
+This part analyzes the conditional limit where Term II is the leading contribution to reward-error variance. This is not assumed to be the average empirical regime; it isolates how aggregation noise affects GRPO when satisfaction dispersion is high. In this limit, σ2 
+
+> ξ
+
+≈ Term II . By Proposition 1: 
+
+σ2 
+
+> ξ
+
+(n) ≈ n2
+
+n − 1 σ2 
+
+> η
+
+(n) Var i[u∗ 
+
+> i
+
+] (34) Substituting into the SNR definition: 
+
+SNR( n) = Var j [∆ ∗ 
+
+> j
+
+]
+
+σ2 
+
+> ξ
+
+(n)
+
+≈ (n−1) Var j [∆ ∗ 
+
+> j
+
+]
+
+n2 σ2 
+
+> η
+
+(n) Var i[u∗ 
+
+> i
+
+] (35) Thus SNR is controlled by the same factors in the denominator. In the high-drift, high-dispersion regime where σ2 
+
+> η
+
+(n) = Θ(1) , Var i[u∗ 
+
+> i
+
+] =Θ(1) , and the true reward-gap spread Var j [∆ ∗ 
+
+> j
+
+]
+
+is bounded, this is O(1 /n ); if either factor shrinks with n, degradation is weaker, and if either van-ishes the Term II channel disappears. Eq. 33 depends on √SNR , so its argument is O(1 /√n)
+
+in the high-drift, high-dispersion regime. Using 
+
+Φ( x) = 1/2 + O(x) gives P (correct sign ) =1/2 + O(1 /√n).
+
+B.4.3 Numerical Thresholds ( G = 8 )
+
+With 1 − 1/G = 7 /8:        
+
+> SNR P(correct sign )
+> 0.5 0.78 1.0 0.86 1.5 0.90 2.0 0.93 3.0 0.97 4.0 0.98
+
+Under ideal i.i.d. noise, even moderate SNR ap-pears sufficient. However, this represents a best-case bound: in practice, (1) noise is correlated across responses sharing the same prompt (reduc-ing effective SNR), (2) the judge’s noise is not Gaussian but exhibits systematic biases (e.g., posi-tion bias, length bias), and (3) the “typical response” assumption ( |∆j | = σsignal ) is optimistic—many responses have smaller true differences. These fac-tors explain why empirically observed training in-stability occurs at SNR values that the i.i.d. theory would predict as sufficient. 
+
+C End-to-End Training Details 
+
+Base model and SFT. We use Qwen3-30B-A3B-Thinking-2507 (Qwen Team, 2025) as the base model. Expert trajectories are generated by Qwen3.5-Plus on multi-stakeholder travel-planning queries and used for supervised fine-tuning before RL. 
+
+GRPO training. All four reward configurations (D ECOMP R, Direct, Rubric, Checklist) share the same GRPO training setup: 6,000 training queries, with the best checkpoint selected within 400 train-ing steps. The training queries are distinct from the 60 seed responses used in the reward-consistency analysis (§3) and from the 650 MR-TravelBench evaluation tasks. 
+
+Evaluation. MR-TravelBench contains 650 held-out multi-stakeholder travel-planning tasks span-ning varying stakeholder counts and constraint dif-ficulties. Each policy is evaluated with 3 indepen-dent trials per task. 17

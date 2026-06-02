@@ -1,0 +1,5105 @@
+Title: Efficient Exploration for Iterative Nash Preference Optimization
+
+URL Source: https://arxiv.org/pdf/2606.01382v1
+
+Published Time: Tue, 02 Jun 2026 01:41:55 GMT
+
+Number of Pages: 49
+
+Markdown Content:
+# Efficient Exploration for Iterative Nash Preference Optimization 
+
+## Tianlong Nan ⋄ Xiaopeng Li † Christian Kroer ⋄ Tianyi Lin ⋄
+
+## Columbia University ⋄
+
+## The Chinese University of Hong Kong, Shenzhen †
+
+Abstract 
+
+Preference alignment is central to improving large language models, but standard reward-based formulations can be restrictive when human preferences are cyclic, non-transitive, or otherwise not representable by a scalar reward. Nash Learning from Human Feedback (NLHF) addresses this limitation by modeling alignment as a preference game and targeting a Nash equilibrium rather than a reward maximizer. However, the learning-theoretic foundations of scalable NLHF remain limited. Existing regret guarantees rely on oracle-based methods that estimate a general preference model and solve KL-regularized minimax problems, while iterative NLHF methods directly optimize policy-level preference losses and are easier to implement but lack regret guarantees. We study online iterative NLHF under general preference models and identify exploration as the key obstacle. First, we show that standard iterative NLHF can suffer an exponential dependence on the KL-regularization parameter, revealing that implicit exploration through policy updates is insufficient for controlling regret. Second, we propose an explicitly exploratory iterative NLHF algorithm that combines SFT-based regularization with adversarial policy exploration. The resulting method retains the direct policy optimization structure of iterative NLHF, avoids explicit preference model estimation, and achieves an O(√T ) regret bound without an exponential dependence on the KL-regularization parameter. We show that the regret can be improved to O(log (T )) with access to a minimax oracle, clarifying the computational-statistical tradeoff in learning general preference games. Finally, we instantiate our method for LLM fine-tuning and evaluate it on Llama-3-8B-Instruct across multiple benchmarks, where explicit exploration yields consistent improvements over existing NLHF baselines. 
+
+# 1 Introduction 
+
+Large language models (LLMs) are increasingly trained to act according to human preferences, typically through reinforcement learning from human feedback (RLHF) [Christiano et al., 2017, Stiennon et al., 2020]. Standard RLHF first fits a scalar reward model from pairwise comparisons and then optimizes a policy against that reward. This reduction has been empirically successful [Ziegler et al., 2019, Ouyang et al., 2022, Touvron et al., 2023, Achiam et al., 2023], but it can be restrictive when preferences are heterogeneous, cyclic, or otherwise not well described by a single Bradley–Terry (BT) reward model [Bradley and Terry, 1952]. Game-theoretic alignment methods, including Nash learning from human feedback (NLHF) [Munos et al., 2024] and its variants [Chakraborty et al., 2024, Swamy et al., 2024, Ye et al., 2024, Rosset et al., 2024, Wu et al., 2025b, Zhang et al., 2025b, Wu et al., 2025a, 2026, Lee et al., 2026], instead treat pairwise preference as the payoff of a game and seek a Nash equilibrium (NE) policy. Despite growing interest in game-theoretic alignment [Bai et al., 2022, Cui et al., 2024], its online learning foundations remain limited. Most existing analyses assume the preference game is fixed and known, and study how quickly equilibrium dynamics compute a Nash equilibrium [Munos et al., 2024, Wu et al., 2025b, Zhang et al., 2025a,b, Wang et al., 2025, Zhou et al., 2025, Tiapkin et al., 2025]. This optimization view is useful, but it abstracts away a central difficulty in LLM alignment: the payoff is revealed only through costly, learner-chosen preference queries. Each update determines which responses are sampled, which opponents are compared, and therefore which parts of the game become statistically visible. Online NLHF is thus a coupled optimization and coverage problem. Existing learning results are comparatively scarce [Ye et al., 2024, Wu et al., 2025a, Lee et al., 2026]. Among them, Ye et al. [2024] obtains an O(√T ) regret bound without exponential dependence on the KL-regularization parameter, but requires a minimax oracle and 1
+
+> arXiv:2606.01382v1 [cs.LG] 31 May 2026
+
+explicit estimation of a general preference model. Iterative NLHF methods [Zhang et al., 2025b] are simpler and more scalable because they update the policy directly through preference losses, but they currently lack regret guarantees. This leaves a central question: can iterative NLHF retain its practical simplicity while achieving provable regret guarantees? A key obstacle is exploration. Recent work on iterative direct preference optimization (DPO) under the BT model shows that purely on-policy sampling can suffer an exponential dependence on the KL-regularization modulus when high-quality responses are rarely sampled by the reference policy [Xie et al., 2025]. This suggests that explicit exploration is necessary. However, extending this idea from DPO to NLHF is nontrivial. The analysis of exploratory DPO relies on a scalar reward representation and the interpretation of DPO as implicit Q⋆-approximation [Rafailov et al., 2024]. In NLHF, preferences may be non-transitive and need not admit any scalar reward representation. Moreover, the goal is not to maximize a reward, but to minimize a duality gap against adaptive opponent policies. Thus, exploration in NLHF must cover not only informative responses, but also the opponent distributions that reveal poorly learned regions of the preference game. To achieve this goal, we augment direct policy optimization in iterative NLHF with two exploration mechanisms. First, we introduce a pessimistic supervised fine-tuning-like (SFT) regularization term into the iterative preference loss. Unlike the optimism term used for exploratory DPO under the BT model [Xie et al., 2025], our term acts as a stabilizing regularizer: it strengthens the mirror-descent structure of the update and prevents exploration from destabilizing policy improvement. Second, we construct an adversarial policy maximization procedure that identifies opponent policies exposing poorly covered regions of the preference game, and we sample completions from these policies. This targeted exploration directly addresses the opponent distributions appearing in the duality gap, enabling regret control without requiring full preference-model estimation at every iteration. 
+
+Contributions. We propose an explicitly exploratory iterative NLHF method with provable regret guarantees. Our contributions can be summarized as follows: 1. We show that standard iterative NLHF can fail to cover adversarially informative responses and may incur an exponential dependence on the KL-regularization parameter. In contrast, we show that by combining SFT-based regularization with adversarial policy exploration, our method can achieve an 
+
+O(√T ) regret bound without an exponential dependence on the KL-regularization modulus. With access to a minimax oracle, the guarantee improves to O(log T ).2. We implement the proposed exploration scheme on Llama-3-8B-Instruct and evaluate it across multiple benchmarks. Experimental results demonstrate consistent improvements over existing NLHF baselines, highlighting that our explicit policy exploration is useful not only theoretically but also in practical LLM alignment. 
+
+Related work. Our work is connected to the literature on game-theoretic preference alignment and online exploration. Due to space limitations, we defer our comments on other relevant topics to Appendix A. Recent works study game-theoretic alignment under general preference models. Early methods solve KL-regularized two-player minimax problems. In particular, NLHF learns a pairwise preference model and applies mirror descent against a geometric mixture of the current and reference policies [Munos et al., 2024], while exploratory NLHF provides offline pessimistic and online optimistic variants using conservative estimates or enhancer policies [Ye et al., 2024]. MaxMin-RLHF addresses diverse users by learning subpopulation-specific rewards via EM and updating toward the currently worst-aligned group [Chakraborty et al., 2024]. However, these methods involve equilibrium solving, which may be hard to stabilize in practice. More recent approaches avoid such oracles through iterative self-play: SPO uses one no-regret learner with on-policy win-rate rewards [Swamy et al., 2024], SPPO updates the policy according to empirical win rates [Wu et al., 2025b], and INPO optimizes a preference-pair square loss without explicit per-response win-rate estimation [Zhang et al., 2025b]. Greedy sampling analyses show that simple empirical updates can be statistically efficient under KL-regularized general preferences and generalized bilinear preferences [Wu et al., 2025a, Lee et al., 2026]. MNPO extends previous works to multiplayer alignment with historical or heterogeneous opponents [Wu et al., 2026]. Online exploration was developed in reinforcement learning theory to exploit interactive feedback by deliberately sampling informative and diverse behaviors. Modern exploration methods provide algorithmic principles that adapt to problem structure and achieve near-optimal regret bounds [Jiang et al., 2017, 2Foster and Rakhlin, 2023]. However, these approaches are often computationally intractable in general RL settings [Jiang et al., 2017, Jin et al., 2021a, Foster et al., 2021]. In preference alignment, practical approaches either collect feedback without updating the policy model [Dwaracherla et al., 2024] or rely on passive on-policy sampling [Guo et al., 2024, Gao et al., 2024, Zhang et al., 2025b], which provides no explicit mechanism for novelty or diversity and can fail to discover rare high-quality responses. Exploratory approaches either impose restrictive assumptions [Novoseller et al., 2020, Xu et al., 2020, Saha et al., 2023, Wu and Sun, 2024, Zhan et al., 2024, Du et al., 2024, Das et al., 2025] or require computationally expensive procedures that are difficult to implement at LLM scale [Chen et al., 2022, Wang et al., 2023, Ye et al., 2024]. Recently, Xie et al. [2025] have taken a first step toward simple and efficient exploration in RLHF under the BT reward model. Our work adapts the principle to online iterative NLHF under general preference models in LLM fine-tuning. 
+
+# 2 Preliminaries and technical background 
+
+This section provides an overview of our setup for game-theoretic preference alignment and the definitions of regret and online exploration. 
+
+## 2.1 Game-theoretic preference alignment 
+
+Modern LLMs are designed based on Transformer architectures [Vaswani et al., 2017]: the input is a user prompt x ∈ V ⋆ and a response y ∈ V ⋆ is generated, where V⋆ is the set of all finite-length sequences of tokens drawn from the vocabulary set V. We cast an LLM as a policy πθ (y|x) which assigns a probability to each y
+
+given x. For assigning probabilities to each token of y, the policy πθ operates in an auto-regressive manner: 
+
+πθ (y|x) = Π |y|
+
+> k=1
+
+πθ (yk|x, y<k ),
+
+where θ stands for the model’s parameters and y<k denotes the first k − 1 tokens of y. Given a base LLM, the generated responses might not be helpful, safe, or reliable. Thus, techniques for aligning the LLM with human preferences are applied. We assume access to a general preference oracle P ⋆ : V⋆ × V ⋆ × V ⋆ → [0 , 1] . Given a prompt x
+
+and two responses y, y′ ∈ V ⋆, querying the oracle returns I ∼ Bern (P ⋆(y ≻ y′ | x)) , where I = 1 
+
+means that y is preferred to y′, and I = 0 means that y′ is preferred to y. We assume symmetry: 
+
+P ⋆(y ≻ y′ | x) + P ⋆(y′ ≻ y | x) = 1 and P ⋆(y ≻ y | x) = 12 . Given a pair of responses (y, y′), we define the preference distribution λP ⋆ by 
+
+λP ⋆ (x, y, y′) = 
+
+(
+
+(y, y′), with probability P ⋆(y ≻ y′ | x),
+
+(y′, y), with probability 1 − P ⋆(y ≻ y′ | x).
+
+Accordingly, we write (y+, y−) ∼ λP ⋆ (x, y, y′) as a pair of preferred and dispreferred responses. We consider game-theoretic preference alignment, which formulates alignment as a KL-regularized game [Munos et al., 2024, Ye et al., 2024]. Formally, we consider pairs of policies π1, π 2 that play an alignment game against each other: 
+
+max 
+
+> π1
+
+min 
+
+> π2
+
+Jβ (π1, π 2) := P ⋆(π1 ≻ π2) − βKL (π1∥πref ) + βKL (π2∥πref ),
+
+where πref is the model after SFT, β > 0 is a regularization parameter, and the preference loss is defined by 
+
+P ⋆(π1 ≻ π2) = Ex∼ρ, y∼π1(·| x),y′∼π2(·| x)[P ⋆(y ≻ y′ | x)] . The goal of both players is to maximize their win rate against the opponent while not deviating too far from πref .Without loss of generality, we restrict our attention to the policy class containing the policies with the same support set as πref . A Nash equilibrium (NE) is then defined as (π⋆ 
+
+> 1
+
+, π ⋆ 
+
+> 2
+
+) satisfying 
+
+Jβ (π1, π ⋆ 
+
+> 2
+
+) ≤ Jβ (π⋆ 
+
+> 1
+
+, π ⋆ 
+
+> 2
+
+) ≤ Jβ (π⋆ 
+
+> 1
+
+, π 2), for any (π1, π 2).
+
+Since the game is symmetric for the two players, as proven by Ye et al. [2024], the NE is unique and the two equilibrium policies coincide, meaning that π⋆ 
+
+> 1
+
+= π⋆ 
+
+> 2
+
+= π⋆. Since Jβ (π⋆, π ⋆) = 12 , we have Jβ (π⋆, π ) ≥ 12 for 3any policy π. For each policy π, we use the following duality gap to measure how well it approximates π⋆:gap Π(π) = max  
+
+> π1∈Π
+
+Jβ (π1, π ) − min  
+
+> π2∈Π
+
+Jβ (π, π 2). (1) In Section B.1, we show that this duality gap is directly connected to the regret bound used to measure policy quality. 
+
+## 2.2 Online exploration 
+
+Under the BT model, the preference oracle can be represented as 
+
+P ⋆(y ≻ y′ | x) = σ(r⋆(x, y) − r⋆(x, y′)) ,
+
+where σ : R 7 → [0 , 1] is the sigmoid function. Direct alignment methods (e.g., DPO [Rafailov et al., 2023]) optimize the policy πθ over the dataset D = {(xi, y+ 
+
+> i
+
+, y− 
+
+> i
+
+)}ni=1 by minimizing a loss of the following form: 
+
+LDPO (θ) = −E(x,y+,y−)∼D
+
+h
+
+log σ
+
+
+
+β
+
+
+
+log πθ (y+|x) 
+
+> πref (y+|x)
+
+− log πθ (y−|x)
+
+> πref (y−|x)
+
+i 
+
+,
+
+where πref is the model after SFT and β > 0 is a regularization parameter. In passive online DPO [Guo et al., 2024], the learner repeatedly samples responses from the current policy, queries the preference oracle, adds the resulting pair of preferred and dispreferred responses to the dataset, and updates the policy using the DPO loss. This procedure uses online feedback, but the learner only observes responses that the current policy already tends to generate. If the reference policy assigns very small probability to a high-reward response, then passive online DPO may fail to discover it for exponentially many rounds in the small-β regime. Thus, online feedback alone does not guarantee efficient exploration; the policy update must deliberately encourage informative behavior. The key idea of XPO Xie et al. [2025] is to include an SFT-based optimism term when updating the policy using the DPO loss. At round t, sample xt ∼ ρ, yt ∼ πθt (· | xt), and y′ 
+
+> t
+
+∼ πref (· | xt). After querying the preference oracle, we obtain a new data sample (xt, y+ 
+
+> t
+
+, y− 
+
+> t
+
+) and update the dataset by 
+
+Dt = Dt−1 ∪ { (xt, y+ 
+
+> t
+
+, y− 
+
+> t
+
+)}. Then, we compute the next policy by minimizing 
+
+α Xti=1 log( π(y′ 
+
+> i
+
+| xi)) − E(x,y+,y−)∼Dt
+
+h
+
+log σ
+
+
+
+β
+
+
+
+log πθ (y+|x) 
+
+> πref (y+|x)
+
+− log πθ (y−|x)
+
+> πref (y−|x)
+
+i 
+
+.
+
+where α > 0 controls the strength of optimism. Xie et al. [2025] interpret this additional term through DPO’s role as implicit Q⋆ approximation: under the Bradley-Terry model, DPO implicitly approximates the optimal KL-regularized value function, and the extra term implements optimism in the face of uncertainty. This yields efficient exploration and an improved regret bound. Unfortunately, the existing analysis relies on assumptions that are absent in game-theoretic preference alignment. First, general preference oracles need not admit any scalar reward representation. Second, KL-regularized games do not admit a single objective to be maximized and lack an interpretation as implicit 
+
+Q⋆ approximation. Finally, the goal of game-theoretic alignment is to minimize the duality gap against adversarial opponent policies. Thus, exploration must control comparisons against possible opponents, not only discover high-reward responses. Therefore, the optimism scheme in Xie et al. [2025] cannot be directly extended to game-theoretic alignment. 
+
+# 3 Exploratory Nash preference optimization 
+
+In this section, we discuss a simplified version of our algorithm to convey the high-level idea. We then study its theoretical sample complexity in Section 4 and present numerical results in Section 5. At a high level, ENPO alternately updates two policies: a policy learner and an adversarial explorer . Each iteration consists of two updates. First, the exploitation update trains the policy learner using a contrastive objective on samples drawn separately from the evolving policy learner and adversarial explorer, together with an SFT-type regularizer that promotes in-sample exploitation. Second, the exploration update trains the 4adversarial explorer to probe the out-of-sample distribution. The resulting exploratory samples are then fed back into the next exploitation update. For ease of presentation, we summarize the notation for policies and datasets. At iteration t, let πt be the output policy learner and ˆπt be the output adversarial explorer. We use Dt 
+
+> 1
+
+for the SFT dataset sampled from πt−1, and Dt 
+
+> 2
+
+for the contrastive dataset of response pairs from πt−2 and ˆπt−1 with preference labels. Finally, ˜Dt 
+
+> 2
+
+denotes the re-labeled dataset used to train the adversarial explorer via the DPO-style objective. 
+
+SFT-type regularizer. The exploitation update drives the current policy in the direction of a mirror descent update. First, we sample n triples (x, y, y′) by drawing x from a fixed prompt distribution, y from the policy learner πt−2, and y′ from the adversarial explorer ˆπt−1, and use them to construct the dataset 
+
+Dt 
+
+> 2
+
+for the contrastive objective. We then sample an i.i.d. comparator response ˆy from πt−1(·| x) and query preference labels It(y) ∼ Bern (P ⋆(y ≻ ˆy|x)) and It(y′) ∼ Bern (P ⋆(y′ ≻ ˆy|x)) to estimate the mirror descent gradient. In addition, we generate or reuse m samples (x, ˜y) from πt−1 to construct a dataset Dt 
+
+> 1
+
+for the SFT-type regularizer. We then minimize the loss function Lmd (π, D t
+
+> 1
+
+, D t
+
+> 2
+
+) := 
+
+−αt
+
+X
+
+> (x,˜y)∈Dt
+> 1
+
+log π(˜ y|x) + X
+
+> (x,y,y′,I t(y),I t(y′)) ∈Dt
+> 2
+
+1
+
+n
+
+
+
+ht(π, x, y, y′) − η It(y) − It(y′)2
+
+, (2) where 
+
+ht(π, x, y, y′) := log π(y|x)
+
+π(y′|x) − ηβ log πref (y|x)
+
+πref (y′|x) − (1 − ηβ ) log πt−1(y|x)
+
+πt−1(y′|x) . (3) The validity of this loss function can be verified by an argument similar to those in Azar et al. [2024], Zhang et al. [2025b]. The first term in Eq. (2) is an SFT-type bonus that strengthens the anchor to the current policy learner. This bonus differs from the more common exploration bonuses used in online RL. The additional regularization can improve the learning process by enhancing the proximal effect and mitigating the instability that arises when learning an equilibrium. This modification is also in the same spirit as Magnetic Mirror Descent [Sokota et al., 2023], which augments regularization for learning in games. To guide the reader through the sequence of objectives below, we briefly summarize their roles. Eq. (2) defines the exploitation loss used to update the policy learner. Eq. (4) introduces the theoretical adversarial explorer objective. The subsequent derivations reformulate and simplify this objective, leading to the practical DPO-style loss in Eq. (8). 
+
+DPO-type explorer surrogate. After the exploitation update, we invoke an exploration oracle to identify an adversarial sampler by solving the following policy maximization problem without collecting additional samples: 
+
+max  
+
+> ˜π∈Π
+
+max 
+
+> π∈Π
+
+  1
+
+> m
+
+P
+
+> (x,˜y)∈Dt
+> 1
+
+log πt(˜ y|x) 
+
+> π(˜ y|x)
+
+− Ex∼ρ, y′∼˜π(·| x)
+
+ log πt(y′|x)
+
+> π(y′|x)
+
+ 2
+
+λ + 1
+
+> n
+
+P
+
+> (x,y,y′)∈Dt
+> 2
+
+  log πt(y|x) 
+
+> π(y|x)
+
+− log πt(y′|x)
+
+> π(y′|x)
+
+2 . (4) One can use a surrogate of this oracle in practice. Applying the identity a2/b = max ω {2aω − bω 2} for b > 0,we recast Eq. (4) as 
+
+max  
+
+> ˜π∈Π
+
+max  
+
+> π∈Π
+
+max  
+
+> ω
+
+2ω
+
+
+
+Ex∼ρ, y′∼˜π(·| x)
+
+ log πt(y′|x) − log π(y′|x) − 1
+
+> m
+
+X
+
+> (x,˜y)∈Dt
+> 1
+
+log πt(˜ y|x)
+
+> π(˜ y|x)
+
+
+
+− ω2
+
+λ + 1
+
+> n
+
+X
+
+> (x,y,y′)∈Dt
+> 2
+
+
+
+log πt(y|x) 
+
+> πt(y′|x)
+
+− log π(y|x)
+
+> π(y′|x)
+
+2 
+
+. (5) The two empirical terms depending on π act as implicit anchors: each penalizes the log-density gap between 
+
+π and πt on observed data, mimicking the geometry of a KL regularizer. We then derive a tractable surrogate loss as follows. First, we approximate the implicit regularization terms using a simpler term: 
+
+max  
+
+> ˜π∈Π
+
+max  
+
+> π∈Π
+
+Ex∼ρ, y∼˜π(·| x)
+
+ log πt(y|x) − log π(y|x) − c Ex∼ρ, y∼πt−1(·| x)
+
+
+
+log πt(y|x)
+
+π(y|x)
+
+
+
+,
+
+where c is a constant hyperparameter. This subproblem, up to a constant independent of π, is equivalent to 
+
+max  
+
+> ˜π∈Π
+
+max  
+
+> π∈Π
+
+Ex∼ρ, y∼˜π(·| x)
+
+ log πt(y|x) − log π(y|x) − c Ex∼ρ [KL (πt−1(·| x)∥π(·| x))] . (6) 5Algorithm 1: Direct Exploratory Nash Preference Optimization (DENPO) 
+
+Input : T , coefficients γ, λ > 0, stepsize η > 0, reference policy πref , αt.Initialize policies π−1 ← πref , π0 ← πref , ˆπ0 ← πref ;Initialize datasets D01 ← ∅, D 02 ← ∅;
+
+for t = 1 , . . . , T do 
+
+Generate n response pairs {(x, y, y′)} via x ∼ ρ, y ∼ πt−2(·| x) and y′ ∼ ˆπt−1(·| x);Generate or reuse m responses {(x, ˜y)} via x ∼ ρ and ˜y ∼ πt−1(·| x);Sample response pairs from Dt
+
+> 2
+
+, for each (x, y, y′), generate or reuse (x, ˆy) via ˆy ∼ πt−1(· | x);Query preference labels I(y) ∼ Bern (P ⋆(y ≻ ˆy | x)) and I(y′) ∼ Bern (P ⋆(y′ ≻ ˆy | x)) ;Update datasets Dt 
+
+> 1
+
+← { (x, ˜y)}, Dt 
+
+> 2
+
+← Dt−12 ∪ { (x, y, y′, I (y), I (y′)) };Compute πt ← argmin π∈Π Lmd (π, D t
+
+> 1
+
+, D t
+
+> 2
+
+), where Lmd (π, D t
+
+> 1
+
+, D t
+
+> 2
+
+) is defined in Eq. (2); Compute ˆπt ← argmin ˜π∈ΠLexp (˜ π, D t
+
+> 2
+
+), where Lexp (˜ π, D t
+
+> 2
+
+) is defined in Eq. (8); 
+
+Output : best ({πt}Tt=1 ).Then, setting π = πt−1 collapses the inner maximization and zeros out the KL anchor, leaving an objective in ˜π alone. The remaining linear term depends on ˜π only through its mass on supp (πt) ∩ supp (πt−1)—we pin this effect down with a KL anchor of strength b > 0 against πt−1, which yields 
+
+max  
+
+> ˜π∈Π
+
+Ex∼ρ, y′∼˜π
+
+ log πt(y′|x) − log πt−1(y′|x) − bEx∼ρ [KL (˜ π(·| x)∥πt−1(·| x))] . (7) A DPO-style reparameterization of Eq. (7) yields the following surrogate loss: 
+
+− X 
+
+> (x,y+,y−)∈˜Dt
+> 2
+
+log σ
+
+
+
+b log ˜π(y+|x) 
+
+> πt−1(y+|x)
+
+− b log ˜π(y−|x)
+
+> πt−1(y−|x)
+
+
+
+, (8) where each triple in ˜Dt 
+
+> 2
+
+is constructed from a triple (x, y, y′) in Dt 
+
+> 2
+
+by assigning (y+, y−) according to the ordering of log πt(y|x) − log πt−1(y|x) and log πt(y′|x) − log πt−1(y′|x).We summarize this simplified version of ENPO , called DENPO , in Algorithm 1. 
+
+# 4 Sample efficiency in Nash preference optimization 
+
+Before presenting the theoretical analysis, we briefly review mirror descent , a canonical no-regret dynamics for computing Nash equilibria. At each round, every player updates her strategy along the first-order improvement direction against the current opponent profile—which coincides with her own strategy in our symmetric setting—regularized by a KL divergence that anchors the new iterate to the previous one: 
+
+πnext  
+
+> ⋆,η
+
+[π] = argmax 
+
+> ˜π
+
+E
+
+> x∼ρ
+
+h
+
+η E
+
+> y∼˜π(·| x)
+
+h
+
+P ∗(y ≻ π|x) − β log 
+
+ π(y|x)
+
+πref (y|x)
+
+i 
+
+− KL (˜ π(·| x)∥π(·| x)) 
+
+i
+
+. (9) Under an appropriate step-size schedule, the dynamics converges to the regularized NE and attains a sublinear regret bound. In essence, the INPO-type algorithm aims to track the mirror descent update at every round. To study sample complexity guarantees for ENPO, we make the following statistical assumptions. The second assumption guarantees the policy class Π is large enough to ensure every π’s mirror descent update is covered by Π, unless π is not too close to NE 1.
+
+Assumption 4.1 We assume that P ⋆, Π satisfy: 
+
+• Finite policy class : Π is finite, and πref , π ⋆ ∈ Π,
+
+• Mirror descent realizability : For each η in a finite set of stepsizes, there exists a sufficiently small 
+
+εη ≥ 0 such that πnext  
+
+> ⋆,η
+
+[π] ∈ Π for every π ∈ Π satisfying KL (π⋆∥π) > ε η .
+
+> 1The second condition in Assumption 4.1 is analogous to the “policy realizability for general preferences” assumption in Huang et al. [2025], but is slightly relaxed to accommodate finite policy classes.
+
+6• Bounded log-ratio : For any π, π ′ ∈ Π, and any x, y, y′ ∈ V ⋆, we have log π(y|x) 
+
+> π′(y|x)
+
+≤ V /β where V ≥ 1
+
+is a constant. 
+
+• Symmetric preferences : For any x, y, y′ ∈ V ⋆, P ⋆(y ≻ y′|x) + P ⋆(y′ ≻ y|x) = 1 .
+
+## 4.1 Deliberate exploration is necessary 
+
+In contrast to offline algorithms such as DPO, Nash learning algorithms such as INPO intrinsically draw new samples from the policy that mimics the mirror descent trajectory, and thus naturally perform on-policy sampling with moving policies. It is therefore natural to ask whether this iterative sampling process helps with exploration, and whether it is sufficient to achieve efficient exploration without further modifications. The following proposition shows that, even with iterative sampling, INPO must still pay Ω( e1/β ) samples to achieve any sublinear regret bound. We defer the formal algorithm statement and its proof to Section B.2. 
+
+Proposition 4.2 There exists an instance satisfying Assumption 4.1. Let πt be a learned policy of INPO (described in Algorithm 2) on this instance after round t with constant batch size n. Then, for any δ ∈ (0 , 1) ,if 2n(T + 1) ≤ e1/(4 β), then with probability at least 1 − δ, gap Π(πt) is at least a constant for all t ≤ T and 
+
+Reg T ≥ Ω( T ).
+
+We refer to sample complexity bounds that do not scale exponentially in 1/β as sample efficient in this paper. 
+
+## 4.2 Sample efficiency guarantee of ENPO 
+
+The example in Section 4.1 suggests that relying solely on the exploration induced by the mirror descent trajectory is insufficient for achieving sample efficiency. More broadly, it has long been recognized in the RL literature that learning a Nash equilibrium is substantially harder than single-agent RL, due to strategic interaction and the need for coordinated exploration Zhang et al. [2020], Loftin et al. [2021], Huang et al. [2024]. In particular, naïve optimistic exploration may waste samples on strategically irrelevant regions of the state space Loftin et al. [2021]. The separation between general preferences and single-reward models has also been established in the offline RL setting [Cui and Du, 2022, Huang et al., 2025]. More generally, computing an equilibrium is well known to be computationally hard Daskalakis et al. [2009]. The main difficulty of achieving sample efficiency under general preferences can be viewed from two perspectives. First, even in the symmetric-game setting, a player’s effective reward depends on her own policy, so the learning objective is nonstationary rather than fixed. Second, game-theoretic performance measures are defined relative to either a Nash equilibrium or an adversarial policy, which may be completely out-of-sample. This gives rise to terms of the form 
+
+Ex∼ρ, y∼πt(·| x),y′∼π(·| x)[ψt(x, y, y′) − ψ′
+
+> t
+
+(x, y, y′)] 
+
+in the regret decomposition, where π may be completely unpredictable at time t. As a result, even abundant in-sample data may provide little control over this term, leading to arbitrarily poor worst-case performance. In particular, this suggests that simple modifications such as proximal exploration in Xie and Jiang [2020] are unlikely to achieve sample efficiency for equilibrium learning. To address this issue, we design Exploratory Nash Preference Optimization ( ENPO ), a formal version of 
+
+DENPO ; see Algorithm 3 for the full algorithm. The design follows the same principle illustrated in Section 3, except that we replace the simplified oracles with formal exploration oracles. This nontrivial “exploitation + exploration”—or equivalently, “pessimistic + optimistic”—structure turns out to align naturally with mirror descent dynamics. By strengthening the regularization in the mirror descent update and then performing deliberate exploration, ENPO achieves an O(√T ) regret bound with O(t) batch samples per iteration. 
+
+Theorem 4.3 Assume that P ⋆, Π satisfy Assumption 4.1 with εη ≤ c/T for a stepsize η = 2 β/ (1 + 4 β2) < 1.Let MT := T (T + 1)( T + 2) /3 and 
+
+LT := max {1, L Π, L P , log( eT )}, where LΠ := log  16 T |Π|2δ−1 , L P := log  16 MT δ−1 .
+
+7Set mt = nt = kt = t, λ = 16(1 + ( V 2 + 1) /β 2)L2 
+
+> T
+
+, γ = p(1 ∨ SEC NLHF (Ψ , λ )) /(λT ), αt = 2 /(γt ), and stepsize η = 2 β/ (1 + 4 β2) < 1 in Algorithm 3. Then, with probability at least 1 − δ,
+
+Reg best  
+
+> T
+
+≤ max 
+
+(
+
+1 + 2 eη(2 V +1) 
+
+η
+
+
+
+B + 20 p(1 ∨ SEC NLHF (Ψ , λ )) λT 
+
+
+
+, (1 + 4 V )
+
+r cT 
+
+2
+
+)
+
+.
+
+The proof of this theorem utilizes the regret decomposition that is analogous to that in Xie and Jiang [2020], and the connection to online data coverage via the deliberate exploration step. We provide a complete proof of Theorem 4.3 in Section B.3. 
+
+Discussion. This is the first sample-efficiency result of this type available in the literature. Although iterative Nash preference optimization has dominated empirical practice and achieved significant progress, the only known sample-complexity result directly based on a mirror-descent oracle is that of Huang et al. [2025], which is offline and therefore does not guarantee no-regret performance when the reference policy is suboptimal. In the more natural online setting, sample-complexity guarantees are scarce, let alone sample-efficient guarantees. Our result also resolves an open problem posed by Lee et al. [2026], which asks for efficient algorithms based on mirror-descent oracles. In our algorithm, we sample an O(t)-sized batch at each iteration, which could potentially be improved. However, even under the BT model, the general XPO algorithm of Xie et al. [2025] also requires t samples per iteration. Their algorithm can avoid this only when samples can be fully reused, i.e., when a stationary policy is used as the sampler; this is incompatible with efficient learning in the game setting. 
+
+## 4.3 Logarithmic regret bound with minimax oracles 
+
+Our ENPO algorithm achieves sample efficiency without relying on either a minimax oracle or an explicit preference model, making it a natural basis for practical algorithms. At the same time, more complex oracle-based methods remain a central paradigm in RL, where access to best-response or minimax planning oracles often enables sharper regret guarantees. Recent results further suggest that, in KL-regularized zero-sum Markov games, oracle-style optimistic best-response sampling can improve the standard O(√T ) rate to logarithmic regret. Motivated by this gap, we next study efficient exploration under access to minimax oracles and ask whether one can design an exploration strategy that achieves O( log T ) regret in our preference-based setting. We further design a minimax-oracle variant of ENPO , called Bonus-Explorer ENPO ( BENPO ), which is equipped with minimax oracles and best-response computation. This variant achieves an improved O(log T )
+
+regret bound without any e1/β dependence. Its analysis builds on recent techniques from KL-regularized RL Zhao et al. [2025], Wu et al. [2025a], Lee et al. [2026]; in particular, we exploit the structure of KL regularization to convert first-order errors into second-order errors, which ultimately enables the logarithmic rate. We conclude with the main theorem here, and defer the formal algorithm and analysis to Section B.4. 
+
+Theorem 4.4 (Logarithmic regret bound of Algorithm 4) Assume that P is a finite class of antisym-metric preference functions with P ⋆ ∈ P , and that the squared difference class {(P − P ′)2 : P, P ′ ∈ P} has eluder dimension at most dP at scale 1/T . Then, with probability at least 1 − δ, Algorithm 4 with a confidence schedule γt(δ) = O(log( |P| /δ )) can output iterates {πt}Tt=1 that satisfies 
+
+> T
+
+X
+
+> t=1
+
+gap Π(πt) ≤ O
+
+ dP log( |P| /δ ) log Tβ
+
+
+
+.
+
+To the best of our knowledge, BENPO is the first algorithm in the NLHF literature to simultaneously achieve 
+
+O(log T ) regret and avoid the exp (1/β ) regularization scaling under standard reverse-KL regularization and general function approximation. In comparison, Wu et al. [2025a], Lee et al. [2026] achieve O(log T ) regret bounds but still incur an exp ( 1/β ) dependence under KL regularization, while Nayak et al. [2025] avoid this dependence but require linear function approximation. We note, however, that all existing algorithms achieving O( log T ) regret rely on minimax oracles, leaving open whether logarithmic regret can be attained using only optimization oracles. 8Table 1: Iteration-3 endpoints across judges. AE2 columns are length-controlled (LC) win-rates (%) under 
+
+gpt-4o-mini and gpt-4-turbo respectively; MT-Bench is MT-Bench mean; Arena-Hard is Arena-Hard win-rate (%); ↓ marks the catastrophic-collapse cells; bold marks the best entry per column. Policies (Iter 3) AE2-mini AE2-turbo MT-Bench Arena-Hard Base Llama-3-8B-Instruct 34.83 28.61 6.64 36.4 XPO 48.57 41.43 6.91 45.7 INPO ( 1/η = 7 .5 · 10 −3) 53.75 46.17 6.94 52.0 INPO 1/2 (1/η = 3 .75 · 10 −3) 55.06 46.17 7.00 50.9 INPO 1/4 (1/η = 1 .875 · 10 −3) 49.58 41.70 6.55 41.2 INPO 1/8 (1/η = 0 .9375 · 10 −3) 32.13 ↓ 28.42 ↓ 5.61 ↓ 22.4 ↓
+
+ENPO 1/2 (1/η = 3 .75 · 10 −3) 53.04 46.37 7.07 50.7 ENPO 1/4 (1/η = 1 .875 · 10 −3) 60.00 47.23 7.03 53.8 ENPO 1/8 (1/η = 0 .9375 · 10 −3) 57.63 47.89 7.10 57.6 
+
+One may observe that BENPO is closely related to the Optimistic ELHF algorithm of Ye et al. [2024]. Indeed, both algorithms learn a minimax policy together with an explorer that maximizes a UCB-type bonus. The key difference is that Optimistic ELHF trains a policy-level explorer, whereas BENPO searches over the 
+
+response space for each context x. This finer-grained exploration structure is what enables our sharper analysis. 
+
+# 5 Experiments 
+
+Setup. We compare four algorithms (XPO [Xie et al., 2025], INPO [Zhang et al., 2025b], (D)ENPO, plus the untrained Llama-3-8B-Instruct base) under a controlled (1 /η )-sweep ( 1/η ∈ { 7.5, 3.75 , 1.875 , 0.9375 } × 10 −3). All variants share the same training recipe: 20 ,000 UltraFeedback prompts per iteration and T =3 iterations, 
+
+Skywork-Reward-V2-Llama-3.1-8B-40M as the reward judge inside the training loop to provide the preference label, learning rate 10 −6, and a single epoch per iteration. Generation uses temperature 0.7 / top-p 0.9 with 
+
+K=8 completions per prompt for INPO/XPO and K=2, nz = 4 for ENPO single-pair, where nz is the number of comparator samples from the current policies. We evaluate every iter-3 endpoint on four chat-quality judges (AlpacaEval-2 length-controlled win-rate under gpt-4o-mini and gpt-4-turbo ; MT-Bench mean score under 
+
+gpt-4o-mini ; Arena-Hard win-rate vs. gpt-4-0314 under gpt-4o-mini , Bradley–Terry bootstrapped over 
+
+500 prompts). Subscripts 1/2, 1/4, 1/8 denote 1/(2 η), 1/(4 η), 1/(8 η) relative to the default 1/η = 7 .5 · 10 −3.The experiments are conducted on a node with 8 × H100 GPUs. 
+
+Discussion. Two conclusions emerge consistently across the four judges in Table 1. First, the ENPO sweep dominates the chat-quality ranking: ENPO 1/4 and ENPO 1/8 are top-2 on every chat-judge column (AE2-mini, AE2-turbo, MT, AH), and ENPO 1/4 achieves 60 .0 AE2-mini – a +5 .0 LC gain over the strongest INPO point INPO 1/2 at 55 .06 . Second, INPO collapses at the most aggressive OMD step ( 1/η = 0 .9375 · 10 −3): AE2-mini falls to 32 .13 , MT-Bench to 5.61 , Arena-Hard to 22 .4 (below the untrained base at 36 .4)—all independent judges agreeing the INPO policy is worse than the base model. At the same η, (D)ENPO holds rank-1 on AH with AE2-mini 57 .63 . This shows an intuitive observation: (D)ENPO is more stable in the larger-stepsize regime than plain INPO .We also include a table for self-play winning rates comparison judged by PairRM + LLM Blender in Sec-tion C.1.1. 
+
+# 6 Conclusion 
+
+We studied online iterative NLHF under general preference models and proposed an exploratory framework that directly optimizes preference losses without explicit preference model estimation. By combining SFT-based regularization with adversarial policy exploration, our method achieves O(√T ) regret without exponential 9dependence on the KL-regularization parameter. This rate can be further improved to O( log (T )) with access to a minimax oracle. Experiments on Llama-3-8B-Instruct across multiple benchmarks demonstrate consistent improvements over existing NLHF baselines. Our findings advance the theoretical understanding of exploration in game-theoretic alignment and show that the proposed method is implementable at LLM scale. 
+
+# Acknowledgment 
+
+We sincerely appreciate Buzz High Performance Computing ( https://www.buzzhpc.ai , info@buzzhpc.ai )for providing computational resources and support for this work. The research of Xiaopeng Li was supported by a start-up fund at the Chinese University of Hong Kong, Shenzhen. The research of Christian Kroer was supported by the Office of Naval Research awards N00014-22-1-2530 and N00014-23-1-2374, and the National Science Foundation awards IIS-2147361 and IIS-2238960. 
+
+# References 
+
+J. Achiam, S. Adler, S. Agarwal, L. Ahmad, I. Akkaya, F. L. Aleman, D. Almeida, J. Altenschmidt, S. Altman, S. Anadkat, et al. GPT-4 technical report. ArXiv Preprint: 2303.08774 , 2023. (Cited on page 1.) 
+
+S. Athey and S. Wager. Policy learning with observational data. Econometrica , 89(1):133–161, 2021. (Cited on page 20.) 
+
+Mohammad Gheshlaghi Azar, Zhaohan Daniel Guo, Bilal Piot, Remi Munos, Mark Rowland, Michal Valko, and Daniele Calandriello. A general theoretical paradigm to understand learning from human preferences. In International Conference on Artificial Intelligence and Statistics , pages 4447–4455. PMLR, 2024. (Cited on page 5.) 
+
+Y. Bai, A. Jones, K. Ndousse, A. Askell, A. Chen, N. DasSarma, D. Drain, S. Fort, D. Ganguli, T. Henighan, et al. Training a helpful and harmless assistant with reinforcement learning from human feedback. ArXiv Preprint: 2204.05862 , 2022. (Cited on page 1.) 
+
+R. A. Bradley and M. E. Terry. Rank analysis of incomplete block designs: The method of paired comparisons. 
+
+Biometrika , 39(3-4):324–345, 1952. (Cited on pages 1 and 18.) 
+
+Daniele Calandriello, Zhaohan Daniel Guo, Remi Munos, Mark Rowland, Yunhao Tang, Bernardo Avila Pires, Pierre Harvey Richemond, Charline Le Lan, Michal Valko, Tianqi Liu, et al. Human alignment of large language models through online preference optimisation. In International Conference on Machine Learning ,pages 5409–5435. PMLR, 2024. (Cited on page 25.) 
+
+S. Casper, X. Davies, C. Shi, T. K. Gilbert, J. Scheurer, J. Rando, R. Freedman, T. Korbak, D. Lindner, P. Freire, T. T. Wang, S. Marks, C-R. Ségerie, M. Carroll, A. Peng, P. J. K. Christoffersen, M. Damani, S. Slocum, U. Anwar, A. Siththaranjan, M. Nadeau, E. J. Michaud, J. Pfau, D. Krasheninnikov, X. Chen, L. Langosco, P. Hase, E. Biyik, A. D. Dragan, D. Krueger, D. Sadigh, and D. Hadfield-Menell. Open problems and fundamental limitations of reinforcement learning from human feedback. Transactions on Machine Learning Research , 2023. URL https://openreview.net/forum?id=bx24KpJ4Eb . (Cited on page 18.) 
+
+S. Cen, J. Mei, K. Goshvadi, H. Dai, T. Yang, S. Yang, D. Schuurmans, Y. Chi, and B. Dai. Value-incentivized preference optimization: A unified approach to online and offline RLHF. In ICLR , 2025. URL 
+
+https://openreview.net/forum?id=SQnitDuow6 . (Cited on page 19.) 
+
+S. Chakraborty, J. Qiu, H. Yuan, A. Koppel, D. Manocha, F. Huang, A. S. Bedi, and M. Wang. MaxMin-RLHF: Alignment with diverse human preferences. In ICML , pages 6116–6135. PMLR, 2024. (Cited on pages 1 and 2.) 
+
+J. Chen and N. Jiang. Offline reinforcement learning under value and density-ratio realizability: The power of gaps. In UAI , pages 378–388. PMLR, 2022. (Cited on page 19.) 
+
+10 P. L. Chen, X. Chen, W. Yin, and T. Lin. ComPO: Preference alignment via comparison oracles. In NeurIPS ,2026a. URL https://openreview.net/forum?id=0lNwIIHWhZ . (Cited on page 19.) 
+
+P. L. Chen, X. Li, X. Chen, and T. Lin. Reward-free alignment for conflicting objectives. ArXiv Preprint: 2602.02495 , 2026b. (Cited on page 19.) 
+
+X. Chen, H. Zhong, Z. Yang, Z. Wang, and L. Wang. Human-in-the-loop: Provably efficient preference-based reinforcement learning with general function approximation. In ICML , pages 3773–3793. PMLR, 2022. 
+
+> (Cited on page 3.)
+
+Y. Chen, Y. He, M. I. Jordan, and F. Yao. How sampling shapes LLM alignment: From one-shot optima to iterative dynamics. ArXiv Preprint: 2602.12180 , 2026c. (Cited on page 19.) 
+
+V. Chernozhukov, M. Demirer, G. Lewis, and V. Syrgkanis. Semi-parametric efficient policy learning with continuous actions. In NeurIPS , page 15039–15049, 2019. (Cited on page 20.) 
+
+P. F. Christiano, J. Leike, T. B. Brown, M. Martic, S. Legg, and D. Amodei. Deep reinforcement learning from human preferences. In NeurIPS , pages 4302–4310, 2017. (Cited on page 1.) 
+
+V. Conitzer, R. Freedman, J. Heitzig, W. H. Holliday, B. M. Jacobs, N. Lambert, M. Mosse, E. Pacuit, S. Russell, H. Schoelkopf, et al. Position: Social choice should guide AI alignment in dealing with diverse human feedback. In ICML , pages 9346–9360. PMLR, 2024. (Cited on page 18.) 
+
+T. Coste, U. Anwar, R. Kirk, and D. Krueger. Reward model ensembles help mitigate overoptimization. In 
+
+ICLR , 2024. URL https://openreview.net/forum?id=dcjtMYkpXx . (Cited on page 19.) 
+
+G. Cui, L. Yuan, N. Ding, G. Yao, B. He, W. Zhu, Y. Ni, G. Xie, R. Xie, Y. Lin, et al. UltraFeedback: Boosting language models with scaled AI feedback. In ICML , pages 9722–9744. PMLR, 2024. (Cited on page 1.) 
+
+Qiwen Cui and Simon S Du. When are offline two-player zero-sum markov games solvable? Advances in Neural Information Processing Systems , 35:25779–25791, 2022. (Cited on page 7.) 
+
+J. Dai and E. Fleisig. Mapping social choice theory to RLHF. In ICLR Workshop on Reliable and Responsible Foundation Models , 2024. URL https://openreview.net/forum?id=iYthn3WATc . (Cited on page 18.) 
+
+C. Dann, N. Jiang, A. Krishnamurthy, A. Agarwal, J. Langford, and R. E. Schapire. On oracle-efficient PAC RL with rich observations. In NeurIPS , pages 1429–1439, 2018. (Cited on page 20.) 
+
+N. Das, S. Chakraborty, A. Pacchiano, and S. R. Chowdhury. Active preference optimization for sample efficient RLHF. In ECML-KDD , pages 96–112. Springer, 2025. (Cited on page 3.) 
+
+Constantinos Daskalakis, Paul W. Goldberg, and Christos H. Papadimitriou. The complexity of computing a nash equilibrium. SIAM Journal on Computing , 39(1):195–259, 2009. (Cited on page 7.) 
+
+S. S. Du, S. Kakade, J. D. Lee, S. Lovett, G. Mahajan, W. Sun, and R. Wang. Bilinear classes: A structural framework for provable generalization in RL. In ICML , pages 2826–2836. PMLR, 2021. (Cited on page 20.) 
+
+Y. Du, A. Winnicki, G. Dalal, S. Mannor, and R. Srikant. Exploration-driven policy optimization in RLHF: Theoretical insights on efficient data utilization. In ICML , pages 11830–11887. PMLR, 2024. (Cited on page 3.) 
+
+Y. Duan, Z. Jia, and M. Wang. Minimax-optimal off-policy evaluation with linear function approximation. In ICML , pages 2701–2709. PMLR, 2020. (Cited on page 20.) 
+
+J. Duchi and H. Namkoong. Variance-based regularization with convex objectives. Journal of Machine Learning Research , 20(68):1–55, 2019. (Cited on page 20.) 
+
+V. Dwaracherla, S. M. Asghari, B. Hao, and B. Van Roy. Efficient exploration for LLMs. In ICML , pages 12215–12227. PMLR, 2024. (Cited on page 3.) 
+
+11 J. Eisenstein, C. Nagpal, A. Agarwal, A. Beirami, A. N. D’Amour, K. D. Dvijotham, A. Fisch, K. A. Heller, S. R. Pfohl, D. Ramachandran, P. Shaw, and J. Berant. Helping or herding? reward model ensembles mitigate but do not eliminate reward hacking. In COLM , 2024. URL https://openreview.net/forum?id=5u1GpUkKtG .
+
+> (Cited on page 19.)
+
+K. Ethayarajh, W. Xu, N. Muennighoff, D. Jurafsky, and D. Kiela. Model alignment as prospect theoretic optimization. In ICML , pages 12634–12651, 2024. (Cited on page 19.) 
+
+A. M. Farahmand, R. Munos, and C. Szepesvári. Error propagation for approximate policy and value iteration. In NeurIPS , pages 568–576, 2010. (Cited on page 20.) 
+
+A. Fisch, J. Eisenstein, V. Zayats, A. Agarwal, A. Beirami, C. Nagpal, P. Shaw, and J. Berant. Robust preference optimization through reward model distillation. Transactions on Machine Learning Research ,2025. ISSN 2835-8856. URL https://openreview.net/forum?id=E2zKNuwNDc . (Cited on page 19.) 
+
+D. J. Foster and A. Rakhlin. Foundations of reinforcement learning and interactive decision making. ArXiv Preprint: 2312.16730 , 2023. (Cited on page 3.) 
+
+D. J. Foster, S. M. Kakade, J. Qian, and A. Rakhlin. The statistical complexity of interactive decision making. 
+
+ArXiv Preprint: 2112.13487 , 2021. (Cited on page 3.) 
+
+D. J. Foster, N. Golowich, and Y. Han. Tight guarantees for interactive decision making with the decision-estimation coefficient. In COLT , pages 3969–4043. PMLR, 2023. (Cited on page 20.) 
+
+David A Freedman. On tail probabilities for martingales. the Annals of Probability , pages 100–118, 1975. 
+
+> (Cited on page 47.)
+
+G. Gabbianelli, G. Neu, and M. Papini. Importance-weighted offline learning done right. In ALT , pages 614–634. PMLR, 2024. (Cited on page 20.) 
+
+Z. Gao, J. D. Chang, W. Zhan, O. Oertell, G. Swamy, K. Brantley, T. Joachims, J. A. Bagnell, J. D. Lee, and W. Sun. REBEL: Reinforcement learning via regressing relative rewards. In NeurIPS , pages 52354–52400, 2024. (Cited on page 3.) 
+
+N. Golowich, A. Moitra, and D. Rohatgi. Exploration is harder than prediction: Cryptographically separating reinforcement learning from supervised learning. In FOCS , pages 1953–1967. IEEE, 2024. (Cited on page 20.) 
+
+S. Guo, B. Zhang, T. Liu, T. Liu, M. Khalman, F. Llinares, A. Rame, T. Mesnard, Y. Zhao, B. Piot, et al. Direct language model alignment from online AI feedback. ArXiv Preprint: 2402.04792 , 2024. (Cited on pages 3 and 4.) 
+
+A. Huang, W. Zhan, T. Xie, J. D. Lee, W. Sun, A. Krishnamurthy, and D. J. Foster. Correcting the mythos of KL-regularization: Direct alignment without overoptimization via Chi-squared preference optimization. In ICLR , 2025. URL https://openreview.net/forum?id=hXm0Wu2U9K . (Cited on pages 6, 7, 8, and 19.) 
+
+Biwei Huang, Jiechao Mei, Qiaomin Xie, and Zhaoran Wang. Model-based reinforcement learning for mean-field games is not statistically harder than single-agent rl. Proceedings of the 41st International Conference on Machine Learning (ICML) , 2024. (Cited on page 7.) 
+
+Dongfu Jiang, Xiang Ren, and Bill Yuchen Lin. LLM-Blender: Ensembling large language models with pairwise ranking and generative fusion. In Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics (ACL 2023) , 2023. URL https://arxiv.org/abs/2306.02561 . (Cited on page 48.) 
+
+N. Jiang, A. Krishnamurthy, A. Agarwal, J. Langford, and R. E. Schapire. Contextual decision processes with low Bellman rank are PAC-learnable. In ICML , pages 1704–1713. PMLR, 2017. (Cited on pages 2 and 3.) 
+
+C. Jin, Q. Liu, and S. Miryoosefi. Bellman eluder dimension: New rich classes of RL problems, and sample-efficient algorithms. In NeurIPS , pages 13406–13418, 2021a. (Cited on page 3.) 
+
+12 Y. Jin, Z. Yang, and Z. Wang. Is pessimism provably efficient for offline RL? In ICML , pages 5084–5096. PMLR, 2021b. (Cited on page 19.) 
+
+N. Kallus and M. Uehara. Double reinforcement learning for efficient off-policy evaluation in Markov decision processes. Journal of Machine Learning Research , 21(167):1–63, 2020. (Cited on page 20.) 
+
+D. Kane, S. Liu, S. Lovett, and G. Mahajan. Computational-statistical gap in reinforcement learning. In 
+
+COLT , pages 1282–1302. PMLR, 2022. (Cited on page 20.) 
+
+T. Kozuno, W. Yang, N. Vieillard, T. Kitamura, Y. Tang, J. Mei, P. Ménard, M. G. Azar, M. Valko, R. Munos, et al. KL-entropy-regularized RL with a generative model is minimax optimal. ArXiv Preprint: 2205.14211 ,2022. (Cited on page 20.) 
+
+J. Lee, M. Hong, K-S. Jun, C. Yun, and S-Y. Yun. Regularized online RLHF with generalized bilinear preferences. ArXiv Preprint: 2602.23116 , 2026. (Cited on pages 1, 2, 8, and 44.) 
+
+Z. Li, Z. Yang, and M. Wang. Reinforcement learning with human feedback: Learning dynamic choices via pessimism. In ICML Workshop Interactive Learning with Implicit Human Feedback , 2023. URL 
+
+https://openreview.net/forum?id=gxM2AUFMsK . (Cited on page 19.) 
+
+K. Liu, Q. Long, Z. Shi, W. J. Su, and J. Xiao. Statistical impossibility and possibility of aligning LLMs with human preferences: From Condorcet paradox to Nash equilibrium. ArXiv Preprint: 2503.10990 , 2025. 
+
+> (Cited on page 18.)
+
+T. Liu, Y. Zhao, R. Joshi, M. Khalman, M. Saleh, P. J. Liu, and J. Liu. Statistical rejection sampling improves preference optimization. In ICLR , 2024a. URL https://openreview.net/forum?id=xbjSwwrQOe . (Cited on page 19.) 
+
+Y. Liu, A. Swaminathan, A. Agarwal, and E. Brunskill. Provably good batch reinforcement learning without great exploration. In NeurIPS , pages 1264–1274, 2020. (Cited on page 19.) 
+
+Z. Liu, M. Lu, S. Zhang, B. Liu, H. Guo, Y. Yang, J. Blanchet, and Z. Wang. Provably mitigating overoptimization in RLHF: Your SFT loss is implicitly an adversarial regularizer. In NeurIPS , pages 138663–138697, 2024b. (Cited on page 19.) 
+
+Robert Loftin, Aadirupa Saha, Sam Devlin, and Katja Hofmann. Strategically efficient exploration in competitive multi-agent reinforcement learning. In Proceedings of the 38th International Conference on Machine Learning (ICML) , 2021. (Cited on page 7.) 
+
+R. D. Luce. Individual Choice Behavior: A Theoretical Analysis . Courier Corporation, 2005. (Cited on page 18.) 
+
+R-R. Maura-Rivero, M. Lanctot, F. Visin, and K. Larson. Jackpot! alignment as a maximal lottery. ArXiv Preprint: 2501.19266 , 2025. (Cited on page 18.) 
+
+Y. Meng, M. Xia, and D. Chen. SimPO: Simple preference optimization with a reference-free reward. In 
+
+NeurIPS , pages 124198–124235, 2024. (Cited on page 19.) 
+
+A. Mishra. AI alignment and social choice: Fundamental limitations and policy implications. ArXiv Preprint: 2310.16048 , 2023. (Cited on page 18.) 
+
+R. Munos, M. Valko, D. Calandriello, M. G. Azar, M. Rowland, D. Guo, Y. Tang, M. Geist, T. Mesnard, C. Fiegel, et al. Nash learning from human feedback. In ICML , pages 36743–36768. PMLR, 2024. (Cited on pages 1, 2, 3, and 19.) 
+
+Anupam Nayak, Tong Yang, Osman Yagan, Gauri Joshi, and Yuejie Chi. Achieving logarithmic regret in kl-regularized zero-sum markov games. arXiv preprint arXiv:2510.13060 , 2025. (Cited on page 8.) 
+
+G. Neu, A. Jonsson, and V. Gómez. A unified view of entropy-regularized Markov decision processes. ArXiv Preprint: 1705.07798 , 2017. (Cited on page 20.) 
+
+13 E. Novoseller, Y. Wei, Y. Sui, Y. Yue, and J. Burdick. Dueling posterior sampling for preference-based reinforcement learning. In UAI , pages 1029–1038. PMLR, 2020. (Cited on pages 3 and 19.) 
+
+L. Ouyang, J. Wu, X. Jiang, D. Almeida, C. L. Wainwright, P. Mishkin, C. Zhang, S. Agarwal, K. Slama, A. Ray, et al. Training language models to follow instructions with human feedback. In NeurIPS , pages 27730–27744, 2022. (Cited on page 1.) 
+
+A. Pal, D. Karkhanis, S. Dooley, M. Roberts, S. Naidu, and C. White. Smaug: Fixing failure modes of preference optimisation with DPO-positive. ArXiv Preprint: 2402.13228 , 2024. (Cited on page 19.) 
+
+R. Park, R. Rafailov, S. Ermon, and C. Finn. Disentangling length from quality in direct preference optimization. In ACL , pages 4998–5017, 2024. (Cited on page 19.) 
+
+R. Rafailov, A. Sharma, E. Mitchell, S. Ermon, C. D. Manning, and C. Finn. Direct preference optimization: Your language model is secretly a reward model. In NeurIPS , pages 53728–53741, 2023. (Cited on pages 4 and 19.) 
+
+R. Rafailov, J. Hejna, R. Park, and C. Finn. From $r$ to $q^*$: Your language model is secretly a $q$-function. In COLM , 2024. URL https://openreview.net/forum?id=kEVcNxtqXk . (Cited on page 2.) 
+
+P. Rashidinejad, B. Zhu, C. Ma, J. Jiao, and S. Russell. Bridging offline reinforcement learning and imitation learning: A tale of pessimism. In NeurIPS , pages 11702–11716, 2021. (Cited on page 19.) 
+
+M. Rita, F. Strub, R. Chaabouni, P. Michel, E. Dupoux, and O. Pietquin. Countering reward over-optimization in LLM with demonstration-guided reinforcement learning. In Findings of ACL , pages 12447–12472, 2024. 
+
+> (Cited on page 19.)
+
+C. Rosset, C-A. Cheng, A. Mitra, M. Santacroce, A. Awadallah, and T. Xie. Direct Nash optimization: Teaching language models to self-improve with general preferences. ArXiv Preprint: 2404.03715 , 2024. 
+
+> (Cited on pages 1 and 19.)
+
+D. Russo and B. V. Roy. Eluder dimension and the sample complexity of optimistic exploration. In NeurIPS ,pages 2256–2264, 2013. (Cited on pages 20, 43, and 46.) 
+
+A. Saha, A. Pacchiano, and J. Lee. Dueling RL: Reinforcement learning with trajectory preferences. In 
+
+AISTATS , pages 6263–6289. PMLR, 2023. (Cited on pages 3 and 19.) 
+
+R. Shi, R. Zhou, and S. S. Du. The crucial role of samplers in online direct preference optimization. In ICLR ,2025a. URL https://openreview.net/forum?id=F6z3utfcYw . (Cited on page 19.) 
+
+Z. Shi, K. Liu, Q. Long, W. J. Su, and J. Xiao. Fundamental limits of game-theoretic LLM alignment: Smith consistency and preference matching. ArXiv Preprint: 2505.20627 , 2025b. (Cited on pages 18 and 19.) 
+
+Samuel Sokota, Ryan D’Orazio, J Zico Kolter, Nicolas Loizou, Marc Lanctot, Ioannis Mitliagkas, Noam Brown, and Christian Kroer. A unified approach to reinforcement learning, quantal response equilibria, and two-player zero-sum games. In The Eleventh International Conference on Learning Representations ,2023. (Cited on page 5.) 
+
+Y. Song, G. Swamy, A. Singh, J. Bagnell, and W. Sun. The importance of online data: Understanding preference fine-tuning via coverage. In NeurIPS , pages 12243–12270, 2024. (Cited on page 19.) 
+
+N. Stiennon, L. Ouyang, J. Wu, D. Ziegler, R. Lowe, C. Voss, A. Radford, D. Amodei, and P. F. Christiano. Learning to summarize with human feedback. In NeurIPS , pages 3008–3021, 2020. (Cited on page 1.) 
+
+W. Sun, N. Jiang, A. Krishnamurthy, A. Agarwal, and J. Langford. Model-based RL in contextual decision processes: PAC bounds and exponential improvements over model-free approaches. In COLT , pages 2898–2933. PMLR, 2019. (Cited on page 20.) 
+
+G. Swamy, C. Dann, R. Kidambi, S. Wu, and A. Agarwal. A minimaximalist approach to reinforcement learning from human feedback. In ICML , pages 47345–47377. PMLR, 2024. (Cited on pages 1, 2, and 19.) 
+
+14 Y. Tang, Z. Guo, Z. Zheng, D. Calandriello, R. Munos, M. Rowland, P. H. Richemond, M. Valko, B. Pires, and B. Piot. Generalized preference optimization: A unified approach to offline alignment. In ICML , pages 47725–47742, 2024. (Cited on page 19.) 
+
+D. Tiapkin, D. Belomestny, D. Calandriello, E. Moulines, R. Munos, A. Naumov, P. Perrault, Y. Tang, M. Valko, and P. Menard. Fast rates for maximum entropy exploration. In ICML , pages 34161–34221. PMLR, 2023. (Cited on page 20.) 
+
+D. Tiapkin, D. Belomestny, D. Calandriello, E. Moulines, A. Naumov, P. Perrault, M. Valko, and P. Menard. Demonstration-regularized RL. In ICLR , 2024. URL https://openreview.net/forum?id=lF2aip4Scn .
+
+> (Cited on page 20.)
+
+D. Tiapkin, D. Calandriello, D. Belomestny, E. Moulines, A. Naumov, K. Rasul, M. Valko, and P. Menard. Accelerating Nash learning from human feedback via mirror prox. ArXiv Preprint: 2505.19731 , 2025. (Cited on page 1.) 
+
+H. Touvron, T. Lavril, G. Izacard, X. Martinet, M-A. Lachaux, T. Lacroix, B. Rozière, N. Goyal, E. Hambro, F. Azhar, et al. Llama: Open and efficient foundation language models. ArXiv Preprint: 2302.13971 , 2023. 
+
+> (Cited on page 1.)
+
+M. Uehara and W. Sun. Pessimistic model-based offline reinforcement learning under partial coverage. In 
+
+ICLR , 2022. URL https://openreview.net/forum?id=tyrJsbKAe6 . (Cited on page 19.) 
+
+A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez, Ł. Kaiser, and I. Polosukhin. Attention is all you need. In NeurIPS , pages 6000–6010, 2017. (Cited on page 3.) 
+
+C. Wang, Y. Jiang, C. Yang, H. Liu, and Y. Chen. Beyond reverse KL: Generalizing direct preference optimization with diverse divergence constraints. In ICLR , 2024a. URL https://openreview.net/forum? id=2cRzmWXK9N . (Cited on page 19.) 
+
+L. Wang, A. Krishnamurthy, and A. Slivkins. Oracle-efficient pessimism: Offline policy optimization in contextual bandits. In AISTATS , pages 766–774. PMLR, 2024b. (Cited on page 20.) 
+
+M. Wang, C. Ma, Q. Chen, L. Meng, Y. Han, J. Xiao, Z. Zhang, J. Huo, W. J. Su, and Y. Yang. Magnetic preference optimization: Achieving last-iterate convergence for language model alignment. In ICLR , 2025. URL https://openreview.net/forum?id=PDnEDS244P . (Cited on page 1.) 
+
+R. Wang, R. Salakhutdinov, and L. F. Yang. Reinforcement learning with general value function approximation: Provably efficient approach via bounded eluder dimension. In NeurIPS , pages 6123–6135, 2020. (Cited on page 20.) 
+
+Y. Wang, Q. Liu, and C. Jin. Is RLHF more difficult than standard RL? a theoretical perspective. In 
+
+NeurIPS , pages 76006–76032, 2023. (Cited on page 3.) 
+
+D. Wu, C. Shi, J. Yang, and C. Shen. Greedy sampling is provably efficient for RLHF. In NeurIPS , 2025a. URL https://openreview.net/forum?id=jQH0gdwsuT . (Cited on pages 1, 2, and 8.) 
+
+F. Wu, X. Huang, W. Xuan, Z. Zhang, Y. Xiao, G. Wan, X. Li, B. Hu, P. Xia, J. Leskovec, and Y. Choi. Multiplayer Nash preference optimization. In ICLR , 2026. URL https://openreview.net/forum?id= x7aLhLMVn1 . (Cited on pages 1 and 2.) 
+
+R. Wu and W. Sun. Making RL with preference-based feedback efficient via randomization. In ICLR , 2024. URL https://openreview.net/forum?id=Pe2lo3QOvo . (Cited on page 3.) 
+
+Y. Wu, Z. Sun, H. Yuan, K. Ji, Y. Yang, and Q. Gu. Self-play preference optimization for language model alignment. In ICLR , 2025b. URL https://openreview.net/forum?id=a3PmRgAB5T . (Cited on pages 1 and 2.) 
+
+15 J. Xiao, Z. Li, X. Xie, E. Getzen, C. Fang, Q. Long, and W. J. Su. On the algorithmic bias of aligning large language models with RLHF: Preference collapse and matching regularization. Journal of the American Statistical Association , 120(552):2154–2164, 2025. (Cited on pages 18 and 19.) 
+
+T. Xie and N. Jiang. q⋆ approximation schemes for batch reinforcement learning: A theoretical comparison. In UAI , pages 550–559. PMLR, 2020. (Cited on pages 7, 8, and 20.) 
+
+T. Xie, C-A. Cheng, N. Jiang, P. Mineiro, and A. Agarwal. Bellman-consistent pessimism for offine reinforcement learning. In NeurIPS , pages 6683–6694, 2021. (Cited on page 19.) 
+
+T. Xie, D. J. Foster, Y. Bai, N. Jiang, and S. M. Kakade. The role of coverage in online reinforcement learning. In ICLR , 2023. URL https://openreview.net/forum?id=LQIjzPdDt3q . (Cited on page 20.) 
+
+T. Xie, D. J. Foster, A. Krishnamurthy, C. Rosset, A. H. Awadallah, and A. Rakhlin. Exploratory preference optimization: Harnessing implicit $q^*$-approximation for sample-efficient RLHF. In ICLR , 2025. URL 
+
+https://openreview.net/forum?id=QYigQ6gXNw . (Cited on pages 2, 3, 4, 8, 9, 19, 23, and 30.) 
+
+W. Xiong, H. Dong, C. Ye, Z. Wang, H. Zhong, H. Ji, N. Jiang, and T. Zhang. Iterative preference learning from human feedback: Bridging theory and practice for RLHF under KL-constraint. In ICML , pages 54715–54754, 2024. (Cited on page 19.) 
+
+H. Xu, A. Sharaf, Y. Chen, W. Tan, L. Shen, B. Van Durme, K. Murray, and Y. J. Kim. Contrastive preference optimization: Pushing the boundaries of LLM performance in machine translation. In ICML ,pages 55204–55224, 2024. (Cited on page 19.) 
+
+Y. Xu, R. Wang, L. F. Yang, A. Singh, and A. Dubrawski. Preference-based reinforcement learning with finite-time guarantees. In NeurIPS , pages 18784–18794, 2020. (Cited on pages 3 and 19.) 
+
+C. Ye, W. Xiong, Y. Zhang, H. Dong, N. Jiang, and T. Zhang. Online iterative reinforcement learning from human feedback with general preference model. In NeurIPS , pages 81773–81807, 2024. (Cited on pages 1, 2, 3, 9, and 19.) 
+
+A. Zanette, M. J. Wainwright, and E. Brunskill. Provable benefits of actor-critic methods for offline reinforcement learning. In NeurIPS , pages 13626–13640, 2021. (Cited on page 20.) 
+
+W. Zhan, B. Huang, A. Huang, N. Jiang, and J. D. Lee. Offline reinforcement learning with realizability and single-policy concentrability. In COLT , pages 2730–2775. PMLR, 2022. (Cited on page 19.) 
+
+W. Zhan, M. Uehara, W. Sun, and J. D. Lee. Provable reward-agnostic preference-based reinforcement learning. In ICLR , 2024. URL https://openreview.net/forum?id=yTBXeXdbMf . (Cited on pages 3 and 19.) 
+
+Kaiqing Zhang, Sham M. Kakade, Tamer Başar, and Lin F. Yang. Model-based multi-agent rl in zero-sum markov games with near-optimal sample complexity. arXiv preprint arXiv:2007.07461 , 2020. (Cited on page 7.) 
+
+X. Zhang, J-F. Ton, W. Shen, H. Wang, and Y. Liu. Overcoming reward overoptimization via adversarial policy optimization with lightweight uncertainty estimation. ArXiv Preprint: 2403.05171 , 2024. (Cited on page 19.) 
+
+Y. Zhang, D. Yu, T. Ge, L. Song, Z. Zeng, H. Mi, N. Jiang, and D. Yu. Improving LLM general preference alignment via optimistic online mirror descent. In NeurIPS , 2025a. URL https://openreview.net/ forum?id=kZstGANG8D . (Cited on page 1.) 
+
+Y. Zhang, D. Yu, B. Peng, L. Song, Y. Tian, M. Huo, N. Jiang, H. Mi, and D. Yu. Iterative Nash policy optimization: Aligning LLMs with general preferences via no-regret learning. In ICLR , 2025b. URL 
+
+https://openreview.net/forum?id=Pujt3ADZgI . (Cited on pages 1, 2, 3, 5, 9, and 23.) 
+
+Heyang Zhao, Chenlu Ye, Wei Xiong, Quanquan Gu, and Tong Zhang. Logarithmic regret for online kl-regularized reinforcement learning. arXiv preprint arXiv:2502.07460 , 2025. (Cited on page 8.) 
+
+16 Y. Zhao, R. Joshi, T. Liu, M. Khalman, M. Saleh, and P. J. Liu. SLiC-HF: Sequence likelihood calibration with human feedback. ArXiv Preprint: 2305.10425 , 2023. (Cited on page 19.) 
+
+Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin, Zhuohan Li, Dacheng Li, Eric P. Xing, Hao Zhang, Joseph E. Gonzalez, and Ion Stoica. Judging LLM-as-a-Judge with MT-Bench and chatbot arena. In Advances in Neural Information Processing Systems 36 (NeurIPS 2023) Track on Datasets and Benchmarks , 2023. URL https://arxiv.org/abs/2306.05685 .
+
+> (Cited on page 48.)
+
+R. Zhou, M. Fazel, and S. S. Du. Extragradient preference optimization (EGPO): Beyond last-iterate convergence for Nash learning from human feedback. In COLM , 2025. URL https://openreview.net/ forum?id=EP7mAqx2BO . (Cited on page 1.) 
+
+B. Zhu, M. I. Jordan, and J. Jiao. Principled reinforcement learning with human feedback from pairwise or k-wise comparisons. In ICML , pages 43037–43067, 2023. (Cited on page 19.) 
+
+B. D. Ziebart. Modeling purposeful adaptive behavior with the principle of maximum causal entropy . Carnegie Mellon University, 2010. (Cited on page 20.) 
+
+B. D. Ziebart, A. L. Maas, J. A. Bagnell, A. K. Dey, et al. Maximum entropy inverse reinforcement learning. In AAAI , pages 1433–1438, 2008. (Cited on page 20.) 
+
+D. M. Ziegler, N. Stiennon, J. Wu, T. B. Brown, A. Radford, D. Amodei, P. Christiano, and G. Irving. Fine-tuning language models from human preferences. ArXiv Preprint: 1909.08593 , 2019. (Cited on page 1.) 
+
+17 Contents 
+
+1 Introduction 12 Preliminaries and technical background 3
+
+2.1 Game-theoretic preference alignment . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32.2 Online exploration . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 4
+
+3 Exploratory Nash preference optimization 44 Sample efficiency in Nash preference optimization 6
+
+4.1 Deliberate exploration is necessary . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 74.2 Sample efficiency guarantee of ENPO . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 74.3 Logarithmic regret bound with minimax oracles . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+
+5 Experiments 96 Conclusion 9A Further Related Works 18 B Theoretical analysis of efficient sample complexity guarantees 20 
+
+B.1 Problem setup . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20 B.2 Proofs of the necessity of efficient explorations . . . . . . . . . . . . . . . . . . . . . . . . . . 23 B.2.1 Iterative Nash preference optimization is not sufficient for efficient exploration . . . . 23 B.3 Proofs of efficient exploration guarantee for ENPO . . . . . . . . . . . . . . . . . . . . . . . . 26 B.3.1 Algorithm . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 B.3.2 Additional notations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 B.3.3 Proof of Theorem 4.3 . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27 B.3.4 Auxiliary Propositions and Lemmas for Theorem B.10 . . . . . . . . . . . . . . . . . . 30 B.4 Proofs of improved sample efficiency of BENPO . . . . . . . . . . . . . . . . . . . . . . . . . . . 43 B.4.1 Algorithm . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 43 B.4.2 Assumptions and additional notations . . . . . . . . . . . . . . . . . . . . . . . . . . . 43 B.4.3 Main proof of sample efficiency . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 44 B.4.4 Technical lemmas . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 46 
+
+C Additional details in numerical experiments 48 
+
+C.1 Additional results . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 48 C.1.1 Pair-wise winning rates . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 48 
+
+# A Further Related Works 
+
+We comment on other topics, including more discussions on game-theoretic alignment methods, theoretical and empirical preference alignment methods, and theoretical reinforcement learning (RL). For an overview of preference alignment methods, we refer to the recent survey [Casper et al., 2023]. 
+
+More discussions on game-theoretic alignment methods. Beyond algorithmic progress, game-theoretic alignment is motivated by a more structural question: what alignment properties are induced by treating pairwise human preferences as a game rather than compressing them into a scalar reward? This perspective is especially relevant when preferences are cyclic, non-transitive, or incompatible with the BT reward model, where standard RLHF might fail to satisfy social choice and diversity desiderata [Bradley and Terry, 1952, Luce, 2005, Mishra, 2023, Conitzer et al., 2024, Dai and Fleisig, 2024, Xiao et al., 2025]. Recent results have shown that the appeal of NLHF is not merely computational: with raw pairwise preference as the payoff, NLHF is Condorcet consistent, Smith consistent under a no-tie condition, and can preserve preference diversity through mixed strategies when no single response dominates all alternatives [Maura-Rivero et al., 2025, Liu et al., 2025]. However, Shi et al. [2025b] emphasize that raw preference is only one possible payoff 18 choice and study the more general game with payoff Ψ( P (y ≻ y′ | x)) , where Ψ( t) = t recovers standard NLHF and Ψ( t) = log ( t 
+
+> 1−t
+
+) connects to reward-based objectives under the BT reward model. Their analysis shows both robustness and limits: Condorcet consistency only requires preserving the majority threshold, while Smith consistency requires an anti-symmetry condition Ψ( t) + Ψ(1 − t) = 2Ψ( 12 ), implying that practical preference models must preserve pairwise anti-symmetry to guarantee support on the Smith set. At the same time, mixed strategies provide only a partial notion of diversity. In the stronger sense of preference matching, which asks the learned policy to match a target distribution reflecting human preference diversity, Shi et al. [2025b] prove an impossibility result: no smooth and learnable mapping of pairwise preferences can generally guarantee a unique Nash equilibrium equal to the target policy, even under the standard BT model [Xiao et al., 2025, Shi et al., 2025b]. These results suggest that game-theoretic alignment is well motivated by social choice consistency and robustness to non-transitive preferences, but its objective has intrinsic axiomatic limitations that are distinct from the exploration mechanism studied in this paper. 
+
+Theoretical preference alignment methods. Recent progress in theoretical preference alignment has developed along several complementary directions. Under the BT reward model, early work established finite-sample guarantees for RLHF and preference-based reinforcement learning in structured settings such as tabular MDPs, linear MDPs, linearly parameterized policies, and KL-constrained policy classes [Novoseller et al., 2020, Xu et al., 2020, Saha et al., 2023, Zhu et al., 2023, Li et al., 2023, Zhan et al., 2024, Xiong et al., 2024]. Another line connects alignment to offline reinforcement learning theory, where the central challenge is distribution shift between the reference policy and candidate aligned policies, leading to analyses based on coverage, uncertainty quantification, and regularization [Liu et al., 2020, Jin et al., 2021b, Rashidinejad et al., 2021, Xie et al., 2021, Uehara and Sun, 2022, Zhan et al., 2022, Chen and Jiang, 2022]. Recent work studies direct preference objectives themselves: DPO provides a policy-only formulation of KL-regularized preference optimization [Rafailov et al., 2023], while subsequent theory considers broader divergence choices, generalized preference losses, and additional regularization mechanisms [Wang et al., 2024a, Tang et al., 2024, Liu et al., 2024b, Cen et al., 2025, Fisch et al., 2025]. XPO and χPO are representative of this recent shift toward simple direct objectives with end-to-end guarantees under general function approximation or offline alignment assumptions [Xie et al., 2025, Huang et al., 2025]. Other works conduct a rigorous analysis through the lens of dataset coverage to differentiate offline DPO and online RLHF [Song et al., 2024] and report faster convergence rate than the information-theoretic lower bounds for online reward maximization in RL by exploiting the structure induced by KL regularization [Shi et al., 2025a]. Beyond scalar-reward preference models, another emerging theoretical direction studies general, possibly non-transitive preferences through game-theoretic solution concepts, replacing reward maximization with duality-gap guarantees [Munos et al., 2024, Swamy et al., 2024, Rosset et al., 2024, Ye et al., 2024]. 
+
+Empirical preference alignment methods. Empirical preference alignment methods have mainly focused on improving the data construction, objective design, and robustness of direct fine-tuning pipelines. Since offline preference optimization is sensitive to the source and quality of comparison pairs, several works modify the preference data itself: SLiC-HF calibrates sequence likelihoods using preference rankings, while statistical rejection sampling constructs more informative preference pairs from refined model samples rather than relying only on static SFT-generated data [Zhao et al., 2023, Liu et al., 2024a]. A second line redesigns the alignment loss to address practical failure modes. KTO replaces pairwise comparisons with prospect-theoretic desirable/undesirable feedback [Ethayarajh et al., 2024]; length-aware variants study verbosity and length-quality confounding [Park et al., 2024]; contrastive preference objectives and SimPO adjust reward parameterization, normalization, or margins to improve performance [Xu et al., 2024, Meng et al., 2024]. More recent variants broaden empirical preference alignment beyond a fixed pairwise-loss formulation, including comparison-oracle optimization [Chen et al., 2026a] and reward-free multi-objective alignment under conflicting preferences [Chen et al., 2026b]. Another empirical direction studies reward hacking and overoptimization, proposing practical stabilizers such as reward-model ensembles, uncertainty-aware or adversarial policy optimization, demonstration-guided calibration, and positive-response correction [Coste et al., 2024, Eisenstein et al., 2024, Rita et al., 2024, Pal et al., 2024, Zhang et al., 2024]. Finally, recent work on sampling dynamics shows that sampling can change ranking behavior and concentration, while iterative deployment choices can lead to entropy collapse [Chen et al., 2026c]. 
+
+Theoretical reinforcement learning (RL). The RL theory relevant to modern alignment has developed around structural complexity, coverage, regularization, and computational tractability. One line studies sample-efficient RL with rich function approximation by identifying complexity measures under which prediction error 19 can be converted into policy improvement, including eluder-dimension, contextual-decision-process, general value-function-approximation, bilinear-class, and decision-estimation-coefficient frameworks [Russo and Roy, 2013, Sun et al., 2019, Wang et al., 2020, Du et al., 2021, Xie et al., 2023, Foster et al., 2023]. These results clarify when statistically efficient learning is possible, but they also reveal a persistent computational-statistical tension: many general optimistic or version-space methods require oracle access, constrained optimization, or other procedures that are difficult to implement at scale [Dann et al., 2018, Kane et al., 2022, Golowich et al., 2024]. A second line analyzes offline and off-policy learning through coverage and concentrability, where guarantees depend on how errors under a behavior distribution transfer to comparator policies or value functions [Farahmand et al., 2010, Xie and Jiang, 2020, Zanette et al., 2021]. This viewpoint is closely related to policy learning and off-policy evaluation in statistics and econometrics, where doubly robust and semiparametric methods are used to control distribution shift under observational data [Chernozhukov et al., 2019, Kallus and Uehara, 2020, Athey and Wager, 2021]. A third line studies regularized RL objectives: maximum-entropy and KL-regularized MDPs provide soft dynamic-programming identities and policy representations [Ziebart et al., 2008, Ziebart, 2010, Neu et al., 2017], while recent finite-sample analyses establish sharper guarantees for entropy- or KL-regularized learning in tabular settings [Kozuno et al., 2022, Tiapkin et al., 2023, 2024]. Finally, χ2-based weighting and regularization have emerged as tools for uncertainty-sensitive offline policy evaluation and optimization [Duchi and Namkoong, 2019, Duan et al., 2020, Wang et al., 2024b, Gabbianelli et al., 2024]. 
+
+# B Theoretical analysis of efficient sample complexity guarantees 
+
+## B.1 Problem setup 
+
+In Section 2, we describe policies as conditional LLM policies π(y | x), where prompts x are drawn from a fixed distribution ρ and responses y belong to V⋆. We use the same convention in this section. To keep formulas short, we often suppress the prompt and write a response atom as τ ; formally, all expectations of the form 
+
+Eτ ∼π,τ ′∼π′ [f (τ, τ ′)] ≡ Ex∼ρ, y∼π(·| x), y′∼π′(·| x)[f (y, y′; x)] ,
+
+where f can be a general function of two response atoms τ := ( x, y) and τ ′ := ( x, y′). This notion implies that the two responses are always compared under the same prompt. Similarly, 
+
+P ⋆(π ≻ π′) := Ex∼ρ, y∼π(·| x), y′∼π′(·| x)[P ⋆(y ≻ y′ | x)] .
+
+The KL divergence is the prompt-averaged conditional KL, KL (π∥π′) := Ex∼ρ[KL (π(· | x)∥π′(· | x))] .
+
+When the prompt is suppressed, Y denotes the finite response support at a fixed prompt; equivalently, all statements below hold pointwise in x and are then integrated over x ∼ ρ.Let Π be a finite class of conditional policies. Recall that Jβ is defined in Section 2 as 
+
+Jβ (π1, π 2) = P ⋆(π1 ≻ π2) − βKL (π1∥πref ) + βKL (π2∥πref )=Ex∼ρ
+
+Ey1∼π1(·| x),y2∼π2(·| x)[P ⋆(y1 ≻ y2|x)] 
+
+− Ex∼ρ [βKL (π1(· | x)∥πref (· | x)) + βKL (π2(· | x)∥πref (· | x))] .
+
+The regularized regret is defined as 
+
+Reg T := max 
+
+> π∈Π
+> T
+
+X
+
+> t=1
+
+
+
+Jβ (π, π t−1) − 12
+
+
+
+= max 
+
+> π∈Π
+> T
+
+X
+
+> t=1
+
+
+
+P ⋆(π ≻ πt−1) − 12 − β(KL (π∥πref ) − KL (πt−1∥πref )) 
+
+
+
+.
+
+(10) Notice that the regularized regret above is connected to the duality gap defined in Section 2. 20 Proposition B.1 For any ˆπ ∈ Π, the duality gap satisfies 
+
+12 gap(ˆ π) = max  
+
+> π∈Π
+
+Jβ (π, ˆπ) − 12 = 12 − min  
+
+> π∈Π
+
+Jβ (ˆ π, π ). (11) 
+
+Let π0, . . . , π t−1 be a sequence of policies in Π. Then, Reg T ≤ 12
+
+PTt=1 gap (πt−1), and 12 gap ( 1
+
+> T
+
+PTt=1 πt−1) ≤ 
+
+> 1
+> T
+
+Reg T .Proof of Proposition B.1. For any ˆπ ∈ Π, we have gap (ˆ π) = max  
+
+> π∈Π
+
+Jβ (π, ˆπ) − min  
+
+> π∈Π
+
+Jβ (ˆ π, π )=
+
+
+
+max  
+
+> π∈Π
+
+Jβ (π, ˆπ) − 12
+
+
+
+−
+
+
+
+min  
+
+> π∈Π
+
+Jβ (ˆ π, π ) − 12
+
+
+
+=
+
+
+
+max  
+
+> π∈Π
+
+Jβ (π, ˆπ) − 12
+
+
+
++
+
+
+
+max  
+
+> π∈Π
+
+−Jβ (ˆ π, π ) + 12
+
+
+
+=
+
+
+
+max  
+
+> π∈Π
+
+Jβ (π, ˆπ) − 12
+
+
+
++
+
+
+
+max  
+
+> π∈Π
+
+Jβ (π, ˆπ) − 1 + 12
+
+
+
+=2 
+
+
+
+max  
+
+> π∈Π
+
+Jβ (π, ˆπ) − 12
+
+
+
+.
+
+This proves Eq. (11). Then, we have 
+
+Reg T = max 
+
+> π∈Π
+> T
+
+X
+
+> t=1
+
+
+
+Jβ (π, π t−1) − 12
+
+
+
+≤
+
+> T
+
+X
+
+> t=1
+
+
+
+max  
+
+> π∈Π
+
+Jβ (π, π t−1) − 12
+
+
+
+= 12
+
+> T
+
+X
+
+> t=1
+
+gap (πt−1),
+
+and 
+
+1
+
+T Reg T = max 
+
+> π∈Π
+
+1
+
+T
+
+> T
+
+X
+
+> t=1
+
+
+
+Jβ (π, π t−1) − 12
+
+
+
+≥ max  
+
+> π∈Π
+
+Jβ π, 1
+
+T
+
+> T
+
+X
+
+> t=1
+
+πt−1
+
+!
+
+− 12= 12 gap 1
+
+T
+
+> T
+
+X
+
+> t=1
+
+πt−1
+
+!
+
+.
+
+This completes the proof. □
+
+We restate the antisymmetric property of the ground true preferences as the following assumption. 
+
+Assumption B.2 (Antisymmetric preference) For every prompt x ∈ V ⋆ and every pair of responses 
+
+y, y′ ∈ V ⋆,
+
+P ⋆(y ≻ y′ | x) + P ⋆(y′ ≻ y | x) = 1 .
+
+Consequently, P ⋆(y ≻ y | x) = 12 and P ⋆(π ≻ π) = 12 for every policy π.
+
+Assumption B.3 (Finite policy class) The prompt-response support considered in the proof is finite, the policy class Π is finite. 
+
+Recall that the symmetric Nash equilibrium π⋆ is defined as 
+
+(π⋆, π ⋆) ∈ argmax 
+
+> π1
+
+argmin 
+
+> π2
+
+Jβ (π1, π 2), (12) and the unconstrained mirror descent update based on a policy π ∈ Π as 
+
+π+ 
+
+> ⋆,η
+
+[π] = argmax 
+
+> ˜π
+
+E
+
+> x∼ρ
+
+h
+
+η E
+
+> y∼˜π(·| x)
+
+h
+
+P ∗(y ≻ π|x) − β log 
+
+ π(y|x)
+
+πref (y|x)
+
+i 
+
+− KL (˜ π(·| x)∥π(·| x)) 
+
+i
+
+, (13) 21 which is the solution of a KL-proximal problem obtained from the exact game gradient. Note that in the subsequent appendix we use π+ 
+
+> ⋆,η
+
+[π] instead of πnext  
+
+> ⋆,η
+
+[π] for simplicity. This exact population mirror descent update is equivalent to the conditional policy 
+
+π+ 
+
+> ⋆,η
+
+[π]( y | x) := πref (y | x)ηβ π(y | x)1−ηβ exp( ηP ⋆(y ≻ π | x)) 
+
+P 
+
+> u∈Y
+
+πref (u | x)ηβ π(u | x)1−ηβ exp( ηP ⋆(u ≻ π | x)) , (14) for any x, y ∈ V ⋆. In the analysis of algorithms, we often use the following notation: at round t,
+
+π⋆t := π+ 
+
+> ⋆,η
+
+[πt−1].
+
+Assumption B.4 (Policy realizability) The unique Nash equilibrium π⋆ ∈ Π. Moreover, π+ 
+
+> ⋆,η
+
+[π] ∈ Π for all π ∈ Π, where the definitions of π⋆ and π+ 
+
+> ⋆,η
+
+[π] can be found in Eq. (12) and Eq. (13) .
+
+Assumption B.5 (Bounded logarithmic ratio) For every prompt x ∈ V ⋆ and every response y ∈ V ⋆,and all π, π ′ ∈ Π,
+
+log π(y | x)
+
+π′(y | x) ≤ Vβ ,
+
+where V is a constant. 
+
+We will write 
+
+B := Vβ .
+
+For any policy π ∈ Π, define 
+
+P ⋆(y ≻ π | x) := Eu∼π(·| x)[P ⋆(y ≻ u | x)] .
+
+Denote 
+
+ht(π, x, y, y′) := log π(y | x)
+
+π(y′ | x) − ηβ log πref (y | x)
+
+πref (y′ | x) − (1 − ηβ ) log πt−1(y | x)
+
+πt−1(y′ | x) .
+
+Proposition B.6 For any x, y, y′ ∈ V ⋆, and a distribution μ over V⋆ given x, let 
+
+L1 = Eˆy∼μ,I t(y)∼Bern (P ⋆(y≻ˆy|x)) ,I t(y′)∼Bern (P ⋆(y′≻ˆy|x)) 
+
+
+
+ht(π, x, y, y′) − η It(y) − It(y′)2
+
+,
+
+and 
+
+L2 =
+
+
+
+ht(π, x, y, y′) − η P ⋆(y ≻ μ | x) − P ⋆(y′ ≻ μ | x)2
+
+.
+
+Then, L1 is equivalent to L2 up to a constant. Proof. Fix x, y, y′ ∈ V ⋆ and write 
+
+h := ht(π, x, y, y′), Z := It(y) − It(y′).
+
+Conditional on ˆy ∼ μ, the indicators It(y) and It(y′) are independent Bernoullis with means P ∗(y ≻ ˆy | x)
+
+and P ∗(y′ ≻ ˆy | x), thus the tower property gives 
+
+E[Z] = Eˆy∼μ,I t(y)∼Bern (P ⋆(y≻ˆy|x)) ,I t(y′)∼Bern (P ⋆(y′≻ˆy|x)) 
+
+ It(y) − It(y′)
+
+=Eˆy∼μ
+
+EIt(y)∼Bern (P ⋆(y≻ˆy|x)) ,I t(y′)∼Bern (P ⋆(y′≻ˆy|x)) [It(y) − It(y′) | ˆy]
+
+=Eˆy∼μ
+
+P ⋆(y ≻ ˆy | x) − P ⋆(y′ ≻ ˆy | x) = P ⋆(y ≻ μ | x) − P ⋆(y′ ≻ μ | x).
+
+Applying the bias-variance identity to the square loss in ηZ ,
+
+L1 = E(h − ηZ )2 =  h − ηE[Z]2 + η2Var( Z) = L2 + η2Var( Z).
+
+By independence of It(y), I t(y′) given ˆy, the law of total variance yields 
+
+Var( Z) = Eˆy∼μ[Var( Z | ˆy)] + Var ˆy∼μ(E[Z | ˆy]) = Eˆy∼μ
+
+P ⋆(y ≻ ˆy|x) 1 − P ⋆(y ≻ ˆy|x) + P ⋆(y′ ≻ ˆy|x) 1 − P ⋆(y′ ≻ ˆy|x) 
+
++ Var ˆy∼μ
+
+ P ⋆(y ≻ ˆy | x) − P ⋆(y′ ≻ ˆy | x),
+
+which depends only on (x, y, y′, μ, P ⋆) and not on π. Hence, L1 = L2 + C for a constant C independent of π.
+
+□
+
+22 Algorithm 2: Iterative Nash Preference Optimization (INPO [Zhang et al., 2025b]) 
+
+Input: Number of rounds T , per-round sample sizes {nt}Tt=1 , reference policy πref , stepsize η > 0;Initialize π0 ← πref , D t 
+
+> pref
+
+← ∅;
+
+for t = 0 , 1, . . . , T do 
+
+Generate nt response pairs {(x, y, y′)} via x ∼ ρ, y, y′ ∼ πt;Query preference label (x, y+, y−) ∼ λP ⋆ (x, y, y′);Update datasets Dt 
+
+> pref
+
+← Dt 
+
+> pref
+
+∪ { (x, y+, y−)} ;Compute πt+1 via 
+
+πt+1 ← argmin 
+
+> π∈Π
+
+X
+
+> (x,y+,y−)∈Dt
+> pref
+
+
+
+ht(π, x, y+, y−) − η
+
+2
+
+2
+
+,
+
+where ht is defined in Eq. (15). 
+
+Output: Uniform ({πt}Tt=1 );
+
+## B.2 Proofs of the necessity of efficient explorations 
+
+B.2.1 Iterative Nash preference optimization is not sufficient for efficient exploration 
+
+Define 
+
+ht(π, x, y+, y−) := log 
+
+ π(y+|x)( πref (y−|x)) ηβ (πt(y−|x)) 1−ηβ 
+
+π(y−|x)( πref (y+|x)) ηβ (πt(y+|x)) 1−ηβ 
+
+
+
+. (15) The following counterexample is constructed similarly to that of Xie et al. [2025]. However, our counterex-ample must satisfy much stricter assumptions, especially mirror descent realizability, and is therefore harder to find. Note that we define π+ 
+
+> ⋆,η
+
+[π] as in Eq. (14). 
+
+Assumption B.7 (Relaxed policy realizability) The unique symmetric Nash policy satisfies π⋆ ∈ Π.Moreover, for the stepsize η used in the algorithm, there exists εη ≥ 0 such that π+ 
+
+> ⋆,η
+
+[π] ∈ Π for every π ∈ Π
+
+satisfying KL (π⋆∥π) > ε η .
+
+Assumption B.7 weakens Assumption B.4 by requiring mirror-target realizability only away from the Nash policy. If the current policy is already inside the εη -neighborhood of π⋆, then the policy is already a small-gap candidate, and exact realizability of its next mirror target is no longer needed for a best-iterate guarantee. 
+
+Lemma B.8 Suppose Assumptions B.2, B.3 and B.7 hold. If q ∈ Π satisfies KL (π⋆∥q) ≤ ε, then 
+
+gap( q) ≤ √2(1 + 4 V )√ε. 
+
+Proof. By Proposition B.1, 12 gap( q) = max  
+
+> π∈Π
+
+Jβ (π, q ) − 12 .
+
+Fix any π ∈ Π. Since π⋆ is the symmetric Nash policy, Jβ (π, π ⋆) ≤ 12 . Hence 
+
+Jβ (π, q ) − 12 ≤ Jβ (π, q ) − Jβ (π, π ⋆).
+
+Let px := π⋆(· | x) and qx := q(· | x). The preference part satisfies 
+
+|P ⋆(π ≻ q) − P ⋆(π ≻ π⋆)| ≤ Ex∼ρ[TV( qx, p x)] ≤
+
+q
+
+Ex∼ρTV( qx, p x)2
+
+≤
+
+r 12 KL (π⋆∥q) ≤
+
+r ε
+
+2 ,
+
+where we used Cauchy–Schwarz and Pinsker’s inequality. 23 It remains to control the KL-regularization difference. For each prompt x,KL (qx∥πref (· | x)) − KL (px∥πref (· | x)) = KL (qx∥px) + 
+
+
+
+qx − px, log px
+
+πref (· | x)
+
+
+
+.
+
+By Assumption B.5, 
+
+log px
+
+πref (· | x) ∞
+
+≤ Vβ , log qx
+
+px ∞
+
+≤ Vβ .
+
+Moreover, KL (qx∥px) ≤ KL (qx∥px) + KL (px∥qx) = 
+
+
+
+qx − px, log qx
+
+px
+
+
+
+≤ Vβ ∥qx − px∥1.
+
+Therefore KL (qx∥πref (· | x)) − KL (px∥πref (· | x)) ≤ 2Vβ ∥qx − px∥1.
+
+Averaging over x ∼ ρ and applying Pinsker again, 
+
+β(KL (q∥πref ) − KL (π⋆∥πref )) ≤ 2V Ex∥qx − px∥1 ≤ 2√2V √ε. 
+
+Combining the preference and KL parts gives, uniformly over π ∈ Π,
+
+Jβ (π, q ) − 12 ≤ 1
+
+√2
+
+√ε + 2 √2V √ε = 1 + 4 V
+
+√2
+
+√ε. 
+
+Taking the maximum over π ∈ Π and using Proposition B.1 proves 
+
+gap( q) ≤ √2(1 + 4 V )√ε. 
+
+□
+
+Proof of Proposition 4.2. Consider the following bandit instance with general preferences, i.e., a single fixed prompt x and three responses Y = {a, b, c } with 
+
+P ⋆(a ≻ b) = 1 , P ⋆(b ≻ c) = 1 , P ⋆(a ≻ c) = 12 .
+
+Let β ≤ 116 log(2) . Let the reference policy be πref (a) = ϵ, π ref (b) = 1 − 2ϵ and πref (c) = ϵ, where 
+
+ϵ := e− 14β ≤ 116 .Consider a policy class 
+
+Π = 
+
+n
+
+πref , (πref )1 
+
+> ⋆,η
+
+, . . . , (πref )⌈(1 /β 2) log (8 /ϵ )⌉ 
+
+> ⋆,η
+
+, π ⋆o
+
+,
+
+where (πref )t⋆,η is defined inductively by (πref )t⋆,η = π+ 
+
+> ⋆,η
+
+[( πref )t−1 
+
+> ⋆,η
+
+] for all t ≥ 1, and π⋆ is Nash equilibrium of the game max π1∈∆( Y) min π2∈∆( Y) Jβ (π1, π 2).We first show that Assumptions B.5 and B.7 holds with Π. Assumption B.7 is satisfied by the construction of Π and the contraction of KL divergence between the mirror descent iterates and π⋆. In particular, we use the contraction guarantees to show that (πref )⌈(1 /β 2) log (8 /ϵ )⌉ 
+
+> ⋆,η
+
+has to satisfy KL (π⋆∥(πref )⌈(1 /β 2) log (8 /ϵ )⌉ 
+
+> ⋆,η
+
+) ≤ ε.To verify Assumption B.5, we prove the following fact: if π ∈ ∆( Y) satisfies min τ ∈Y π(τ ) ≥ ϵ5, then 
+
+π+ 
+
+> ⋆
+
+[π]( τ ) ≥ ϵ5 for all τ ∈ Y . For any τ ∈ Y , π+ 
+
+> ⋆
+
+[π] has a closed-form solution as shown in Eq. (14). Denote 
+
+Z := X 
+
+> τ∈Y
+
+(πref (τ )) ηβ (π(τ )) 1−ηβ eηP ⋆(τ ≻π).
+
+Then, we can upper bound Z by 
+
+Z ≤ eη X 
+
+> τ∈Y
+
+(πref (τ )) ηβ (π(τ )) 1−ηβ ≤ eη  X  
+
+> τ∈Y
+
+πref (τ )
+
+ηβ  X  
+
+> τ∈Y
+
+π(τ )
+
+1−ηβ 
+
+= eη ,
+
+24 where the first inequality is because P ⋆(τ ≻ π) ≤ 1 for all τ ∈ Y and π ∈ ∆( Y), and the second inequality is by Hölder’s inequality with p = 1 
+
+> ηβ
+
+and q = 11−ηβ . Thus, 
+
+π+ 
+
+> ⋆
+
+(τ ) = 1
+
+Z (πref (τ )) ηβ (π(τ )) 1−ηβ eηP ⋆(τ ≻π) ≥ e−η ϵηβ  ϵ51−ηβ = ( ϵ−4β )−η ϵηβ ϵ5(1 −ηβ ) = ϵ5,
+
+where the first inequality is because Z ≤ eη , πref (τ ) ≥ ϵ, π (τ ) ≥ ϵ5 for all τ ∈ Y , and eηP ⋆(·≻· ) ≥ 1. Since 
+
+min τ ∈Y πref (τ ) ≥ ϵ ≥ ϵ5, we have min τ ∈Y π(τ ) ≥ ϵ5 for all π ∈ Π\{ π⋆}. It remains to show min τ ∈Y ∗ π⋆(τ ) ≥ ϵ5.Note that the Nash equilibrium can be characterized by the following equality [Calandriello et al., 2024, Eq. (12)]: 
+
+π⋆(τ ) = πref (τ ) exp ( P ⋆(τ ≻ π⋆)/β )
+
+P  
+
+> τ′∈Y
+
+πref (τ ′) exp ( P ⋆(τ ′ ≻ π⋆)/β ) . (16) Since exp ( P ⋆(τ ≻ π⋆)/β ) ≥ 1, and P  
+
+> τ′∈Y
+
+πref (τ ′) exp ( P ⋆(τ ′ ≻ π⋆)/β ) ≤ e1/β , we have 
+
+π⋆(τ ) ≥ πref (τ )e−1/β ≥ ϵe −1/β = e− 14β e− 1 
+
+> β
+
+= e− 54β = ϵ5.
+
+Thus, we have min τ ∈Y π(τ ) ≥ ϵ5 for all π ∈ Π. Clearly, we have |log ( π(y) 
+
+> π′(y)
+
+)| ≤ log (1 /ϵ 5) = 54β for all π, π ′ ∈ Π.Hence, Assumption B.5 holds for Π with V = 5 /4.We now consider applying Algorithm 2 to learn a Nash policy. For each round t, define the event 
+
+Et := {actions a, c is not sampled at the round t}. We establish the following lemma and present its proof after this proof. 
+
+Lemma B.9 For each round t, define the event Et := {actions a, c is not sampled at the round t}. Then, whenever E0, E1, . . . , Et−1 happen, we can choose the next policy πt = πref , and therefore 
+
+• P(Et | E 0, E1, . . . , Et−1) ≥ 1 − 4ntϵ, and 
+
+• the duality gap of πt is lower bounded by a constant: gap Π(πt) ≥ c, where c is the KL divergence between 
+
+πref and π⋆.
+
+The proposition then follows by: for any constant δ ∈ (0 , 1) , if 2n(T + 1) ≤ elog δ+ 14β , then 
+
+P(E0, E1, . . . , ET ) = P(E0)Π T −1 
+
+> t=0
+
+P(Et+1 | E 0, E1, . . . , Et) ≥ (1 − 2nϵ )T +1 ≥ 1 − 2n(T + 1) ϵ = 1 − δ. (17) Combining Eq. (17) with the second point of Lemma B.9 completes the proof. □
+
+Proof of Lemma B.9. If E0, E1, . . . , Et−1 happen, the online dataset Dt−1 
+
+> pref
+
+only contains b. In this case, the loss function in Algorithm 2 is a constant that is independent of π, and thus πref is a valid minimizer of the loss function. Then, 
+
+P(Et | E 0, E1, . . . , Et−1) = (1 − πt(a) − πt(c)) 2nt = (1 − 2ϵ)2nt ≥ 1 − 4ntϵ, 
+
+where the last inequality is because (1 + x)a ≥ 1 + ax for any x ≥ − 1 and a ≥ 1.For the second claim, since π⋆ ∈ Π, Proposition B.1 gives 
+
+12 gap Π(πref ) = max  
+
+> π1∈Π
+
+Jβ (π1, π ref ) − 12 ≥ Jβ (π⋆, π ref ) − 12 .
+
+Set f (π2) := Jβ (π⋆, π 2). By the Nash property π⋆ ∈ arg min π2 f (π2) and f (π⋆) = 12 . Writing the preference term as the linear form P ⋆(π⋆ ≻ π2) = ⟨g, π 2⟩ with g(y′) := P ⋆(π⋆ ≻ y′ | x), and using the exact three-point identity 
+
+KL( π2∥πref ) − KL( π⋆∥πref ) = KL( π2∥π⋆) + log( π⋆/π ref ), π 2 − π⋆ ,
+
+we get 
+
+f (π2) − f (π⋆) = g + β log( π⋆/π ref ), π 2 − π⋆ + βKL( π2∥π⋆).
+
+First-order optimality of π⋆ over ∆( Y) makes the inner product nonnegative (the constant component of 
+
+∇f (π⋆) annihilates π2 − π⋆, which has zero sum), so f (π2) − f (π⋆) ≥ βKL( π2∥π⋆). Taking π2 = πref ,
+
+12 gap Π(πref ) ≥ f (πref ) − f (π⋆) ≥ βKL( πref ∥π⋆).
+
+Since π⋆ has full support and πref ̸ = π⋆, the constant c := 2 βKL (πref ∥π⋆) > 0 is independent of t and T ,giving gap Π(πt) ≥ c. □
+
+25 Algorithm 3: Exploratory Nash Preference Optimization (ENPO) for Theoretical Analysis 
+
+Input: horizon T , schedules (mt, n t, k t)Tt=1 , coefficients γ, λ > 0, stepsize η > 0, reference policy πref ,pessimistic parameter αt;
+
+Initialize π−1 ← πref , π0 ← πref , ˆπ0 ← πref ;
+
+Initialize D01 ← ∅, D02 ← ∅;
+
+for t = 1 , . . . , T do 
+
+Generate nt response pairs (τt−1,i , ˆτt−1,i ) via τ t−1,i ∼ πt−2, ˆτ t−1,i ∼ ˆπt−1;Generate mt responses ˜τt−1,i via ˜τt−1,i ∼ πt−1;Update preference datasets Dt 
+
+> 1
+
+← { ˜τt−1,i }mt
+
+> i=1
+
+, Dt 
+
+> 2
+
+← Dt−12 ∪ { (τt−1,i , ˆτt−1,i )}nt
+
+> i=1
+
+;Define Yact  
+
+> t
+
+:= {τ, τ ′ : ( τ, τ ′) ∈ Dt
+
+> 2
+
+}. Generate ct, 1, . . . , c t,k t ∼ πt−1 independently. For every 
+
+a ∈ Y act  
+
+> t
+
+, query Yt,a,j ∼ Bern( P ∗(a ≻ ct,j )) for j = 1 , . . . , k t, and set 
+
+bPt(a ≻ πt−1) = 1
+
+> kt
+
+Pkt 
+
+> j=1
+
+Yt,a,j ;Compute 
+
+πt ← argmin 
+
+> π∈Π
+
+
+
+−αt
+
+X 
+
+> τ∈Dt
+> 1
+
+log π(τ ) + Lt−1(π)
+
+
+
+, (18) where Lt−1 is defined in Eq. (22); Compute 
+
+ˆπt ← argmax 
+
+> ˜π∈Π
+
+max 
+
+> π∈Π
+
+  1
+
+> mt
+
+Pmt 
+
+> i=1
+
+log πt(˜ τt−1,i ) 
+
+> π(˜ τt−1,i )
+
+− Eτ ′∼˜π
+
+ log πt(τ ′) 
+
+> π(τ′)
+
+ 2
+
+λ + Pt−1 
+
+> s=0 1
+> ns+1
+
+Pns+1 
+
+> i=1
+
+  log πt(τs,i ) 
+
+> π(τs,i )
+
+− log πt(τ ′ 
+
+> s,i )
+> π(τ′
+> s,i )
+
+2 . (19) 
+
+Output: Uniform ({πt}T −1 
+
+> t=0
+
+) or πbest ∈ { πt}T −1 
+
+> t=0
+
+with the best duality gap.; 
+
+## B.3 Proofs of efficient exploration guarantee for ENPO 
+
+B.3.1 Algorithm 
+
+The formal statement of Exploratory Nash Preference Optimization (ENPO) is in Algorithm 3. 
+
+B.3.2 Additional notations 
+
+For a prompt-response atom τ = ( x, y), write π(τ ) as shorthand for π(y | x) inside likelihood ratios. For any 
+
+π, π ′ ∈ Π, define the population residual 
+
+δ(τ ; π, π ′) := log π(τ )
+
+π′(τ ) − ηβ log πref (τ )
+
+π′(τ ) − ηP ⋆(τ ≻ π′), (20) where P ⋆(τ ≻ π′) means P ⋆(y ≻ π′ | x) when τ = ( x, y). For a general π ∈ Π, define 
+
+∆t(τ, τ ′; π) := δ(τ ; π, π t−1) − δ(τ ′; π, π t−1).
+
+At round t, write 
+
+δt(τ ) := δ(τ ; πt, π t−1), ∆t(τ, τ ′) := ∆ t(τ, τ ′; πt) = δt(τ ) − δt(τ ′),
+
+where τ = ( x, y) and τ ′ = ( x, y′) share the same prompt. We define the empirical residuals at round t by substituting P ⋆ with the empirical preferences bPt at round t:
+
+bδt(τ ; π) := log π(τ )
+
+πt−1(τ ) − ηβ log πref (τ )
+
+πt−1(τ ) − η bPt(τ ≻ πt−1), (21) and b∆t(τ, τ ′; π) := bδt(τ ; π) − bδt(τ ′; π).
+
+26 The empirical learner loss in Algorithm 3 is 
+
+Lt−1(π) := 
+
+> t−1
+
+X
+
+> s=0
+
+1
+
+ns+1 
+
+> ns+1
+
+X
+
+> i=1
+
+b∆t(τs,i , τ ′
+
+> s,i
+
+; π)2. (22) At round t, Algorithm 3 only estimates preferences for the active prompt-response atoms appearing in the historical comparison dataset, 
+
+Yact  
+
+> t
+
+:= {(xs,i , ys,i ), (xs,i , y′
+
+> s,i
+
+) : 0 ≤ s < t, 1 ≤ i ≤ ns+1 }.
+
+For an active atom a = ( x, y) ∈ Y act  
+
+> t
+
+, the proof version of Algorithm 3 uses prompt-conditional opponents: draw ct,a,j ∼ πt−1(· | x) and query Yt,a,j ∼ Bern (P ⋆(y ≻ ct,a,j | x)) , for j = 1 , . . . , k t. Reusing a common set of opponents is a practical variant, but the theorem below is proved for the prompt-conditional version stated in the algorithm. All preference-estimation concentration below is imposed only on Yact  
+
+> t
+
+, not on the entire response space. The SEC class is 
+
+Ψ := 
+
+
+
+ψρ′,π (τ, τ ′) = log ρ′(τ )
+
+π(τ ) − log ρ′(τ ′)
+
+π(τ ′) : ρ′, π ∈ Π
+
+
+
+.
+
+For a fixed floor λ > 0, define 
+
+SEC NLHF (Ψ , λ ) := sup  
+
+> ψ1,...,ψ T∈Ψ
+
+sup   
+
+> π0,...,π T−1∈Π
+> bπ1,..., bπT∈Π
+> T
+
+X
+
+> t=1
+
+ Eτ ∼πt−1,τ ′∼bπt ψt(τ, τ ′)2
+
+λ ∨ Pt−1 
+
+> s=1
+
+Eτ ∼πs−1,τ ′∼bπs ψt(τ, τ ′)2 . (23) 
+
+B.3.3 Proof of Theorem 4.3 Proof strategy. The proof of the regret bound consists of a deterministic regret bound Theorem B.11 and a high-probability concentration step Lemma B.24. The deterministic part shows that accurate empirical estimates imply small regret; the concentration part verifies that these accuracy events hold with high probability for the stated sample sizes. To facilitate the proof, we first restate the main theorem with complete notations. 
+
+Theorem B.10 Suppose Assumptions B.2 to B.5 hold. Let MT := T (T + 1)( T + 2) /3 and 
+
+LT := max {1, L Π, L P , log( eT )}, where LΠ := log  16 T |Π|2δ−1 , L P := log  16 MT δ−1 .
+
+Set the exploration coefficient αt = 2 /(γm t), the sample counts mt = nt = kt = t, the SEC parameters 
+
+H := 1 + B2 + β−2, λ := 16 HL 2 
+
+> T
+
+, ST ≥ 1 ∨ SEC NLHF (Ψ , λ ), γ := pST /(λT ), and the constant stepsize 
+
+η := 2 β/ (1 + 4 β2). Then, with probability at least 1 − δ,
+
+Reg T ≤ 1 + 2 eη(2 V +1) 
+
+η
+
+
+
+B + 20 pST λT 
+
+
+
+≤ 3e3V η−1 
+
+B + 20 pST λT 
+
+
+
+. (24) 
+
+Thus, Algorithm 3 achieves eO(√T ) regret bound. 
+
+We first prove a deterministic version of the regret bound. It assumes the empirical quantities used by the learner and explorer are accurate, and postpones concentration to the end of Section B.3.4. 
+
+Theorem B.11 Suppose Assumptions B.2 to B.5 hold, and choose a constant stepsize satisfying 0 < η ≤
+
+4β/ (1 + 4 β2). Let B := V /β , cη := 1 − ηβ − η/ (4 β) and Rη := η(2 V + 1) . Assume cη > 0. On any event on which Proposition B.20 holds for both π = eπT and π = π⋆, where 
+
+eπT ∈ argmax 
+
+> π∈Π
+> T
+
+X
+
+> t=1
+
+
+
+P ⋆(π ≻ πt−1) − 12 − β(KL (π∥πref ) − KL (πt−1∥πref )) 
+
+
+
+,
+
+with ℓt defined in Eq. (33) , we have 
+
+Reg T ≤ 1 + eRη /c η
+
+η
+
+"
+
+B + 16 
+
+γ SEC NLHF (Ψ , λ ) + 3γλT 
+
+8 +
+
+> T
+
+X
+
+> t=1
+
+ϵm,t + 18 
+
+γλ 
+
+> T
+
+X
+
+> t=1
+
+ϵ2 
+
+> m,t
+
++ 4 γη 2
+
+> T
+
+X
+
+> t=1
+
+tϵ 2
+
+> p,t
+
+#
+
+. (25) 27 Proof. Apply Lemma B.15 with comparator eπT and sum over t:
+
+ηReg T ≤
+
+> T
+
+X
+
+> t=1
+
+(KL (eπT ∥πt−1) − KL (eπT ∥π⋆t )) + 
+
+> T
+
+X
+
+> t=1
+
+KL (πt−1∥π⋆t )= KL (eπT ∥π0) − KL (eπT ∥πT ) + ET (eπT ) + 
+
+> T
+
+X
+
+> t=1
+
+KL (πt−1∥π⋆t ).
+
+Since π0 = πref and eπT ∈ Π, Assumption B.5 gives KL (eπT ∥π0) ≤ B. Also KL (eπT ∥πT ) ≥ 0. Therefore 
+
+ηReg T ≤ B + ET (eπT ) + 
+
+> T
+
+X
+
+> t=1
+
+KL (πt−1∥π⋆t ).
+
+By Lemma B.21, 
+
+ηReg T ≤ B + ET (eπT ) + eRη
+
+cη
+
+(KL (π⋆∥π0) + ET (π⋆)) .
+
+Again KL (π⋆∥π0) ≤ B. Apply Proposition B.20 to π = eπT and π = π⋆ to obtain Eq. (25). □
+
+It remains to instantiate the deterministic bound with the concentration events proved in Section B.3.4 with specific choices of parameters. 
+
+Proof of Theorem B.10. Lemma B.24 has shown the following three concentration events hold with high probability, i.e., for all ρ′, π, ν ∈ Π,
+
+|N ρ′,π t (ν) − bN ρ′,π t (ν)| ≤ ϵm,t , ϵm,t := B
+
+r 2LΠ
+
+mt
+
+;12 (λ + Ht(π)) ≤ λ + bHt(π) ≤ 2( λ + Ht(π)); 
+
+| bPt(a ≻ πt−1) − P ⋆(a ≻ πt−1)| ≤ ϵp,t , ϵ2 
+
+> p,t
+
+:= LP
+
+2kt
+
+,
+
+where N ρ′,π t (ν), bN ρ′,π t (ν), bHt(π), H t(π) are defined in Eqs. (43) and (44). The first event controls the numerator of the explorer objective: the empirical extrapolation shift is close to its population value. The second one controls the denominator: the empirical coverage energy is within a constant factor of the population coverage energy after adding λ. The third one controls the preference estimates used in the learner’s residual loss on the historical comparison data set. Together, these events allow replacing the population quantities in the deterministic regret bound by the empirical quantities computed by Algorithm 3. On the above three events, Proposition B.20 is valid for every π ∈ Π, and it allows us to invoke the deterministic regret bound Theorem B.11, 
+
+Reg T ≤ 1 + eRη /c η
+
+η
+
+"
+
+B + 16 
+
+γ ST + 3γλT 
+
+8 +
+
+> T
+
+X
+
+> t=1
+
+ϵm,t + 18 
+
+γλ 
+
+> T
+
+X
+
+> t=1
+
+ϵ2 
+
+> m,t
+
++ 4 γη 2
+
+> T
+
+X
+
+> t=1
+
+tϵ 2
+
+> p,t
+
+#
+
+,
+
+where we use ST = 1 ∨ SEC NLHF (Ψ , λ ). Since Eq. (67) gives cη = 1 /2 and Rη = η(2 V + 1) , the prefactor 
+
+(1 + eRη /c η )/η becomes (1 + 2 eη(2 V +1) )/η .It remains to upper bound the bracket in Eq. (25). Let AT := √ST λT and we will try to bound each term in the bracket using a constant multiple of AT . Since γ = pST /(λT ), we have 
+
+16 
+
+γ ST + 3γλT 
+
+8 =
+
+
+
+16 + 38
+
+
+
+AT . (26) Since we take mt = t,
+
+ϵm,t = B
+
+r 2LΠ
+
+t ≤
+
+s
+
+2HL T
+
+t ,
+
+28 where we used B2 ≤ H and LΠ ≤ LT . Hence, using PTt=1 t−1/2 ≤ 2√T and PTt=1 t−1 ≤ log (eT ) ≤ LT , we have TX
+
+> t=1
+
+ϵm,t ≤ 2
+
+q
+
+2HL T T , 
+
+> T
+
+X
+
+> t=1
+
+ϵ2 
+
+> m,t
+
+≤ 2HL 2 
+
+> T
+
+. (27) Since ST ≥ 1, LT ≥ 1, and λ = 16 HL 2 
+
+> T
+
+, the linear ϵm term satisfies 
+
+> T
+
+X
+
+> t=1
+
+ϵm,t ≤ AT . (28) For the quadratic ϵm term, 
+
+18 
+
+γλ 
+
+> T
+
+X
+
+> t=1
+
+ϵ2 
+
+> m,t
+
+≤ 36 HL 2
+
+> T
+
+γλ = 36 HL 2
+
+> T
+
+ST λ AT ≤ 94 AT , (29) where the last inequality uses ST ≥ 1 and λ = 16 HL 2 
+
+> T
+
+. Next, kt = t and LP ≤ LT , so 
+
+> T
+
+X
+
+> t=1
+
+tϵ 2 
+
+> p,t
+
+=
+
+> T
+
+X
+
+> t=1
+
+tL P
+
+2kt
+
+≤ T L T
+
+2 . (30) Since η ≤ 1, H ≥ 1, and LT ≥ 1,
+
+4γη 2
+
+> T
+
+X
+
+> t=1
+
+tϵ 2 
+
+> p,t
+
+≤ 2γη 2LT T = 2η2LT
+
+λ AT ≤ 18 AT . (31) Combining Eq. (26), Eq. (28), Eq. (29), and Eq. (31), the non-B part of the bracket in Eq. (25) is at most 
+
+
+
+16 + 38 + 1 + 94 + 18
+
+
+
+AT = 19 .75 AT ≤ 20 AT .
+
+The desired inequality Eq. (24) then follows by noticing that V ≥ 1 and η ≤ 1. □
+
+Theorem B.10 is stated under exact mirror-target realizability. We next consider a relaxed version: if realizability only holds away from a small neighborhood of π⋆, the same proof yields a best-candidate guarantee with an additional approximation term. Define best response 
+
+πbest ∈ argmin   
+
+> π∈{ π0,π 1,...,π T−1,¯πT}
+
+gap( π),
+
+and the best-candidate regret 
+
+Reg best  
+
+> T
+
+:= T
+
+
+
+max  
+
+> ν∈Π
+
+Jβ (ν, π best ) − 12
+
+
+
+= T
+
+2 gap( πbest ),
+
+where the equality follows from Proposition B.1. 
+
+Corollary B.12 Suppose Assumptions B.2, B.3, B.5 and B.7. Run Algorithm 3 for T rounds with the same choices of parameters as in Theorem B.10. Then, with probability at least 1 − δ,
+
+Reg best  
+
+> T
+
+≤ max 
+
+ 1 + 2 eη(2 V +1) 
+
+η
+
+
+
+B + 20 pST λT 
+
+
+
+, T
+
+√2 (1 + 4 V )√εη
+
+
+
+.
+
+If εη = O(1 /T ), then Reg best  
+
+> T
+
+= eO(√T ).
+
+29 Proof. Let CT := {π0, π 1, . . . , π T −1, ¯πT }. Define the first entrance time 
+
+τ := inf {s ∈ { 0, . . . , T − 1} : KL (π⋆∥πs) ≤ εη } .
+
+First suppose τ = ∞. Then for every update round t = 1 , . . . , T , KL (π⋆∥πt−1) > ε η . By relaxed realizability, π+ 
+
+> ⋆,η
+
+[πt−1] ∈ Π for every realized round. Inspecting the proof of Theorem B.10, Assumption B.4 is used only to ensure that these realized exact mirror targets belong to Π. Therefore the proof of Theorem B.10 applies on the full horizon and gives the same trajectory regret Reg T .Since ¯πT ∈ C T , by Proposition B.1, we have 
+
+Reg best  
+
+> T
+
+= T
+
+2 gap( πbest ) ≤ T
+
+2 gap(¯ πT ) ≤ Reg T .
+
+Now suppose τ < ∞. Then KL (π⋆∥πτ ) ≤ εη . By Lemma B.8, 
+
+gap( πτ ) ≤ √2(1 + 4 V )√εη .
+
+Since πτ ∈ C T , the best candidate satisfies 
+
+Reg best  
+
+> T
+
+= T
+
+2 gap( πbest ) ≤ T
+
+2 gap( πτ ) ≤ T
+
+√2 (1 + 4 V )√εη .
+
+Combining the two cases gives 
+
+Reg best  
+
+> T
+
+≤ max 
+
+
+
+Reg T , T
+
+√2 (1 + 4 V )√εη
+
+
+
+.
+
+Substituting the bound on Reg T from Theorem B.10 proves the displayed high-probability bound. □
+
+Finally, we can invoke a result in Xie et al. [2025] to upper bound SEC NLHF (Ψ , λ ) by coverage and some logarithmic factor in T .
+
+Corollary B.13 For π, bπ ∈ Π, define the same-prompt pair distribution 
+
+νπ, bπ (x, y, y′) := ρ(x)π(y|x)bπ(y′|x).
+
+Define 
+
+Cpair cov (Π) := inf  
+
+> μ
+
+sup 
+
+> π, bπ∈Π
+
+νπ, bπ
+
+μ ∞
+
+.
+
+Under the same assumptions as in Theorem B.10 
+
+SEC NLHF (Ψ , λ ) ≤ c C pair cov (Π) log( eT ),
+
+where c > 0 is a universal constant. Proof. This is a direct adaptation of Xie et al. [2025]. □
+
+B.3.4 Auxiliary Propositions and Lemmas for Theorem B.10 
+
+We now collect the auxiliary facts used in Section B.3.3. The first part concerns the population mirror update, the second part controls extrapolation and local empirical error, and the last part verifies the required concentration events. The following result shows that exact mirror target has a simple residual structure: its population residual is constant across responses for the same prompt. This identity allows us to decompose KL error into a local term and an extrapolation term. 30 Proposition B.14 For every t ≥ 1 and every prompt x, the function y 7 → δ(( x, y); π⋆t , π t−1) is constant over responses y. More precisely, 
+
+δ(( x, y); π⋆t , π t−1) = − log Zt(x),
+
+where Zt(x) is the denominator in Eq. (14) with π = πt−1. Consequently, for any two prompt-response atoms 
+
+τ = ( x, y) and τ ′ = ( x, y′) sharing the same prompt, 
+
+∆t(τ, τ ′) = log πt(τ )
+
+π⋆t (τ ) − log πt(τ ′)
+
+π⋆t (τ ′) .
+
+Moreover, for any π ∈ Π,
+
+KL (π∥πt) − KL (π∥π⋆t ) = Eτ ∼πt−1 [log π⋆t (τ ) − log πt(τ )] + Eτ ∼πt−1,τ ′∼π [∆ t(τ, τ ′)] . (32) 
+
+Proof. Fix a prompt x. By Eq. (14), 
+
+log π⋆t (y | x) = ηβ log πref (y | x) + (1 − ηβ ) log πt−1(y | x) + ηP ⋆(y ≻ πt−1 | x) − log Zt(x).
+
+Substituting this display into Eq. (20) gives 
+
+δ(( x, y); π⋆t , π t−1) = − log Zt(x),
+
+which is independent of y for the fixed prompt x. Therefore 
+
+δt(x, y) − δ(( x, y); π⋆t , π t−1) = log πt(y | x)
+
+π⋆t (y | x) .
+
+Taking differences between y and y′ proves the first identity. For Eq. (32), note that all policies have the same prompt marginal ρ, so the conditional constant − log Zt(x) has the same expectation under π and under 
+
+πt−1. Thus KL (π∥πt) − KL (π∥π⋆t ) = Ex∼ρ, y′∼π(·| x)
+
+
+
+log π⋆t (y′ | x)
+
+πt(y′ | x)
+
+
+
+can be rewritten by adding and subtracting the expectation under y ∼ πt−1(· | x), yielding Eq. (32). □
+
+The next lemma is the one-step mirror-descent inequality. It converts regularized gain against any comparator into a KL telescoping term plus the movement of the exact mirror target. 
+
+Lemma B.15 For every π ∈ Π and every t ≥ 1, define 
+
+ℓt(π) := P ⋆(π ≻ πt−1) − 12 − β(KL (π∥πref ) − KL (πt−1∥πref )) .
+
+Then 
+
+ηℓ t(π) ≤ KL (π∥πt−1) − KL (π∥π⋆t ) + KL (πt−1∥π⋆t ). (33) 
+
+Proof. Let 
+
+gt(τ ) := P ⋆(τ ≻ πt−1) − β log πt−1(τ )
+
+πref (τ ) .
+
+The exact update satisfies 
+
+π⋆t = argmin 
+
+> u∈∆( Y)
+
+{⟨− ηg t, u ⟩ + KL (u∥πt−1)}.
+
+The Bregman three-point inequality for the KL prox step gives, for all π,
+
+η⟨gt, π − π⋆t ⟩ ≤ KL (π∥πt−1) − KL (π∥π⋆t ) − KL (π⋆t ∥πt−1). (34) Add η⟨gt, π ⋆t − πt−1⟩ to both sides. The closed form gives 
+
+ηg t(τ ) = log π⋆t (τ )
+
+πt−1(τ ) + log Zt(x),
+
+31 so the constant cancels when integrated against π⋆t − πt−1. Hence 
+
+η⟨gt, π ⋆t − πt−1⟩ = X
+
+> τ
+
+(π⋆t (τ ) − πt−1(τ )) log π⋆t (τ )
+
+πt−1(τ ) = KL (π⋆t ∥πt−1) + KL (πt−1∥π⋆t ).
+
+Combining with Eq. (34), 
+
+η⟨gt, π − πt−1⟩ ≤ KL (π∥πt−1) − KL (π∥π⋆t ) + KL (πt−1∥π⋆t ).
+
+Finally, 
+
+⟨gt, π − πt−1⟩ = P ⋆(π ≻ πt−1) − 12 − β(KL (π∥πref ) − KL (πt−1∥πref )) + βKL (π∥πt−1)
+
+≥ ℓt(π),
+
+which proves the claim. □
+
+We next use the KL regularization to show that the exact population mirror map contracts toward the Nash policy. This contraction is the key reason a constant stepsize is possible. 
+
+Lemma B.16 (Contraction of mirror descent with constant stepsize) Let π⋆ be the unique symmet-ric Nash equilibrium of the KL-regularized game. Let π+ := π+ 
+
+> ∗,η
+
+(π) be defined by Eq. (14) . If 
+
+0 < η ≤ 4β
+
+1 + 4 β2 ≤ 1, (35) 
+
+then, with cη := 1 − ηβ − η/ (4 β) ≥ 0,
+
+KL (π⋆∥π+) ≤ (1 − ηβ )KL (π⋆∥π) − cη KL (π+∥π). (36) 
+
+In particular, KL (π⋆∥π+) ≤ (1 − ηβ )KL (π⋆∥π).Proof. The proof is pointwise in the prompt x; we suppress x and write distributions over the finite response set Y. Integrating the resulting inequality over x ∼ ρ gives the stated prompt-averaged KL inequality. Let 
+
+h(p) = P 
+
+> τ
+
+p(τ ) log p(τ ) be negative entropy. Define the operator 
+
+F (p) = A(p) + B(p), A(p)( τ ) := −P ⋆(τ ≻ p), B(p) := β(∇h(p) − ∇ h(πref )) .
+
+The Nash equilibrium π⋆ satisfies the variational inequality 
+
+⟨F (π⋆), u − π⋆⟩ ≥ 0 ∀u ∈ ∆( Y). (37) The exact update is equivalently 
+
+π+ = argmin 
+
+> u∈∆( Y)
+
+{η⟨F (π), u ⟩ + KL (u∥π)} . (38) Indeed, expanding F gives exactly Eq. (14) up to constants independent of u.We first record three structural facts. Let P be the matrix with entries Pτ,u = P ⋆(τ ≻ u). Assumption B.2 gives P + P ⊤ = 11 ⊤. Since both u − v and π − v have zero sum for distributions, for all u, v ∈ ∆( Y),
+
+⟨A(u) − A(v), u − v⟩ = −(u − v)⊤P (u − v) = − 12 (u − v)⊤(P + P ⊤)( u − v) = 0 .
+
+Thus A is monotone with equality. Also, 
+
+∥A(u) − A(v)∥∞ = max 
+
+> τ
+
+X
+
+> a
+
+
+
+Pτ,a − 12
+
+
+
+(v(a) − u(a)) ≤ 12 ∥u − v∥1.
+
+32 Finally, the entropy identity gives 
+
+⟨B(u) − B(v), u − v⟩ = β KL (u∥v) + KL (v∥u). (39) Using 
+
+η⟨B(π), u ⟩ = ηβ KL (u∥πref ) − ηβ KL (u∥π) + constant in u, 
+
+we can write the prox objective as 
+
+Ψ( u) = η⟨A(π), u ⟩ + ηβ KL (u∥πref ) + (1 − ηβ )KL (u∥π),
+
+where ηβ ≤ 1 follows from Eq. (35). The two KL weights sum to one, hence Ψ is 1-strongly convex with respect to the entropy Bregman divergence. Since π+ minimizes Ψ, the Bregman three-point inequality for a 
+
+1-strongly convex function with respect to negative entropy gives 
+
+Ψ( π⋆) − Ψ( π+) ≥ KL (π⋆∥π+). (40) On the other hand, Eq. (37) and the strong convexity of u 7 → ⟨ A(π⋆), u ⟩ + βKL (u∥πref ) imply 
+
+ηβ  KL (π+∥πref ) − KL (π⋆∥πref ) ≥ η⟨A(π⋆), π ⋆ − π+⟩ + ηβ KL (π+∥π⋆). (41) Adding Eq. (40) and Eq. (41), the KL (·∥ πref ) terms cancel and we obtain KL (π⋆∥π+) ≤ η⟨A(π) − A(π⋆), π ⋆ − π+⟩ + (1 − ηβ )KL (π⋆∥π)
+
+− (1 − ηβ )KL (π+∥π) − ηβ KL (π+∥π⋆). (42) Insert and subtract A(π+) in the inner product. By monotonicity with equality, 
+
+⟨A(π) − A(π⋆), π ⋆ − π+⟩ = ⟨A(π+) − A(π), π + − π⋆⟩.
+
+Using the Lipschitz property of A, Hölder’s inequality, and Pinsker’s inequality, 
+
+η ⟨A(π+) − A(π), π + − π⋆⟩ ≤ η
+
+2 ∥π+ − π∥1∥π+ − π⋆∥1
+
+≤ ηpKL (π+∥π)KL (π+∥π⋆)
+
+≤ η
+
+4β KL (π+∥π) + ηβ KL (π+∥π⋆),
+
+where the last step applies the AM–GM inequality. Substituting this into Eq. (42) cancels the ηβ KL (π+∥π⋆)
+
+term and yields KL (π⋆∥π+) ≤ (1 − ηβ )KL (π⋆∥π) −
+
+
+
+1 − ηβ − η
+
+4β
+
+
+
+KL (π+∥π).
+
+This proves Eq. (36). □
+
+The previous contraction controls one KL direction. The next lemma compares the reverse direction using the fact that one exact mirror step changes log-probabilities by a bounded amount. 
+
+Lemma B.17 For every t ≥ 1,
+
+KL (πt−1∥π⋆t ) ≤ eRη KL (π⋆t ∥πt−1), Rη := η(2 V + 1) .
+
+Proof. By the closed form Eq. (14), 
+
+log π⋆t (y | x)
+
+πt−1(y | x) = at(x, y) − log Zt(x), Zt(x) = X
+
+> u
+
+πt−1(u | x)eat(x,u ).
+
+where 
+
+at(x, y) := ηβ log πref (y | x)
+
+πt−1(y | x) + ηP ⋆(y ≻ πt−1 | x),
+
+33 The range of ηβ log (πref /π t−1) over τ is at most 2ηV by Assumption B.5, and the range of ηP ⋆(τ ≻ πt−1) is at most η. Since Zt(x) is a πt−1(· | x)-weighted average of eat(x,u ), log Zt(x) lies between min u at(x, u ) and 
+
+max u at(x, u ). Therefore 
+
+log π⋆t (y | x)
+
+πt−1(y | x) ≤ max  
+
+> u
+
+at(x, u ) − min  
+
+> u
+
+at(x, u ) ≤ η(2 V + 1) =: Rη .
+
+Let p = π⋆t , ¯π = πt−1, and r = p/ ¯π. Then r ∈ [e−Rη , e Rη ] pointwise. The f -divergence representation gives KL (¯ π∥p) = E¯π [r − 1 − log r], KL (p∥¯π) = E¯π [r log r − r + 1] .
+
+For r ∈ [e−Rη , e Rη ], the functions f (r) = r − 1 − log r and g(r) = r log r − r + 1 satisfy f (1) = g(1) = f ′(1) = 
+
+g′(1) = 0 and 
+
+f ′′ (r) = 1
+
+r2 ≤ eRη 1
+
+r = eRη g′′ (r).
+
+Integrating twice around r = 1 gives f (r) ≤ eRη g(r) for all such r. Taking expectation under ¯π proves the claim. □
+
+For π ∈ Π, define pairwise log-ratio direction 
+
+ψt,π (τ, τ ′) := log πt(τ )
+
+π(τ ) − log πt(τ ′)
+
+π(τ ′) .
+
+For concentration statements we also need a version with an arbitrary numerator policy ρ′ ∈ Π:
+
+ψρ′,π (τ, τ ′) := log ρ′(τ )
+
+π(τ ) − log ρ′(τ ′)
+
+π(τ ′) .
+
+We now introduce the quantities optimized by the adversarial explorer. The numerator measures extrapolation to a candidate opponent, while the denominator measures how well past exploratory data cover the corresponding log-ratio direction. For ρ′, π, ν ∈ Π, define 
+
+N ρ′,π t (ν) := Eτ ∼πt−1,τ ′∼ν ψρ′,π (τ, τ ′),
+
+bN ρ′,π t (ν) := 1
+
+mtmtX
+
+> i=1
+
+log ρ′(eτt−1,i )
+
+π(eτt−1,i ) − Eτ ′∼ν log ρ′(τ ′)
+
+π(τ ′) ,Hρ′,π t := 
+
+> t−1
+
+X
+
+> s=0
+
+Eτ ∼πs−1,τ ′∼bπs ψρ′,π (τ, τ ′)2,
+
+bHρ′,π t := 
+
+> t−1
+
+X
+
+> s=0
+
+1
+
+ns+1 
+
+> ns+1
+
+X
+
+> i=1
+
+ψρ′,π (τs,i , τ ′
+
+> s,i
+
+)2.
+
+(43) Here N ρ′,π t (ν) denotes the population extrapolation shift, measuring how much the log-ratio direction changes when moving from πt−1 to candidate opponent ν, and bN ρ′,π t (ν) is its empirical version; Hρ′,π t denotes the population coverage energy, accumulating squared size of this direction under past exploration pairs. We can also define their round-t version 
+
+Nt(ν, π ) := N πt,π t (ν), bNt(ν, π ) := bN πt,π t (ν), H t(π) := Hπt,π t , and bHt(π) := bHπt,π t . (44) The following lemma bounds the extrapolation error by the SEC term, up to empirical estimation errors and a quadratic remainder. 
+
+Lemma B.18 Assume that for every t ≤ T , every π ∈ Π, and every ν ∈ Π,
+
+|Nt(ν, π ) − bNt(ν, π )| ≤ ϵm,t , 12 (λ + Ht(π)) ≤ λ + bHt(π) ≤ 2( λ + Ht(π)) , (45) 34 where Nt(ν, π ), bNt(ν, π ), Ht(π), bHt(π) are defined in Eqs. (43) and (44) . Then for every π ∈ Π,
+
+> T
+
+X
+
+> t=1
+
+Eτ ∼πt−1,τ ′∼π ∆t(τ, τ ′) ≤ 16 
+
+γ SEC NLHF (Ψ , λ ) + γλT 
+
+4 + 18 
+
+γλ 
+
+> T
+
+X
+
+> t=1
+
+ϵ2
+
+> m,t
+
++ γ
+
+4
+
+> T
+
+X
+
+> t=1
+> t−1
+
+X
+
+> s=0
+
+Eτ ∼πs−1,τ ′∼bπs ∆t(τ, τ ′)2. (46) 
+
+Proof. By Proposition B.14, ∆t(τ, τ ′) = ψt,π ⋆t (τ, τ ′), and this function belongs to Ψ by Assumption B.4. Define Dt := λ + Ht(π⋆t ). For any real x and a > 0, x ≤ x2/(γa ) + γa/ 4. Therefore, 
+
+Eπt−1,π ∆t ≤ Nt(π, π ⋆t )2
+
+γD t
+
++ γλ 
+
+4 + γ
+
+4 Ht(π⋆t ). (47) Using Eq. (45), 
+
+Nt(π, π ⋆t )2
+
+γD t
+
+≤ 2 bNt(π, π ⋆t )2
+
+γD t
+
++ 2ϵ2
+
+> m,t
+
+γλ ≤ 4 bNt(π, π ⋆t )2
+
+γ(λ + bHt(π⋆t )) + 2ϵ2
+
+> m,t
+
+γλ .
+
+By the definition of bπt in Algorithm 3, 
+
+bNt(π, π ⋆t )2
+
+λ + bHt(π⋆t ) ≤ max 
+
+> r∈Π
+
+bNt(bπt, r )2
+
+λ + bHt(r) .
+
+Again using Eq. (45), for every r ∈ Π,
+
+bNt(bπt, r )2
+
+λ + bHt(r) ≤ 4 Nt(bπt, r )2
+
+λ + Ht(r) + 4ϵ2
+
+> m,t
+
+λ .
+
+Combining the last three displays yields 
+
+Nt(π, π ⋆t )2
+
+γD t
+
+≤ 16 
+
+γ max 
+
+> r∈Π
+
+Nt(bπt, r )2
+
+λ + Ht(r) + 18 ϵ2
+
+> m,t
+
+γλ .
+
+Substitute this into Eq. (47) and sum over t. For each r ∈ Π, Ht(r) contains the SEC denominator sum 
+
+Pt−1 
+
+> s=1
+
+Eπs−1,bπs [ψ2 
+
+> t,r
+
+] and possibly the additional nonnegative s = 0 term. Hence 
+
+λ + Ht(r) ≥ λ ∨
+
+> t−1
+
+X
+
+> s=1
+
+Eτ ∼πs−1,τ ′∼bπs ψt,r (τ, τ ′)2.
+
+By the SEC definition Eq. (23), the sum of the max-ratio terms is bounded by SEC NLHF (Ψ , λ ). This proves Eq. (46). □
+
+The preceding lemma controls the extrapolation part but leaves a quadratic remainder. The next lemma controls the local, on-sample part of the update and produces a negative copy of the same quadratic term. This is where the learner’s empirical risk minimization step is used: because πt minimizes the empirical residual loss, it cannot be much worse than the exact mirror target π⋆t on the sampled data. The remaining error comes only from finite-sample estimation of preferences. 
+
+Lemma B.19 Fix t ≥ 1. Suppose the following events hold: 
+
+Eτ ∼πt−1 [log π⋆t (τ ) − log πt(τ )] ≤ 1
+
+mtmtX
+
+> i=1
+
+[log π⋆t (eτt−1,i ) − log πt(eτt−1,i )] + ϵm,t , (48) 
+
+> t−1
+
+X
+
+> s=0
+
+Eπs−1,bπs ∆t(τ, τ ′)2 ≤
+
+> t−1
+
+X
+
+> s=0
+
+1
+
+ns+1 
+
+> ns+1
+
+X
+
+> i=1
+
+∆t(τs,i , τ ′
+
+> s,i
+
+)2 + λ
+
+2 , (49) 35 and for every empirical historical pair, with 
+
+et(a) := bPt(a ≻ πt−1) − P ⋆(a ≻ πt−1),
+
+we have 
+
+|et(a)| ≤ ϵp,t for all a ∈ { τs,i , τ ′ 
+
+> s,i
+
+: 0 ≤ s < t, 1 ≤ i ≤ ns+1 }. (50) 
+
+Then, under Eq. (18) ,
+
+Eτ ∼πt−1 [log π⋆t (τ ) − log πt(τ )] + γ
+
+4
+
+> t−1
+
+X
+
+> s=0
+
+Eπs−1,bπs ∆t(τ, τ ′)2 ≤ ϵm,t + γλ 
+
+8 + 4 γη 2tϵ 2
+
+> p,t
+
+. (51) 
+
+Proof. For brevity, define the empirical averages 
+
+bSt(π) := 
+
+> t−1
+
+X
+
+> s=0
+
+1
+
+ns+1 
+
+> ns+1
+
+X
+
+> i=1
+
+b∆t(τs,i , τ ′
+
+> s,i
+
+; π)2,St(π) := 
+
+> t−1
+
+X
+
+> s=0
+
+1
+
+ns+1 
+
+> ns+1
+
+X
+
+> i=1
+
+∆t(τs,i , τ ′
+
+> s,i
+
+; π)2.
+
+From Eq. (48) and Eq. (49), 
+
+Eπt−1 [log π⋆t − log πt] + γ
+
+4
+
+> t−1
+
+X
+
+> s=0
+
+Eπs−1,bπs ∆2
+
+> t
+
+≤ 1
+
+mtmtX
+
+> i=1
+
+[log π⋆t (eτt−1,i ) − log πt(eτt−1,i )] + γ
+
+4 St(πt) + ϵm,t + γλ 
+
+8 . (52) The ERM optimality of πt against the feasible comparator π⋆t gives 
+
+1
+
+mtmtX
+
+> i=1
+
+[log π⋆t (eτt−1,i ) − log πt(eτt−1,i )] + γ
+
+2 bSt(πt) ≤ γ
+
+2 bSt(π⋆t ). (53) This is exactly where αt = 2 /(γm t) is used. For an empirical pair (a, b ), write 
+
+u := ∆ t(a, b ; πt), z := η(et(a) − et(b)) .
+
+Then b∆t(a, b ; πt) = u−z. Also, by Proposition B.14, ∆t(a, b ; π⋆t ) = 0 , and hence b∆t(a, b ; π⋆t ) = −z. Combining Eq. (53) with the term γ 
+
+> 4
+
+St(πt) in Eq. (52), pair by pair we get the upper bound 
+
+γ
+
+2 z2 + γ
+
+4 u2 − γ
+
+2 (u − z)2 = γuz − γ
+
+4 u2 ≤ γz 2,
+
+where the last inequality follows from uz − u2/4 ≤ z2. Therefore 
+
+1
+
+mtmtX
+
+> i=1
+
+[log π⋆t (eτt−1,i ) − log πt(eτt−1,i )] + γ
+
+4 St(πt) ≤ γη 2
+
+> t−1
+
+X
+
+> s=0
+
+1
+
+ns+1 
+
+> ns+1
+
+X
+
+> i=1
+
+ et(τs,i ) − et(τ ′
+
+> s,i
+
+)2.
+
+By Eq. (50), each squared difference is at most 4ϵ2
+
+> p,t
+
+. Since 
+
+> t−1
+
+X
+
+> s=0
+
+1
+
+ns+1 
+
+> ns+1
+
+X
+
+> i=1
+
+1 = t, 
+
+the last display is bounded by 4γη 2tϵ 2
+
+> p,t
+
+. Substituting into Eq. (52) proves Eq. (51). □
+
+Combining the extrapolation bound with the local bound cancels the shared quadratic remainder. This gives a uniform bound on the accumulated inexact-update error ET (π).36 Proposition B.20 Assume the events Eqs. (45) and (48) to (50) hold for every t ≤ T . Then for every fixed comparator π ∈ Π,
+
+ET (π) := 
+
+> T
+
+X
+
+> t=1
+
+ KL (π∥πt) − KL (π∥π⋆t )
+
+≤ 16 
+
+γ SEC NLHF (Ψ , λ ) + 3γλT 
+
+8 +
+
+> T
+
+X
+
+> t=1
+
+ϵm,t + 18 
+
+γλ 
+
+> T
+
+X
+
+> t=1
+
+ϵ2 
+
+> m,t
+
++ 4 γη 2
+
+> T
+
+X
+
+> t=1
+
+tϵ 2
+
+> p,t
+
+. (54) 
+
+Proof. Fix a comparator π ∈ Π. Throughout this proof, for each t, write 
+
+∆t(τ, τ ′) := δt(τ ) − δt(τ ′).
+
+Also define the accumulated population quadratic term 
+
+Qt := 
+
+> t−1
+
+X
+
+> s=0
+
+Eτ ∼πs−1, τ ′∼bπs
+
+∆t(τ, τ ′)2 ,
+
+and 
+
+Qtot  
+
+> T
+
+:= 
+
+> T
+
+X
+
+> t=1
+
+Qt =
+
+> T
+
+X
+
+> t=1
+> t−1
+
+X
+
+> s=0
+
+Eτ ∼πs−1, τ ′∼bπs
+
+∆t(τ, τ ′)2 .
+
+We start from the definition of ET (π). For every t,KL (π∥πt) − KL (π∥π⋆t ) = Eτ ∼π
+
+
+
+log π⋆t (τ )
+
+πt(τ )
+
+
+
+.
+
+Therefore, 
+
+ET (π) = 
+
+> T
+
+X
+
+> t=1
+
+Eτ ∼π [log π⋆t (τ ) − log πt(τ )] .
+
+Next we use the residual decomposition from Eq. (32). For completeness, we spell out the identity. By the residual identity, 
+
+log π⋆t (τ ) − log πt(τ ) = δ⋆t (τ ) − δt(τ ),
+
+and by Proposition B.14, δ⋆t (·) is constant in τ . Hence 
+
+Eτ ∼π [log π⋆t (τ ) − log πt(τ )] = Eτ ∼π [δ⋆t (τ ) − δt(τ )] = Eτ ∼πt−1 [δ⋆t (τ ) − δt(τ )] + Eτ ∼πt−1 [δt(τ )] − Eτ ′∼π [δt(τ ′)] = Eτ ∼πt−1 [log π⋆t (τ ) − log πt(τ )] + Eτ ∼πt−1, τ ′∼π [δt(τ ) − δt(τ ′)] = Eτ ∼πt−1 [log π⋆t (τ ) − log πt(τ )] + Eτ ∼πt−1, τ ′∼π [∆ t(τ, τ ′)] .
+
+Summing this equality over t = 1 , . . . , T gives 
+
+ET (π) = 
+
+> T
+
+X
+
+> t=1
+
+Eτ ∼πt−1 [log π⋆t (τ ) − log πt(τ )] 
+
+| {z }
+
+> =: LT
+
++
+
+> T
+
+X
+
+> t=1
+
+Eτ ∼πt−1, τ ′∼π [∆ t(τ, τ ′)] 
+
+| {z }
+
+> =: XT
+
+. (55) We now bound the extrapolation part XT . Since the event Eq. (45) holds for every t ≤ T , the hypotheses of Lemma B.18 are satisfied. Applying Lemma B.18 with the fixed comparator π gives 
+
+XT =
+
+> T
+
+X
+
+> t=1
+
+Eτ ∼πt−1, τ ′∼π [∆ t(τ, τ ′)] 
+
+≤ 16 
+
+γ SEC NLHF (Ψ , λ ) + γλT 
+
+4 + 18 
+
+γλ 
+
+> T
+
+X
+
+> t=1
+
+ϵ2 
+
+> m,t
+
++ γ
+
+4 Qtot  
+
+> T
+
+. (56) 37 We next bound the local part LT . Since the events Eqs. (48) to (50) hold for every t ≤ T , the hypotheses of Lemma B.19 are satisfied at every round t. Thus, for each t,
+
+Eτ ∼πt−1 [log π⋆t (τ ) − log πt(τ )] + γ
+
+4 Qt ≤ ϵm,t + γλ 
+
+8 + 4 γη 2tϵ 2
+
+> p,t
+
+. (57) Rearranging Eq. (57) gives 
+
+Eτ ∼πt−1 [log π⋆t (τ ) − log πt(τ )] ≤ ϵm,t + γλ 
+
+8 + 4 γη 2tϵ 2 
+
+> p,t
+
+− γ
+
+4 Qt.
+
+Summing this inequality over t = 1 , . . . , T , we obtain 
+
+LT =
+
+> T
+
+X
+
+> t=1
+
+Eτ ∼πt−1 [log π⋆t (τ ) − log πt(τ )] 
+
+≤
+
+> T
+
+X
+
+> t=1
+
+ϵm,t + γλT 
+
+8 + 4 γη 2
+
+> T
+
+X
+
+> t=1
+
+tϵ 2 
+
+> p,t
+
+− γ
+
+4
+
+> T
+
+X
+
+> t=1
+
+Qt
+
+=
+
+> T
+
+X
+
+> t=1
+
+ϵm,t + γλT 
+
+8 + 4 γη 2
+
+> T
+
+X
+
+> t=1
+
+tϵ 2 
+
+> p,t
+
+− γ
+
+4 Qtot  
+
+> T
+
+. (58) Finally, substitute Eq. (56) and Eq. (58) into the decomposition Eq. (55). We get 
+
+ET (π) = LT + XT
+
+≤
+
+" TX
+
+> t=1
+
+ϵm,t + γλT 
+
+8 + 4 γη 2
+
+> T
+
+X
+
+> t=1
+
+tϵ 2 
+
+> p,t
+
+− γ
+
+4 Qtot 
+
+> T
+
+#
+
++
+
+"
+
+16 
+
+γ SEC NLHF (Ψ , λ ) + γλT 
+
+4 + 18 
+
+γλ 
+
+> T
+
+X
+
+> t=1
+
+ϵ2 
+
+> m,t
+
++ γ
+
+4 Qtot 
+
+> T
+
+#
+
+.
+
+Therefore, 
+
+ET (π) ≤ 16 
+
+γ SEC NLHF (Ψ , λ ) + 3γλT 
+
+8 +
+
+> T
+
+X
+
+> t=1
+
+ϵm,t + 18 
+
+γλ 
+
+> T
+
+X
+
+> t=1
+
+ϵ2 
+
+> m,t
+
++ 4 γη 2
+
+> T
+
+X
+
+> t=1
+
+tϵ 2
+
+> p,t
+
+,
+
+which is exactly Eq. (54). □
+
+The deterministic regret bound still contains the total movement of the exact mirror targets. The next lemma controls this movement using the contraction of the population mirror map. 
+
+Lemma B.21 Let 
+
+ET (π⋆) := 
+
+> T
+
+X
+
+> t=1
+
+(KL (π⋆∥πt) − KL (π⋆∥π⋆t )) .
+
+Under Eq. (35) , TX
+
+> t=1
+
+KL (πt−1∥π⋆t ) ≤ eRη
+
+cη
+
+(KL (π⋆∥π0) + ET (π⋆)) , (59) 
+
+where cη = 1 − ηβ − η/ (4 β) and Rη = η(2 V + 1) .Proof. By Lemma B.16 applied with π = πt−1 and π+ = π⋆t ,
+
+cη KL (π⋆t ∥πt−1) ≤ (1 − ηβ )KL (π⋆∥πt−1) − KL (π⋆∥π⋆t ).
+
+Dropping the nonpositive term −ηβ KL (π⋆∥πt−1) and adding then subtracting KL (π⋆∥πt) gives 
+
+cη KL (π⋆t ∥πt−1) ≤ KL (π⋆∥πt−1) − KL (π⋆∥πt) + KL (π⋆∥πt) − KL (π⋆∥π⋆t ).
+
+38 Sum over t = 1 , . . . , T and telescope: 
+
+cηTX
+
+> t=1
+
+KL (π⋆t ∥πt−1) ≤ KL (π⋆∥π0) + ET (π⋆).
+
+Finally apply Lemma B.17 to each term to obtain the desired result. □
+
+We now turn to concentration. The following martingale Hoeffding bound handles adaptively chosen but conditionally bounded samples. 
+
+Lemma B.22 Let (Fi)Ni=0 be a filtration and let (Xi)Ni=1 be adapted. Suppose deterministic constants ai ≤ bi
+
+satisfy ai ≤ Xi ≤ bi almost surely. Then, for every δ ∈ (0 , 1) , with probability at least 1 − δ,
+
+> N
+
+X
+
+> i=1
+
+Xi −
+
+> N
+
+X
+
+> i=1
+
+E[Xi | F i−1] ≤
+
+vuut 12
+
+> N
+
+X
+
+> i=1
+
+(bi − ai)2
+
+!
+
+log 
+
+ 2
+
+δ
+
+
+
+.
+
+Proof. Let Di := Xi − E[Xi|F i−1] and Sn := Pni=1 Di. Then (Sn) is a martingale. Conditional on Fi−1, Di
+
+has mean zero and lies in an interval of length at most ci := bi − ai. Hoeffding’s lemma applied conditionally gives 
+
+E[eθD i | F i−1] ≤ exp 
+
+ θ2c2
+
+> i
+
+8
+
+
+
+, θ ∈ R.
+
+Thus Mn := exp (θS n − θ2 Pni=1 c2 
+
+> i
+
+/8) is a nonnegative supermartingale. For θ > 0 and ε > 0, Markov’s inequality gives 
+
+P (SN ≥ ε) ≤ exp −θε + θ2
+
+8
+
+> N
+
+X
+
+> i=1
+
+c2
+
+> i
+
+!
+
+.
+
+Optimizing over θ gives 
+
+P (SN ≥ ε) ≤ exp 
+
+
+
+− 2ε2
+
+P 
+
+> i
+
+c2
+
+> i
+
+
+
+.
+
+Applying the same bound to −SN and union bounding gives 
+
+P (|SN | ≥ ε) ≤ 2 exp 
+
+
+
+− 2ε2
+
+P 
+
+> i
+
+c2
+
+> i
+
+
+
+.
+
+The claim follows by taking ε = p(P 
+
+> i
+
+c2 
+
+> i
+
+) log(2 /δ )/2. □
+
+This corollary records the conditional i.i.d. form used for the per-round batches in Algorithm 3. 
+
+Corollary B.23 Let G be a sigma-field. Conditional on G, let X1, . . . , X n be independent random variables with Xi ∈ [a, b ] almost surely and E[Xi | G ] = μ for every i. Then, for every ϵ > 0,
+
+P 1
+
+n
+
+> n
+
+X
+
+> i=1
+
+Xi − μ > ϵ G
+
+!
+
+≤ 2 exp 
+
+
+
+− 2nϵ 2
+
+(b − a)2
+
+
+
+.
+
+Equivalently, for every α ∈ (0 , 1) , with conditional probability at least 1 − α,
+
+1
+
+n
+
+> n
+
+X
+
+> i=1
+
+Xi − μ ≤ (b − a)
+
+r log(2 /α )2n .
+
+Proof. Apply Lemma B.22 to the filtration Fi := G ∨ σ(X1, . . . , X i), i = 0 , . . . , n . Since the variables are conditionally independent given G and have conditional mean μ, we have E[Xi | F i−1] = E[Xi | G ] = μ.Moreover, the range length is b − a for every i. Lemma B.22 gives the displayed high-probability inequality conditionally on G; rewriting it in tail form gives the exponential bound. □
+
+39 Here, we restate the batch sample sizes defined in Theorem B.10. 
+
+For T ≥ 1 and δ ∈ (0 , 1) define the policy-class and active-set logarithmic factors as follows: 
+
+mt := t, nt := t, kt := t, t = 1 , . . . , T. (60) The logarithmic factors are moved into the ridge parameter and the final regret bound. Set 
+
+LΠ := log 
+
+ 16 T |Π|2
+
+δ
+
+
+
+. (61) Because nr = r, the total number of active atoms across all rounds is bounded by 
+
+MT := 2 
+
+> T
+
+X
+
+> r=1
+
+(T − r + 1) r = T (T + 1)( T + 2) 3 . (62) Define 
+
+LP := log 
+
+ 16 MT
+
+δ
+
+
+
+, LT := max {1, L Π, L P , log( eT )}. (63) Then PTt=1 |Y act  
+
+> t
+
+| ≤ MT . Define 
+
+H := 1 + B2 + β−2, λ := 16 HL 2 
+
+> T
+
+, ST ≥ 1 ∨ SEC NLHF (Ψ , λ ), γ := 
+
+r ST
+
+λT . (64) Use the learner coefficient 
+
+αt = 2
+
+γm t
+
+= 2
+
+γt . (65) Finally, fix the constant stepsize 
+
+η := 2β
+
+1 + 4 β2 . (66) Then η ≤ 4β/ (1 + 4 β2), ηβ < 1, η ≤ 1, and 
+
+cη = 1 − ηβ − η
+
+4β = 12 . (67) The final lemma verifies all deterministic events required above hold with high probability. It controls the explorer numerator, the explorer denominator, and the active-set preference estimates simultaneously. 
+
+Lemma B.24 Under the sampling rules of Algorithm 3 and the choices Eqs. (60) and (61) , with probability at least 1 − δ, all of the following statements hold simultaneously for all t ≤ T .(i) For all ρ′, π ∈ Π and all ν ∈ Π,
+
+|N ρ′,π t (ν) − bN ρ′,π t (ν)| ≤ ϵm,t , ϵm,t := B
+
+r 2LΠ
+
+mt
+
+. (68) 
+
+Although the event is stated for all ν ∈ Π, the random deviation depends only on the on-policy empirical average, so no union bound over ν is needed. In particular, Eq. (48) holds with the same ϵm,t .(ii) For all ρ′, π ∈ Π,
+
+| bHρ′,π t − Hρ′,π t | ≤ λ
+
+2 . (69) 
+
+Consequently, for all π ∈ Π,
+
+12
+
+ λ + Ht(π) ≤ λ + bHt(π) ≤ 2 λ + Ht(π), (70) 
+
+and Eq. (49) holds. 
+
+40 (iii) For every active prompt-response atom in the empirical historical loss at round t,
+
+| bPt(a ≻ πt−1) − P ⋆(a ≻ πt−1)| ≤ ϵp,t , ϵ2 
+
+> p,t
+
+:= LP
+
+2kt
+
+. (71) 
+
+Proof. We prove the three claims and then union bound. (i) Fix t, ρ′, π ∈ Π, and ν ∈ Π. Let Gmt be the sigma-field containing all randomness before drawing the on-policy batch eτt−1,1: mt . Conditional on Gmt , the variables 
+
+Xi := log ρ′(eτt−1,i )
+
+π(eτt−1,i ) , i = 1 , . . . , m t,
+
+are independent because eτt−1,i are sampled independently from πt−1. Assumption B.5 gives Xi ∈
+
+[−B, B ] almost surely. Moreover, 
+
+E[Xi | G mt ] = Eτ ∼πt−1
+
+
+
+log ρ′(τ )
+
+π(τ )
+
+
+
+.
+
+The ν-dependent term Eτ ′∼ν [log (ρ′(τ ′)/π (τ ′))] is deterministic conditional on Gmt and appears in both 
+
+N ρ′,π t (ν) and bN ρ′,π t (ν), so it cancels. Hence 
+
+N ρ′,π t (ν) − bN ρ′,π t (ν) = E[X1 | G mt ] − 1
+
+mtmtX
+
+> i=1
+
+Xi.
+
+Apply Corollary B.23 with a = −B, b = B, n = mt, and ϵ = Bp2LΠ/m t. Since b − a = 2 B, this gives 
+
+P
+
+
+
+|N ρ′,π t (ν) − bN ρ′,π t (ν)| > ϵ Gmt
+
+
+
+≤ 2e−LΠ .
+
+This bound is uniform in ν because the random deviation does not depend on ν. Therefore no union bound over ν is needed. Union bounding over t ≤ T and (ρ′, π ) ∈ Π2 gives total failure probability at most 2T |Π|2e−LΠ = δ/ 8. The local event Eq. (48) follows by substituting (ρ′, π ) = ( π⋆t , π t); this is legitimate because Assumption B.4 implies π⋆t ∈ Π and Algorithm 3 outputs πt ∈ Π.(ii) Fix t and (ρ′, π ) ∈ Π2. For s = 0 , . . . , t − 1 and i = 1 , . . . , n s+1 define 
+
+Zs,i := 1
+
+ns+1 
+
+ψρ′,π (τs,i , τ ′
+
+> s,i
+
+)2.
+
+Order the pairs (s, i ) lexicographically and let Fs,i be the filtration generated by all samples revealed up to pair (s, i ). Conditional on the history before drawing the s-th exploration batch, the pairs (τs,i , τ ′
+
+> s,i
+
+)
+
+are independent with law πs−1 ⊗ bπs. Hence Zs,i is adapted and 
+
+E[Zs,i | F s,i −1] = 1
+
+ns+1 
+
+Eτ ∼πs−1,τ ′∼bπs
+
+ψρ′,π (τ, τ ′)2 .
+
+By Assumption B.5, | log (ρ′(τ )/π (τ )) | ≤ B, so |ψρ′,π (τ, τ ′)| ≤ 2B. Therefore 0 ≤ Zs,i ≤ 4B2/n s+1 ,and the range length in Lemma B.22 is 4B2/n s+1 . Applying Lemma B.22 to the ordered collection 
+
+{Zs,i }s<t,i ≤ns+1 with confidence parameter α = 2 e−LΠ gives, for this fixed t, ρ ′, π ,
+
+| bHρ′,π t − Hρ′,π t | ≤ 
+
+vuut 12
+
+> t−1
+
+X
+
+> s=0
+
+ns+1 
+
+ 4B2
+
+ns+1 
+
+2
+
+LΠ = 4 B2
+
+vuut 12
+
+> t−1
+
+X
+
+> s=0
+
+1
+
+ns+1 
+
+!
+
+LΠ
+
+with failure probability at most 2e−LΠ . Union bounding over t ≤ T and (ρ′, π ) ∈ Π2 costs at most another 2T |Π|2e−LΠ = δ/ 8. Under the simple schedule ns+1 = s + 1 ,
+
+> t−1
+
+X
+
+> s=0
+
+1
+
+ns+1 
+
+≤
+
+> T
+
+X
+
+> r=1
+
+1
+
+r ≤ log( eT ) ≤ LT , LΠ ≤ LT .
+
+41 Algorithm 4: Bonus-explorer Exploratory Nash Preference Optimization (BENPO) 
+
+Input: horizon T , reference policy πref , confidence-radius schedule {γt(δ)}t≥1, coefficient λ > 0;
+
+Initialize D0 ← ∅;
+
+for t = 1 , 2, . . . , T do 
+
+Compute MLE bPt via Eq. (72); Compute a Nash policy under bPt by solving 
+
+πt ∈ argmax 
+
+> π1
+
+min 
+
+> π2
+
+Jβ
+
+ π1, π 2; bPt
+
+;
+
+Generate a prompt-response pair (xt, yt) via xt ∼ ρ and yt ∼ πt(· | xt);Construct UCB bonus at (xt, yt) for any y′ ∈ V ⋆: bt(y′; xt, yt) by 
+
+min 
+
+1, pγt(δ) sup  
+
+> P,P ′∈P
+
+P (yt ≻ y′|xt) − P ′(yt ≻ y′|xt)
+
+q
+
+λ + Pt−1
+
+> s=1
+
+ P (ys ≻ ˆys|xs) − P ′(ys ≻ ˆys|xs)2
+
+ ;
+
+Sample from the exploiter policy: 
+
+ˆyt ∈ argmax 
+
+> y′
+
+bt(y′; xt, yt); 
+
+Query preference label It ∼ Bern (P ⋆(yt ≻ ˆyt|xt)) ;Update dataset Dt ← Dt−1 ∪ { (xt, yt, ˆyt, I t)};
+
+Output: {πt}Tt=1 ;Thus 
+
+| bHρ′,π t − Hρ′,π t | ≤ 4B2 LT
+
+√2 ≤ 4HL T ≤ 8HL 2 
+
+> T
+
+= λ
+
+2 ,
+
+where B2 ≤ H, LT ≥ 1, and λ = 16 HL 2 
+
+> T
+
+. The comparison Eq. (70) follows by applying this bound to 
+
+(ρ′, π ) = ( πt, π ) and using | bH − H| ≤ λ/ 2.(iii) Fix t and condition on the history Gpt just before drawing the comparison opponents for preference estimation. For a fixed active prompt-response atom a = ( x, y) ∈ Y act  
+
+> t
+
+, Algorithm 3 draws ct,a,j ∼
+
+πt−1(· | x) independently and then observes 
+
+Yt,a,j ∼ Bern  P ⋆(y ≻ ct,a,j | x), j = 1 , . . . , k t.
+
+The variables Yt,a,j are conditionally independent and lie in [0 , 1] . By the tower property, 
+
+E[Yt,a,j | G pt ] = Ec∼πt−1(·| x)[P ⋆(y ≻ c | x)] = P ⋆(a ≻ πt−1).
+
+Apply Corollary B.23 with a = 0 , b = 1 , n = kt, and ϵ = pLP /(2 kt). For this fixed active atom, the conditional failure probability is at most 2e−LP . Since the active sets are history-measurable before the labels at round t are drawn and PTt=1 |Y act  
+
+> t
+
+| ≤ MT , union bounding over all realized active atoms and all times gives failure probability at most 2MT e−LP = δ/ 8.Combining the three bounds gives total failure probability at most 3δ/ 8 < δ . □
+
+42 B.4 Proofs of improved sample efficiency of BENPO 
+
+B.4.1 Algorithm 
+
+We first provide the high-level idea of Bonus-Explorer ENPO. At round t, BENPO computes the MLE bPt of the preference function from the data collected so far: 
+
+bPt ∈ argmax  
+
+> P∈P
+> t−1
+
+X
+
+> s=1
+
+h
+
+Is log P (ys ≻ ˆys|xs) + (1 − Is) log  1 − P (ys ≻ ˆys|xs)i
+
+, (72) where xs, ys, ˆys are sampled prompts and responses at round s, and Is ∼ Bern (P ⋆(ys ≻ ˆys|xs)) is the preference label collected at round t. Then, it finds a regularized Nash policy ˆπt by querying a minimax oracle: 
+
+πt ∈ argmax 
+
+> π1
+
+min 
+
+> π2
+
+bPt(π1 ≻ π2) − βKL (π1∥πref ) + βKL (π2∥πref ).
+
+This main-policy step plays the same role as ENPO ’s policy update in Eq. (18)—it tracks the regret-relevant policy, the one whose suboptimality is the object of analysis. We then draw one sample from yt ∼ πt, and based on this sample, we solve the following maximization problem: 
+
+max 
+
+> y′
+
+1 ∧ pγt(δ) sup  
+
+> P,P ′∈P
+
+P (yt ≻ y′|xt) − P ′(yt ≻ y′|xt)
+
+q
+
+λ + Pt−1
+
+> s=1
+
+ P (ys ≻ ˆys|xs) − P ′(ys ≻ ˆys|xs)2
+
+ , (73) and denote this adversarial sample by ˆyt. We then query a preference label It between yt and ˆyt.See Algorithm 4 for the full statement of the algorithm. As a counterpart of ENPO with stronger oracles, BENPO aligns with ENPO in a clear manner: maintain a main policy ˆπt whose regret is the object of analysis, and pair that main policy with a second mechanism whose only role is to guide exploration .
+
+B.4.2 Assumptions and additional notations 
+
+Before we analyze the regret of BENPO , we first introduce some assumptions and notations. Let P be a finite realizable class of preference models: P ⋆ ∈ P . Furthermore, every P ∈ P satisfies 
+
+P (y ≻ y′ | x) + P (y′ ≻ y | x) = 1 , thus P (y ≻ y | x) = 12 .
+
+We define the KL-regularized game with a t-round empirical preference as follows: 
+
+max 
+
+> π1
+
+min 
+
+> π2
+
+Jβ
+
+ π1, π 2; bPt
+
+ := bPt(π1 ≻ π2) − βKL (π1∥πref ) + βKL (π2∥πref )
+
+We denote Jβ (π1, π 2) := Jβ (π1, π 2; P ⋆). For each P ∈ P , let π⋆P denote the unique symmetric Nash policy of the KL-regularized game under P , i.e., 
+
+Jβ (π1, π ⋆P ; P ) ≤ Jβ (π⋆P , π ⋆P ; P ) ≤ Jβ (π⋆P , π 2; P ), ∀ π1, π 2 ∈ Π.
+
+By anti-symmetry of the preference model P , Jβ (π⋆P , π ⋆P ; P ) = 1 /2.We specify that the statistical domain is 
+
+Z := {(x, y, y′) : x ∈ X , y, y′ ∈ Y x}.
+
+Finally, the logarithmic bound is stated in terms of the eluder dimension Russo and Roy [2013] of the squared model-difference class 
+
+GP := (P (y ≻ y′ | x) − P ′(y ≻ y′ | x)) 2 : P, P ′ ∈ P .
+
+Let dP := dE (GP , 1/T ) be its eluder dimension at scale 1/T .43 B.4.3 Main proof of sample efficiency 
+
+The following squared ℓ2 bound for the regret bound or equivalently duality gap, is the key to access the logarithmic regret bound. The proof strategy follows that in the proof of [Lee et al., 2026, Theorem 3.1.]. 
+
+Lemma B.25 (Squared ℓ2 bound) Let bP be any antisymmetric preference function, and let π⋆ 
+
+> bP
+
+denote the symmetric regularized Nash policy under bP :
+
+π⋆ 
+
+> bP
+
+∈ arg max 
+
+> π1
+
+min 
+
+> π2
+
+Jβ (π1, π 2; bP ).
+
+Then, we have 
+
+gap β (π⋆ 
+
+> bP
+
+) ≤ 4
+
+β Ex∼ρ, y∼π⋆ 
+
+> bP(·| x)
+
+
+
+sup 
+
+> y′∈Y
+
+ P ⋆(y ≻ y′ | x) − bP (y ≻ y′ | x)2
+
+
+
+.
+
+Proof. Fix a prompt x ∈ V ⋆. Denote 
+
+eπ := arg max  
+
+> π1∈Π
+
+Jβ (π1, π ⋆ 
+
+> bP
+
+; P ⋆).
+
+First, note that 
+
+12 gap β (π⋆ 
+
+> bP
+
+) = max  
+
+> π1∈Π
+
+Jβ (π1, π ⋆ 
+
+> bP
+
+; P ⋆) − 12= Jβ (eπ, π ⋆ 
+
+> bP
+
+; P ⋆) − Jβ (eπ, π ⋆ 
+
+> bP
+
+; bP ) + Jβ (eπ, π ⋆ 
+
+> bP
+
+; bP ) − 12
+
+≤ Jβ (eπ, π ⋆ 
+
+> bP
+
+; P ⋆) − Jβ (eπ, π ⋆ 
+
+> bP
+
+; bP )= Ey∼eπ, y′∼π⋆
+
+> bP
+
+P ⋆(y ≻ y′ | x) − bP (y ≻ y′ | x),
+
+where the inequality follows by the fact that π⋆ 
+
+> bP
+
+is a Nash policy with preference bP .Since by the antisymmetry of P ⋆ and bP , we have for any π
+
+Ey,y′∼π(·| x)
+
+P ⋆(y ≻ y′|x) − bP (y ≻ y′|x) = 0 ,
+
+and therefore 
+
+12 gap β (π⋆ 
+
+> bP
+
+) ≤Ey∼eπ(·| x),y′∼π⋆ 
+
+> bP(·| x)
+
+P ⋆(y ≻ y′|x) − bP (y ≻ y′|x)
+
+− Ey,y′∼π⋆ 
+
+> bP(·| x)
+
+P ⋆(y ≻ y′|x) − bP (y ≻ y′|x)
+
+=Ey′∼π⋆ 
+
+> bP(·| x)
+
+h
+
+Ey∼eπ(·| x)
+
+P ⋆(y ≻ y′|x) − bP (y ≻ y′|x)i
+
+− Ey′∼π⋆ 
+
+> bP(·| x)
+
+h
+
+Ey∼π⋆ 
+
+> bP(·| x)
+
+P ⋆(y ≻ y′|x) − bP (y ≻ y′|x)i
+
+=Ey′∼π⋆ 
+
+> bP(·| x)
+
+h
+
+P ⋆(· ≻ y′|x) − bP (· ≻ y′|x), eπ(·| x) − π⋆ 
+
+> bP
+
+(·| x)
+
+i
+
+≤Ey′∼π⋆ 
+
+> bP(·| x)
+
+h
+
+sup 
+
+> y∈Y
+
+P ⋆(y ≻ y′|x) − bP (y ≻ y′|x)
+
+i
+
+· eπ(·| x) − π⋆ 
+
+> bP
+
+(·| x) 1, (74) where the last inequality is by Hölder’s inequality. On the other hand, since −β KL  π1(·| x) ∥ πref (·| x) is β-strongly concave w.r.t. ∥·∥ 1 by Pinsker’s inequality, 
+
+Jβ (π1, π ⋆ 
+
+> bP
+
+; P ⋆) is β-strongly concave with respect to its first parameter. Also, we have Jβ (π⋆ 
+
+> bP
+
+, π ⋆ 
+
+> bP
+
+; P ⋆) = 12 ,therefore 12 gap β (π⋆ 
+
+> bP
+
+) = Jβ (eπ, π ⋆ 
+
+> bP
+
+; P ⋆) − Jβ (π⋆ 
+
+> bP
+
+, π ⋆ 
+
+> bP
+
+; P ⋆) ≥ β
+
+2 eπ(·| x) − π⋆ 
+
+> bP
+
+(·| x) 21. (75) By rearranging Eq. (75), we have 
+
+eπ(·| x) − π⋆ 
+
+> bP
+
+(·| x) 1 ≤
+
+q
+
+gap β (π⋆ 
+
+> bP
+
+)β. (76) 44 Substituting Eq. (76) into Eq. (74) yields the quadratic inequality 
+
+12 gap β (π⋆ 
+
+> bP
+
+) ≤ Ey′∼π⋆ 
+
+> bP(·| x)
+
+h
+
+sup 
+
+> y∈Y
+
+P ⋆(y ≻ y′|x) − bP (y ≻ y′|x)
+
+i
+
+·
+
+q
+
+gap β (π⋆ 
+
+> bP
+
+)β, 
+
+which solves to gap β (π⋆ 
+
+> bP
+
+) ≤ 4
+
+β
+
+
+
+Ey′∼π⋆ 
+
+> bP(·| x)
+
+
+
+sup 
+
+> y∈Y
+
+P ⋆(y ≻ y′|x) − bP (y ≻ y′|x)
+
+ 2
+
+.
+
+By Jensen’s inequality, we obtain gap β (π⋆ 
+
+> bP
+
+) ≤ 4
+
+β Ey′∼π⋆ 
+
+> bP(·| x)
+
+
+
+sup 
+
+> y∈Y
+
+ P ⋆(y ≻ y′|x) − bP (y ≻ y′|x)2
+
+
+
+. (77) Note that, by antisymmetric property of the preferences, we further have 
+
+ P ⋆(y ≻ y′|x) − bP (y ≻ y′|x)2 =  P ⋆(y′ ≻ y|x) − bP (y′ ≻ y|x)2,
+
+By swapping the names of y and y′ in Eq. (77) and taking expectation over x ∼ ρ, we complete the proof. 
+
+□
+
+Theorem B.26 (Logarithmic regret bound of Algorithm 4) Suppose P is a finite class of antisym-metric preference functions with P ⋆ ∈ P , and that the squared difference class {(P − P ′)2 : P, P ′ ∈ P} has eluder dimension at most dP at scale 1/T . In Algorithm 4, set λ = 1 and 
+
+γt(δ) = 4 log(2 T |P| /δ ) + 1 .
+
+Then, the iterates {πt}Tt=1 produced by Algorithm 4 satisfy 
+
+> T
+
+X
+
+> t=1
+
+gap β (πt) ≤ eO
+
+ dP log( T |P| /δ ) log Tβ
+
+
+
+with probability at least 1 − δ.Proof of Theorem B.26. We begin by reducing the per-round suboptimality to a squared preference error via Lemma B.25. Since πt = π⋆
+
+> bPt
+
+by construction, by Lemma B.25 we have gap β (πt) ≤ 4
+
+β Ex∼ρ, y∼πt(·| x)
+
+
+
+sup 
+
+> y′∈Y
+
+ P ⋆(y ≻ y′|x) − bPt(y ≻ y′|x)2
+
+
+
+. (78) Throughout this proof, we abbreviate ∆t(y, y′|x) := P ⋆(y ≻ y′|x) − bPt(y ≻ y′|x), and denote Ft−1 := 
+
+σ {xs, ys, ˆys, I s}s<t 
+
+ and Et[ · ] := E[ · | F t−1].By Lemma B.27, there exists an event E1 with P(E1) ≥ 1 − δ/ 2 on which 
+
+> t−1
+
+X
+
+> s=1
+
+
+
+P ⋆(ys ≻ ˆys|xs) − bPt(ys ≻ ˆys|xs)
+
+2
+
+≤ 4 log(2 T |P| /δ ) ∀ t ∈ [T ].
+
+Setting γt(δ) := 4 log (2 T |P| /δ ) + λ and taking P = P ⋆, P ′ = bPt inside the supremum defining bt, on E1,
+
+∆t(y, y′|x)2
+
+γt(δ) ≤ ∆t(y, y′|x)2
+
+λ + Pt−1 
+
+> s=1
+
+∆t(ys, ˆys|xs)2 ≤ 1
+
+γt(δ) bt(y′; x, y)2,
+
+therefore |∆t(y, y′|x)| ≤ bt(y′; x, y) for all (x, y, y′) ∈ X × Y 2. Note that the clip min {1, ·} is harmless because |∆t(y, y′|x)| ≤ 1 holds trivially. Squaring, taking sup y′∈Y , and noting that the exploiter ˆyt =arg max y′∈Y bt(y′; xt, yt) realizes the supremum, we have 
+
+sup 
+
+> y′∈Y
+
+∆t(yt, y′|xt)2 ≤ bt(ˆ yt; xt, yt)2.
+
+45 Substituting into Eq. (78) yields gap β (πt) ≤ 4
+
+β Et
+
+bt(ˆ yt; xt, yt)2. (79) We next concentrate the squared bonus around its conditional expectation. Since bt ∈ [0 , 1] by construction, the sequence 
+
+Xt := Et
+
+bt(ˆ yt; xt, yt)2 − bt(ˆ yt; xt, yt)2
+
+is a martingale difference sequence with |Xt| ≤ 1 and Et[X2 
+
+> t
+
+] ≤ Et
+
+bt( ˆyt; xt, yt)2. Applying Lemma B.28 with Yt = bt(ˆ yt; xt, yt) and confidence δ/ 2 yields an event E2 with P(E2) ≥ 1 − δ/ 2 on which 
+
+> T
+
+X
+
+> t=1
+
+Et
+
+bt(ˆ yt; xt, yt)2 ≤ 2
+
+> T
+
+X
+
+> t=1
+
+bt(ˆ yt; xt, yt)2 + 4 log(2 /δ ). (80) To control the cumulative realized squared bonus, observe that by the definition of bt and γt(δ) = 4 log(2 T |P| /δ ) + 1 ≥ 1,
+
+bt(ˆ yt; xt, yt)2 ≤ γt(δ) · min 
+
+(
+
+1, sup  
+
+> P,P ′∈P
+
+(P − P ′)2(yt ≻ ˆyt|xt)
+
+λ + Pt−1
+
+> s=1
+
+(P − P ′)2(ys ≻ ˆys|xs)
+
+)
+
+.
+
+Summing over t ∈ [T ], the right-hand side is the standard self-normalized squared width for the function class 
+
+{(P − P ′)2 : P, P ′ ∈ P} evaluated on the realized sequence {(xt, yt, ˆyt)}Tt=1 . Since γt(δ) is non-decreasing in 
+
+t, the eluder-dimension lemma [Russo and Roy, 2013, Lemma 5] gives 
+
+> T
+
+X
+
+> t=1
+
+bt(ˆ yt; xt, yt)2 ≤ C′ · γT (δ) · dP · log T (81) for a constant C′ > 0.Combining the pieces, on E1 ∩ E 2 (which has probability at least 1 − δ by a union bound), summing Eq. (79) over t ∈ [T ] and chaining Eqs. (80) and (81), 
+
+> T
+
+X
+
+> t=1
+
+gap β (πt) ≤ 4
+
+β
+
+> T
+
+X
+
+> t=1
+
+Et
+
+bt(byt; xt, yt)2
+
+≤ 8
+
+β
+
+> T
+
+X
+
+> t=1
+
+bt(byt; xt, yt)2 + 16 log(2 /δ )
+
+β
+
+≤ 8C′
+
+β · γT (δ) · dP · log T + 16 log(2 /δ )
+
+β
+
+= eO
+
+ dP · log( |P| /δ ) · log Tβ
+
+
+
+.
+
+□
+
+B.4.4 Technical lemmas Lemma B.27 (MLE concentration) Let P be a finite class of preference functions P : V⋆ × V ⋆ × V ⋆ →
+
+[0 , 1] with P ⋆ ∈ P . Suppose that at each round s ∈ [T ] the preference label is generated as Is ∼ Bern  P ⋆(ys ≻
+
+bys | xs). Then, for any δ ∈ (0 , 1) , with probability at least 1 − δ,
+
+> t−1
+
+X
+
+> s=1
+
+  bPt(ys ≻ bys | xs) − P ⋆(ys ≻ bys | xs)2 ≤ 4 log  T |P| /δ  ∀ t ∈ [T ].
+
+46 Proof. Fix t ∈ [T ] and a candidate P ∈ P . Write ps(P ) := P (ys ≻ bys | xs) for short, and let Fs := 
+
+σ {xr , yr , byr , I r }r≤s
+
+ be the natural filtration. Define the half-log-likelihood-ratio martingale 
+
+Mt(P ) := 
+
+> t−1
+
+Y
+
+> s=1
+
+s
+
+ps(P )Is (1 − ps(P )) 1−Is
+
+ps(P ⋆)Is (1 − ps(P ⋆)) 1−Is .
+
+A direct computation gives 
+
+EMt(P ) Ft−2
+
+ =Mt−1(P ) ·
+
+p pt−1(P )pt−1(P ⋆) + p(1 − pt−1(P ))(1 − pt−1(P ⋆)) 
+
+
+
+=Mt−1(P ) ·  1 − 12 D2 
+
+> H
+
+(pt−1(P ), p t−1(P ⋆)) ,
+
+where D2 
+
+> H
+
+(p, q ) := ( √p − √q)2 + ( √1 − p − √1 − q)2 is the squared Hellinger distance between Bernoulli (p)
+
+and Bernoulli (q). Using 1 − x ≤ e−x,
+
+EMt(P ) ≤ E
+
+"
+
+exp 
+
+
+
+− 12
+
+> t−1
+
+X
+
+> s=1
+
+D2 
+
+> H
+
+(ps(P ), p s(P ⋆)) 
+
+
+
+· Mt(P )
+
+.
+
+Mt(P )
+
+#
+
+· E[M0] ≤ 1.
+
+Equivalently, the process Mt(P ) exp   12
+
+P 
+
+> s<t
+
+D2 
+
+> H
+
+(ps(P ), p s(P ⋆))  is a non-negative supermartingale with mean at most 1, so by Markov’s inequality, for any P ∈ P and δ′ ∈ (0 , 1) ,
+
+Pr 
+
+"
+
+> 12
+> t−1
+
+X
+
+> s=1
+
+D2 
+
+> H
+
+(ps(P ), p s(P ⋆)) > − log Mt(P ) + log(1 /δ ′)
+
+#
+
+≤ δ′. (82) Setting δ′ = δ/ (T |P| ) and taking a union bound over P ∈ P and t ∈ [T ], the event in Eq. (82) fails for all 
+
+(P, t ) with probability at least 1 − δ. On this event, plugging in P = bPt and using − log Mt( bPt) ≤ 0 by the MLE optimality P 
+
+> s<t
+
+log ps( bPt)Is (1 − ps( bPt)) 1−Is ≥ P 
+
+> s<t
+
+log ps(P ⋆)Is (1 − ps(P ⋆)) 1−Is ,
+
+> t−1
+
+X
+
+> s=1
+
+D2
+
+> H
+
+ ps( bPt), p s(P ⋆) ≤ 2 log  T |P| /δ  ∀ t ∈ [T ].
+
+Finally, the standard Hellinger-vs.-TV comparison for Bernoulli distributions gives D2 
+
+> H
+
+(p, q ) ≥ 12 (p − q)2 for all p, q ∈ [0 , 1] , so 
+
+> t−1
+
+X
+
+> s=1
+
+  bPt − P ⋆2(ys ≻ bys | xs) ≤ 2
+
+> t−1
+
+X
+
+> s=1
+
+D2
+
+> H
+
+ ps( bPt), p s(P ⋆) ≤ 4 log  T |P| /δ .
+
+□
+
+Lemma B.28 (Freedman’s inequality Freedman [1975]) Let {Xt}Tt=1 be a sequence of real-valued ran-dom variables adapted to a filtration {F t}Tt=0 satisfying E[Xt | F t−1] = 0 and |Xt| ≤ R almost surely. Let 
+
+VT := PTt=1 E[X2 
+
+> t
+
+| F t−1] denote the predictable quadratic variation. Then for any δ ∈ (0 , 1) and any 
+
+η ∈ (0 , 1/R ), with probability at least 1 − δ,
+
+> T
+
+X
+
+> t=1
+
+Xt ≤ ηV T + log(1 /δ )
+
+η .
+
+In particular, applying this with Xt = Et[Yt] − Yt for Yt ∈ [0 , 1] adapted, and noting that Et[X2 
+
+> t
+
+] ≤ Et[Yt],with probability at least 1 − δ, TX
+
+> t=1
+
+Et[Yt] ≤ 2
+
+> T
+
+X
+
+> t=1
+
+Yt + 4 log(1 /δ ).
+
+47 C Additional details in numerical experiments 
+
+## C.1 Additional results 
+
+C.1.1 Pair-wise winning rates Self-play tournament. Because INPO, XPO, and ENPO are all derived from a Nash-equilibrium objective, average pairwise win-rate is the natural correctness metric: at a true equilibrium, every policy in the iterate set should win roughly 50 % against every other policy. Deviations from 0.5 measure the residual exploitability of each iterate and induce a strict preference ordering. We therefore run a head-to-head tournament across the iter 3 endpoints of the four headline algorithms (base, XPO, INPO with the four step sizes, and ENPO with the three step sizes whose checkpoints are available), producing the 9 × 9 matrix in Table 2. 
+
+Judge and inputs. For each unordered pair (i, j ) of policies and each of the N = 805 AlpacaEval 2 prompts, we sample one response from each policy under temperature 0.7 / top-p 0.9 (the same generation hyperparameters used during training), apply the chat template through the policy’s own tokenizer, and feed the (instruction, response A, response B) tuple to the llm-blender/PairRM [Jiang et al., 2023] pairwise judge. PairRM is a 400 M-parameter DeBERTa-v3-large classifier trained on multiple human-preference datasets; critically, it is not the Skywork reward model used in the training loop, so the resulting comparison is unbiased relative to the training objective (a comparison that re-used the training RM would conflate “how well did each algorithm optimize the training reward” with “which algorithm sits closer to the Nash equilibrium of the underlying preference distribution”). 
+
+Position-bias correction and aggregation. Pairwise judges are well known to exhibit position bias [Zheng et al., 2023]. We therefore evaluate every pair in both orderings (A=i, B =j) and (A=j, B =i) and average the per-prompt outcomes, so each cell Wij ∈ { 0, 0.5, 1}N before averaging and the position-bias component cancels out in expectation. With K= 9 policies this gives  K
+
+> 2
+
+ · 2 · N = 36 · 2 · 805 = 57 ,960 PairRM forward passes, completed in ∼25 minutes on a single H100 at zero external API cost. The reproduction script (eval/judge_evals/self_play_pairrm.py ) consumes cached ae2_responses.json files for every policy and writes a complete K × K matrix; we report the matrix as Wij = Pr p[i ≻ j] (probability that i beats j on a randomly chosen prompt p, after position-bias averaging). 
+
+Discussion. The bottom row of Table 2 reports each policy’s average win-rate against the other eight, which we use as the headline single-number summary. The full row data exposes which matchups drive that average, and three patterns are immediately visible. First, the two ENPO points at the most aggressive step sizes ( ENPO 1/4 ·3 and ENPO 1/8 ·3) sweep the top of the leaderboard with average win-rates 0.602 and 
+
+0.610 respectively, beating every INPO and XPO checkpoint on average. Second, at the moderate step size 
+
+1/η = 3 .75 ·10 −3 the three relevant policies ( INPO ·3, INPO 1/2 ·3, ENPO 1/2 ·3) cluster within ±0.001 of each other ( 0.559 , 0.560 , 0.560 ) – the adversary advantage emerges only when the OMD step is aggressive enough for plain INPO to destabilize. Third, INPO 1/8 ·3 collapses to an average of 0.336 , falling below the untrained base model in pairwise comparisons against several stronger policies and losing 0.493 vs base on the head-to-head row; ENPO 1/8 ·3 at the same η achieves 0.610 , a +0 .274 swing. This is direct evidence that the adversary’s role is to stabilize the OMD step at larger stepsize, where INPO becomes unstable. The closest pair to a Nash tie is ENPO 1/4 · 3 vs ENPO 1/8 · 3 at 0.504 /0.496 , suggesting the two ENPO endpoints sit in roughly the same equivalence class near the equilibrium manifold. Conversely, the largest exploitable cell is ENPO 1/4 · 3 vs base at 0.744 .48 Table 2: PairRM self-play win-rate matrix restricted to iter3 endpoints (805 AE2 prompts, both orderings averaged; judge = llm-blender/PairRM ). Row beats column; values ∈ [0 , 1] ; self-cells − are 0.5 by definition. Subscripts 1/2, 1/4, 1/8 denote (1 /η )/2, (1 /η )/4, (1 /η )/8 relative to the spec default 1/η = 7 .5 · 10 −3. At a perfect Nash equilibrium every entry would be ∼ 0.5. The largest exploitable matchup ENPO 1/4 · 3 vs base 
+
+= 0 .744 is in bold ; the closest near-equilibrium tie is ENPO 1/4 · 3 vs ENPO 1/8 · 3 at 0.504 /0.496 . Bottom row reports each column’s average win-rate against the other eight policies. 
+
+base XPO ·3 INPO ·3 INPO 1/2·3 INPO 1/4·3 INPO 1/8·3 ENPO 1/2·3 ENPO 1/4·3 ENPO 1/8·3base − 0.360 0.284 0.293 0.345 0.493 0.287 0.257 0.260 XPO ·3 0.640 − 0.427 0.414 0.484 0.615 0.438 0.376 0.367 INPO ·3 0.716 0.573 − 0.509 0.585 0.708 0.488 0.448 0.447 INPO 1/2·3 0.707 0.586 0.491 − 0.589 0.708 0.486 0.466 0.447 INPO 1/4·3 0.655 0.515 0.415 0.411 − 0.648 0.430 0.399 0.379 INPO 1/8·3 0.507 0.385 0.292 0.292 0.352 − 0.306 0.287 0.265 ENPO 1/2·3 0.713 0.562 0.512 0.514 0.570 0.694 − 0.457 0.454 ENPO 1/4·3 0.744 0.624 0.552 0.534 0.601 0.713 0.543 − 0.504 ENPO 1/8·3 0.740 0.633 0.553 0.553 0.621 0.735 0.546 0.496 −
+
+avg vs others 0.322 0.470 0.559 0.560 0.482 0.336 0.560 0.602 0.610 
+
+49
