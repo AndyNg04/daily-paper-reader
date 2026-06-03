@@ -1,0 +1,2393 @@
+Title: GAPD: Gold-Action Policy Distillation for Agentic Reinforcement Learning in Knowledge Base Question Answering
+
+URL Source: https://arxiv.org/pdf/2605.29584v1
+
+Published Time: Fri, 29 May 2026 00:52:55 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+GAPD: Gold-Action Policy Distillation for Agentic Reinforcement Learning in Knowledge Base Question Answering 
+
+Xin Sun 1,2 Jianan Xie 3 Zhongqi Chen 4 Qiang Liu 2
+
+Shu Wu 2 Bowen Song 4 Weiqiang Wang 4 Zilei Wang 1 Liang Wang 21University of Science and Technology of China 
+
+> 2
+
+NLPR, MAIS, Institute of Automation, Chinese Academy of Sciences 
+
+> 3
+
+Southern University of Science and Technology 4Ant Group 
+
+xin.sun@cripac.ia.ac.cn , 12110714@mail.sustech.edu.cn {qiang.liu, shu.wu, wangliang}@nlpr.ia.ac.cn , zlwang@ustc.edu.cn {chenzhongqi.czq, bowen.sbw, weiqiang.wwq}@antgroup.com 
+
+Abstract 
+
+Reinforcement learning (RL) is a natural fit for agentic knowledge base question answer-ing (KBQA), where a model must issue exe-cutable actions, observe knowledge-base feed-back, and eventually return an answer. How-ever, current RL-based KBQA systems mainly optimize sparse rewards from the final answer, leaving intermediate action errors weakly su-pervised. This is especially limiting for logical-form annotated KBQA benchmarks: gold logi-cal forms can be converted into executable ac-tion sequences, but existing pipelines use them mainly for warm-start data construction rather than for on-policy RL updates. We propose 
+
+GAPD , a training-time Gold-Action Policy 
+
+Distillation framework that adds dense token-level guidance to outcome-based RL. To align gold actions with on-policy student rollouts, GAPD uses E NTITY -A NCHOR MATCHING :it treats the intermediate entities reached dur-ing student exploration and gold execution as state anchors, and matches student states to gold states through these explored entity sets. The current policy conditioned on this aligned gold action serves as a stop-gradient teacher, whose token distribution is distilled back to the ordinary student policy over matched student-generated token spans. GAPD consistently sur-passes the current state of the art on WebQSP, GrailQA, and GraphQ. 
+
+1 Introduction 
+
+Knowledge Base Question Answering (KBQA) re-quires a model to answer natural language ques-tions by navigating a structured knowledge base (KB), such as Freebase (Bollacker et al., 2008), and producing executable logical operations over enti-ties, relations, and constraints (Berant et al., 2013; Yih et al., 2016; Gu et al., 2021). From the perspective of external-knowledge agents, KG agents for KBQA are the structured counterpart of retrieval-augmented generation and search agents. RAG-style systems retrieve pas-sages or documents from unstructured corpora, us-ing dense retrieval and retrieval-augmented lan-guage modeling or generation as core mecha-nisms (Karpukhin et al., 2020; Guu et al., 2020; Lewis et al., 2020; Izacard and Grave, 2021; Borgeaud et al., 2022). Search-agent variants sim-ilarly retrieve web evidence for reasoning (Xiong et al., 2025a), while recent work studies reliability and multimodal evidence in retrieved contexts (Sun et al., 2025b, 2026; Du et al., 2026). KG agents instead query a structured graph: each action se-lects an entity, relation, operator, or constraint and changes the executable state. This makes relation quality and precise graph navigation central, since a wrong relation or constraint can propagate through later execution; robust relation extraction is one source of reliable relational facts for such KBs (Sun et al., 2023). Prior KBQA work spans semantic parsing (Be-rant et al., 2013), subgraph-based reasoning (He et al., 2021), and LLM-based logical-form gen-eration (Luo et al., 2024a). Recent agentic for-mulations instead decompose KBQA into interac-tions with an executable environment (Xiong et al., 2024; Luo et al., 2025; Chen et al., 2025; Sun et al., 2025a). In this setting, the model emits an action, the KB executor returns an observation, and the model continues until it can produce an answer. Compared with one-shot logical-form generation, this action-based formulation can improve robust-ness because intermediate actions can be executed and checked against the KB environment. This set-ting is also a specialized form of tool-augmented 
+
+> arXiv:2605.29584v1 [cs.CL] 28 May 2026
+
+generation: the model does not choose among open-ended APIs, but selects KB operations from a fixed action space. Prior tool-learning work studies scal-able tool representation and selection as tool li-braries grow (Su et al., 2025; Fang et al., 2026); our focus is how to train structured KB actions with token-level RL supervision. Reinforcement learning (RL) is a natural fit for such agentic KBQA, and has recently become a central post-training method for improving LLM reasoning with verifiable rewards (Schulman et al., 2017; Shao et al., 2024; Guo et al., 2025; Yu et al., 2025). Systems such as KBQA-R1 (Sun et al., 2025a) and KnowCoder-A1 (Chen et al., 2025) train policies with outcome-based rewards, typically using answer F1 and format validity, and update the policy with algorithms such as GRPO (Shao et al., 2024). This shifts learning from static trace imitation to verifiable interac-tion optimization. However, in outcome-reward GRPO, supervision is attached to the whole roll-out: generated tokens in the same response in-herit the same group-relative advantage com-puted from the final answer reward. When a trajectory fails, this rollout-level signal gives lit-tle information about which intermediate action caused the failure or which token should have been changed. Logical-form annotated KBQA benchmarks al-ready provide executable programs or semantic parses, from which gold action sequences can be de-rived (Berant et al., 2013; Yih et al., 2016; Gu et al., 2021; Su et al., 2016). Prior KBQA pipelines have used this information for few-shot logical-form demonstrations (Li et al., 2023; Nie et al., 2024), offline program or logical-form supervision (Cao et al., 2022; Shu et al., 2022; Luo et al., 2024a), tra-jectory synthesis (Luo et al., 2025), or supervised warm-starting (Sun et al., 2025a). However, prior RL-based KBQA methods typically discard this supervision during on-policy updates and optimize only final outcome reward (Sun et al., 2025a; Chen et al., 2025). We address this gap by introducing GAPD 
+
+(Gold-Action Policy Distillation), a framework for RL-based KBQA. The core idea is simple: when the student policy reaches an intermediate state, we first decide which gold action is valid for that state, use the aligned action to condition the cur-rent model as a teacher, and distill the teacher’s token-level preference back into the student pol-icy. This turns gold actions into dense guidance without replacing RL exploration with direct be-havior cloning. The teacher is not a separate frozen oracle; it is the current policy conditioned on ad-ditional gold-action information. Thus, the dis-tillation signal asks the model to move from its unguided behavior toward its own behavior under valid procedural conditioning. The alignment step is necessary because on-policy rollouts can devi-ate from the gold trajectory: the next gold action should be determined by the current execution state, not by the raw turn index. GAPD therefore uses ENTITY -A NCHOR MATCHING inside the distilla-tion procedure. It represents each student and gold intermediate state by the entities reached during execution and matches the student state to the most compatible gold state. Our contributions are: 
+
+❶ We identify the token-level credit-assignment problem in agentic KBQA RL policies. 
+
+❷ We propose GAPD, which uses ENTITY -ANCHOR MATCHING to align gold actions with student states, constructs gold-action-conditioned self-teacher distributions, and sup-plies token-level distillation guidance during RL. 
+
+❸ We show that GAPD surpasses the current state of the art on WebQSP, GrailQA, and GraphQ. 
+
+2 Background 
+
+2.1 Agentic KBQA 
+
+We follow the action-based, agentic KBQA set-ting explored by KBQA-O1, KBQA-R1, and KnowCoder-A1 (Luo et al., 2025; Sun et al., 2025a; Chen et al., 2025). Given a question q, linked topic entities, and a KB executor, the model gener-ates a sequence of actions such as Find_relation ,
+
+Merge , Order , Compare , Time_constraint , and 
+
+Count . Appendix E provides the full action tem-plates and their corresponding logical-form up-dates. Each action updates an intermediate S-expression state. To obtain KB feedback, the executor translates the current S-expression into SPARQL and executes the SPARQL query against the KB. The environment returns observations con-taining retrieved entities, relation candidates, execu-tion status, and diagnostic messages. The trajectory terminates when the model emits an answer. 
+
+2.2 Outcome-Only RL 
+
+Let πθ be the student policy and τ =(a1, o 1, . . . , a T , o T , ˆy) be a rollout. Prior RL-based KBQA training assigns a trajectory-level reward: 
+
+R(τ ) = λout rout (ˆ y, y ∗) + λfmt rfmt (τ ), (1) where rout measures final answer correctness and 
+
+rfmt rewards valid output format. GRPO estimates the advantage by comparing multiple sampled roll-outs for the same prompt: 
+
+ˆAi = R(τi) − 1
+
+n
+
+> n
+
+X
+
+> j=1
+
+R(τj ). (2) Here i indexes a sampled multi-turn response, where a response denotes the whole rollout rather than a single KBQA turn. This objective can im-prove final answers, but its credit assignment is coarse: all generated tokens are weighted by the same trajectory advantage. 
+
+2.3 Gold Actions in Existing Pipelines 
+
+Logical-form annotated KBQA datasets provide a gold logical form z∗. An action parser can convert 
+
+z∗ into a gold action sequence g = ( g1, . . . , g M ).Prior KBQA pipelines use this supervision in sev-eral offline ways. Supervised semantic parsers and LLM-based generators learn from question– program or question–logical-form pairs (Cao et al., 2022; Shu et al., 2022; Ye et al., 2022; Hu et al., 2022; Zhang et al., 2023; Luo et al., 2024a). Few-shot prompting methods instead use labeled logical forms as demonstrations without fine-tuning (Li et al., 2023; Nie et al., 2024). Agentic methods use stepwise traces more directly: KBQA-O1 initializes policy and reward models from anno-tated trajectories and further fine-tunes them with MCTS-generated annotations (Luo et al., 2025), while KBQA-R1 uses referenced rejection sam-pling (RRS), where gold actions extracted from S-expressions guide trajectory synthesis before SFT (Sun et al., 2025a). KnowCoder-A1 instead emphasizes outcome supervision and curriculum RL to avoid process-supervised trajectory imita-tion (Chen et al., 2025). These strategies im-prove prompting, warm-start quality, or outcome-supervised exploration, but gold actions do not di-rectly affect the later RL policy gradient. Our work uses gold actions during RL itself. 
+
+3 Method 
+
+3.1 Overview 
+
+GAPD augments outcome-based RL for KBQA (Sun et al., 2025a; Chen et al., 2025) with dense supervision derived from gold action sequences. For each training question, the dataset provides a gold logical form or its corresponding executable action list, as in standard KBQA semantic-parsing benchmarks (Berant et al., 2013; Yih et al., 2016; Gu et al., 2021; Su et al., 2016). During RL, the student policy still performs on-policy KB interaction and receives the original outcome reward. In addition, for matched inter-mediate states, GAPD constructs a teacher-side prompt by conditioning the current policy on the aligned gold action, obtains a self-teacher distribution, and distills this distribution back to the student tokens. Figure 1 contrasts the two supervision signals used in training. The blue path shows the orig-inal outcome-RL signal, where the final answer reward is broadcast as a coarse GRPO advantage. The orange and green paths show GAPD: E NTITY -ANCHOR MATCHING first aligns a student state with a gold execution state, the aligned gold action conditions the teacher-side context, the gold-action-conditioned self-teacher scores the sampled student tokens, and the resulting token-level guide is fused with the GRPO advantage before the policy up-date. The detailed training procedure is provided in Appendix B as Algorithm 1. 
+
+3.2 Gold-Action-Conditioned Self-Teacher 
+
+As in prior action-based KBQA pipelines (Luo et al., 2025; Sun et al., 2025a), we parse the gold logical form z∗ to obtain a ground-truth action se-quence g = ( g1, . . . , g M ), where each gm is an atomic operation in the action space. We execute this sequence once to collect the corresponding gold execution states um and their reached entity sets E(um). These gold states are used only for training-time alignment and supervision construc-tion; they are not exposed to the student at inference time. The orange self-teacher path in Figure 1 visu-alizes this construction: a gold action sequence is paired with intermediate entity anchors, E NTITY -ANCHOR MATCHING selects the aligned state, and the next gold action is inserted only into the teacher-side prompt for scoring. At a student turn t, let xt be the ordinary stu-dent context containing the original question, previ-ous student actions, and previous KB observations. Let m∗(t) denote the accepted gold-state index se-lected by E NTITY -A NCHOR MATCHING for the student state st. When this match is accepted, the next gold action gm∗(t)+1 provides a candidate pro-Question 
+
+Student Policy 
+
+(current policy π θ)
+
+KB Environment 
+
+(knowledge base) 
+
+Outcome Reward 
+
+(r final )
+
+GRPO Loss 
+
+(outcome reward) 
+
+> Action
+> (multi-turn)
+> Observation
+> (state / results) Final Answer
+> Student State
+> (at current turn t)
+
+q 
+
+> Legend
+> GRPO advantage
+> GAPD advantage
+> Fused advantage
+> Final policy update
+
+Token Advantage Fusion 
+
+Entity-Anchor 
+
+Gold Action Hint 
+
+(at turn t) 
+
+> gold-action hint aligned to current state
+
+Teacher Prompt 
+
+> history + State
+> + hidden gold-action hint
+
+Current Policy as Teacher 
+
+(with hint) 
+
+Teacher Token Distribution   
+
+> (scoring sampled student tokens)
+> log p hint (x t)− log p student (x t)
+
+GAPD Token-Level Supervision 
+
+Atotal (t) = 
+
+AGRPO (t) + λGAPD ·
+
+AGAPD (t)    
+
+> GRPO token advantage
+> -0.45 -0.45 -0.45 -0.45
+
+... 
+
++     
+
+> GAPD token advantage
+> -0.04 -0.17 +0.00 -1.89 -0.018
+> =
+> Fused token advantage (for policy update)
+> match student state to gold MID set
+
+Matching 
+
++
+
+Student Token Distribution 
+
+> ps(·|context)
+
+Gold Action Sequence + Entity States  
+
+> (oracle path with intermediate states)
+> Gold Action_1
+> Entity set_1
+> Gold Action_2
+> Entity set_2
+
+...     
+
+> oracle actions produce intermediate entity sets
+> -0.47 -0.53 -0.45 -1.4 -0.46
+
+GRPO provides coarse outcome-level advantage shared across tokens. 
+
+Policy Update 
+
+> (update π θ)
+
+Outcome-RL Path (Outcome Reward Only) 
+
+> Find
+> -0.04
+> _relation
+> +0.00
+> [
+> +0.00
+> expression
+> -0.17
+> 1
+> +0.00
+> |
+> +0.00
+> distilled
+> +0.00
+> _s
+> -0.00
+> pir
+> +0.00
+> its
+> +0.00
+> .
+> -1.89
+> fer
+> -0.00
+> mentation
+> +0.00
+> _base
+> -0.00
+> .s
+> +0.016
+> pirit
+> -0.018
+> _products
+> -0.00
+> ]
+> -0.00
+> 0.5×
+
+Real Case: GAPD Corrects a Wrong Relation Branch           
+
+> T1 correct action
+> Find_relation [m.041j_x |
+> distilled_spirits.distilled_spirit_type.fermentation_base ]
+> Student MID set ={m.053wn, m.09696}
+> Gold S1 MID set ={m.053wn, m.09696}
+> match score = 1.00
+> Student wrong: Find_relation [expression1 | distilled_spirits. fermentation_base.spirit_products ]
+> Gold hint: Find_relation [expression1 |
+> distilled_spirits. distilled_spirit.fermentation_base ]
+> divergence after distilled_spirits
+> Execution consequence (MID sets) Token boundary evidence
+> Student next MID set:
+> {m.01p5b6, m.0c59y}
+> Gold next MID set:
+> {m.01019_jv, m.03ntq8, m.03ntxh, ...}
+> ✕
+
+✓
+
+> boundary after distilled_spirits
+
+↓   
+
+> student token: “.”
+> teacher top-1: “.dist”
+> GAPD guide: -1.89
+
+2 Wrong Branch vs. Gold Branch 1 State Match Evidence 
+
+✓✓
+
+3 Execution Consequence + Token Evidence Figure 1: Overview of GAPD. GRPO supplies supervision mainly through the final answer reward. GAPD uses ENTITY -A NCHOR MATCHING to align an on-policy student state with a gold execution state, conditions the current policy on the aligned gold action to obtain a self-teacher distribution, assigns dense guidance to the selected student tokens, and fuses this guidance with the original GRPO advantage. 
+
+cedural conditioning signal. We construct a teacher-side prompt ˜xt by adding this gold action to the same student context: 
+
+˜xt = GoldCond( xt, g m∗(t)+1 ). (3) The added action describes the next valid operation in the action language. It is intentionally procedu-ral: it may reveal the next relation, merge target, or constraint operation, but it does not directly reveal the final answer. The self-teacher is the current policy conditioned on the gold-action prompt: 
+
+pteach 
+
+θ (· | ˜xt) = stopgrad ( πθ(· | ˜xt)) . (4) The student distribution is the same policy condi-tioned on the original prompt: 
+
+pstud 
+
+θ (· | xt) = πθ(· | xt). (5) This design follows the on-policy distillation view that the student should receive feedback on tokens sampled from its own current rollout (Agarwal et al., 2024; Gu et al., 2024; Song and Zheng, 2026). Unlike hard behavior cloning, the target is not a single gold string but the model’s own distribution under valid procedural conditioning. The student is therefore encouraged to move toward a gold-action-conditioned self-teacher while still being optimized by outcome reward, preserving softer preferences among generated-token alternatives. 
+
+3.3 Gold-Action Selection with ENTITY -A NCHOR MATCHING 
+
+Gold actions are useful for distillation only when they correspond to the student’s current execution state. In an executable KBQA environment, the state after each action determines which next op-erations are valid: a relation, merge target, or con-straint that is correct for one intermediate entity set may be invalid for another. Thus, GAPD must align gold actions by state rather than blindly apply-ing the gold action at the same turn index. E NTITY -ANCHOR MATCHING performs this alignment us-ing the intermediate entity sets reached during stu-dent exploration and gold execution. The state-alignment box and the lower real-case panel in Figure 1 show this principle: when the student and gold entity anchors match, the next gold action is treated as the action that should be valid from that state; when execution later diverges, the teacher can penalize the specific relation branch that led to the wrong next entity set. For a student state st and a gold state um, E NTITY -A NCHOR MATCHING 
+
+computes the Jaccard similarity over their reached entity sets: 
+
+sim( st, u m) = |E(st) ∩ E(um)||E(st) ∪ E(um)| . (6) The matched gold state is selected as 
+
+m∗(t) = arg max  
+
+> m
+
+sim( st, u m). (7) If this match is accepted, the next gold action 
+
+gm∗(t)+1 becomes the conditioning action for the teacher-side prompt. E NTITY -A NCHOR MATCH - 
+
+> ING
+
+is part of training-time teacher construction, not an additional reasoning module at inference time. We apply two conservative filters before as-signing token-level guidance. First, we skip answer turns because the teacher conditioning uses a next reasoning action, while an answer turn is already supervised by the final outcome reward. Second, we use a same-next-state filter: if the executed stu-dent action reaches the same non-empty next entity set as the aligned gold action, we drop the distilla-tion signal for that turn. This preserves exploration of equivalent KB paths instead of forcing every successful state transition onto the annotated gold surface path. 
+
+3.4 Token-Level Fusion with GRPO 
+
+GAPD does not optimize a standalone JSD reg-ularizer. Instead, it converts the gold-action-conditioned self-teacher distribution into a dense token-level guide and fuses this guide with the orig-inal GRPO policy update (Shao et al., 2024). Let 
+
+yi,k be the sampled token at position k of response 
+
+i, and let I denote the set of selected student-generated token positions after E NTITY -A NCHOR 
+
+MATCHING matching. In Figure 1, this is the tran-sition from the orange “GAPD Token-Level Super-vision” strip to the green “Token Advantage Fusion” box: GAPD produces token-specific scores only on matched generated spans, while the blue GRPO advantage remains the outcome-level signal shared across response tokens. For k ∈ I , we score the sampled token under the gold-action-conditioned self-teacher and the ordinary student context: 
+
+di,k = log pteach  
+
+> θ
+
+(yi,k | ˜xi,k )
+
+− log pstud  
+
+> θ
+
+(yi,k | xi,k ). (8) We use this score as a detached, clipped token ad-vantage: 
+
+Agapd  
+
+> i,k
+
+= clip (sg( di,k ), −c, c ) , (9) and Agapd  
+
+> i,k
+
+= 0 for tokens outside I. A positive value reinforces a sampled token that the gold-action-conditioned self-teacher assigns higher prob-ability than the ordinary student context, while a negative value suppresses a token that the self-teacher disfavors. Let Agrpo  
+
+> i
+
+be the standard group-relative advan-tage derived from the final answer reward for re-sponse i. We form a token-level fused advantage 
+
+bAi,k = Agrpo  
+
+> i
+
++ λgapd Agapd  
+
+> i,k
+
+. (10) The policy is updated with the GRPO objective over generated response tokens, using the standard PPO-style clipped surrogate (Schulman et al., 2017; Shao et al., 2024): 
+
+Lfuse = − 1
+
+Z
+
+X
+
+> i,k
+
+mi,k min 
+
+
+
+ri,k (θ) bAi,k ,
+
+clip( ri,k (θ), 1 − ϵ, 1 + ϵ) bAi,k 
+
+
+
+,ri,k (θ) = πθ(yi,k | xi,k )
+
+πold (yi,k | xi,k ) .
+
+(11) where mi,k is the response-token mask and Z =P 
+
+> i,k
+
+mi,k . Thus the final-answer reward supplies the shared GRPO signal, while GAPD adds local guidance only on aligned student-generated tokens. The numeric example in Figure 1 illustrates this fusion: a wrong relation segment receives both the coarse negative GRPO advantage and a dense negative GAPD advantage on the divergent relation tokens, yielding a stronger update on the actual error span. 
+
+4 Experiments 
+
+4.1 Experimental Setup 4.1.1 Datasets 
+
+We evaluate on three widely used KBQA bench-marks. GrailQA (Gu et al., 2021) is designed to evaluate compositional generalization in KBQA. Table 1: Performance on GrailQA. Bold numbers indicate the best result, and underlined numbers indicate the second-best result. 
+
+Method LLM I.I.D. Compositional Zero-shot Overall EM F1 EM F1 EM F1 EM F1 
+
+Prompting Methods 
+
+KB-BINDER (Li et al., 2023) Codex-davinci-002 40.0 43.3 33.9 36.6 40.1 44.0 38.7 42.2 KB-Coder (Nie et al., 2024) GPT-3.5-turbo 40.6 45.5 34.5 38.6 42.2 47.3 40.1 44.9 ARG-KBQA (Tian et al., 2024) GPT-3.5-turbo 46.6 51.5 36.4 41.8 46.6 52.1 43.8 48.5 KBQA-R1 Harness (Sun et al., 2025a) GLM-5 46.0 62.1 51.4 64.4 68.7 75.5 60.0 70.2 Kimi-K2.5 64.0 70.1 57.1 65.7 73.9 78.0 68.5 73.9 gpt-5.3-codex 55.6 64.3 56.2 65.6 77.4 79.6 68.6 73.5 Claude 4.6 Sonnet 62.0 68.6 62.9 68.8 79.1 81.9 72.0 76.3 
+
+Fine-tune-based Methods 
+
+RnG-KBQA (Ye et al., 2022) T5-large 86.7 89.0 61.7 68.9 68.8 74.7 69.5 76.9 DecAF (Yu et al., 2022) T5-large 88.7 92.4 71.5 79.8 65.9 77.3 72.5 81.4 TIARA (Shu et al., 2022) T5-large 88.4 91.2 66.4 74.8 73.3 80.7 75.3 81.9 KBQA-o1 (Luo et al., 2025) Llama-3.1-8B 77.8 ±0.5 85.5 ±0.4 76.3 ±0.6 77.6 ±0.5 68.1 ±0.8 76.1 ±0.4 71.9 ±0.3 78.5 ±1.0 
+
+KnowCoder-A1 (Chen et al., 2025) Qwen2.5-Coder-7B – 81.1 – 70.6 – 84.1 – 80.5 KBQA-R1 (Sun et al., 2025a) Llama-3.1-8B 90.0 ±0.3 91.5 ±0.2 78.0 ±0.4 82.5 ±0.3 83.6 ±0.3 85.2 ±0.3 83.9 ±0.2 86.1 ±0.3 
+
+GAPD Llama-3.1-8B 92.8 ±0.2 93.8 ±0.2 82.4 ±0.3 87.0 ±0.3 87.8 ±0.2 88.7 ±0.2 87.8 ±0.2 89.5 ±0.2 
+
+Rel. improv. over KBQA-R1 +3.1% +2.5% +5.6% +5.5% +5.0% +4.1% +4.6% +3.9% 
+
+Table 2: Results on WebQSP. Bold numbers indicate the best result, and underlined numbers indicate the second-best result. 
+
+Method LLM F1 
+
+Prompting Methods 
+
+KB-BINDER (Li et al., 2023) Codex-davinci-002 52.6 KB-Coder (Nie et al., 2024) GPT-3.5-turbo 55.7 ARG-KBQA (Tian et al., 2024) GPT-3.5-turbo 58.8 Interactive-KBQA (Xiong et al., 2024) GPT-4-turbo 71.2 KBQA-R1 Harness (Sun et al., 2025a) GLM-5 64.5 Kimi-K2.5 73.3 gpt-5.3-codex 71.1 Claude 4.6 Sonnet 76.7 
+
+Fine-tune-based Methods 
+
+RnG-KBQA (Ye et al., 2022) T5-large 75.6 DecAF (Yu et al., 2022) T5-large 76.7 TIARA (Shu et al., 2022) T5-large 78.9 MCTS-KBQA (Xiong et al., 2025b) Llama-3.1-8B 76.0 KBQA-o1 (Luo et al., 2025) Llama-3.1-8B 57.8 KnowCoder-A1 (Chen et al., 2025) Qwen2.5-Coder-7B 77.2 KBQA-R1 (Sun et al., 2025a) Llama-3.1-8B 83.4 ±0.3 
+
+GAPD Llama-3.1-8B 86.1 ±0.2 
+
+Rel. improv. over KBQA-R1 +3.2% 
+
+Table 3: Results on GraphQ. Bold numbers indicate the best result, and underlined numbers indicate the second-best result. 
+
+Method LLM F1 
+
+Prompting Methods 
+
+KB-BINDER (Li et al., 2023) Codex-davinci-002 27.1 KB-Coder (Nie et al., 2024) GPT-3.5-turbo 31.1 KBQA-R1 Harness (Sun et al., 2025a) GLM-5 48.5 Kimi-K2.5 53.3 gpt-5.3-codex 51.5 Claude 4.6 Sonnet 51.8 
+
+Fine-tune-based Methods 
+
+SPARQA (Sun et al., 2020) BERT-base 21.5 BERT+Ranking (Gu et al., 2021) BERT-base 25.0 ArcaneQA (Gu and Su, 2022) BERT-base 31.8 CoTKR (Wu et al., 2024) Llama-3-8B 47.5 KBQA-o1 (Luo et al., 2025) Llama-3.1-8B 48.7 KBQA-R1 (Sun et al., 2025a) Llama-3.1-8B 53.8 ±0.7 
+
+GAPD Llama-3.1-8B 55.1 ±0.4 
+
+Rel. improv. over KBQA-R1 +2.4% 
+
+It contains 64,331 questions, with 44,337 training questions, 6,763 validation questions, and 13,231 test questions. Following prior work (Luo et al., 2024a, 2025), we report results on the dev set and break down performance into i.i.d. , compositional ,and zero-shot splits. WebQSP (Yih et al., 2016) contains 4,737 questions with semantic parses, split into 3,098 training questions and 1,639 test ques-tions. GraphQ (Su et al., 2016) contains 5,166 graph-structured questions, with 2,508 training questions and 2,658 test questions. 
+
+4.1.2 Baselines 
+
+We organize baselines into prompting and fine-tuning based KBQA methods. Prompting meth-ods include KB-BINDER (Li et al., 2023), KB-Coder (Nie et al., 2024), ARG-KBQA (Tian et al., 2024), and Interactive-KBQA (Xiong et al., 2024). These methods rely on in-context learning or tool interaction with strong LLMs. We further include a KBQA-R1 Harness comparison, where GLM-5 (GLM-5 Team, 2026), Kimi-K2.5 (Kimi Team, 2026), gpt-5.3-codex (OpenAI, 2026), and Claude 4.6 Sonnet (Anthropic, 2026) are plugged into the KBQA-R1 interaction harness (Sun et al., 2025a). To control the token cost of evaluating recent pro-prietary models in multi-turn KB interaction, we randomly sample 500 queries for this compari-son: 200 GrailQA, 200 WebQSP, and 100 GraphQ examples. We report these results as KBQA-R1 Harness rows to make the comparison with current commercial LLMs explicit. Fine-tuning based methods include RnG-KBQA (Ye et al., 2022), DecAF (Yu et al., 2022), TIARA (Shu et al., 2022), MCTS-KBQA (Xiong et al., 2025b), KBQA-o1 (Luo et al., 2025), and KnowCoder-A1 (Chen et al., 2025). For GraphQ, we ad-ditionally include SPARQA (Sun et al., 2020), BERT+Ranking (Gu et al., 2021), ArcaneQA (Gu and Su, 2022), and CoTKR (Wu et al., 2024). De-tailed baseline descriptions are provided in Ap-pendix D. 
+
+4.1.3 Evaluation Metrics 
+
+We use standard KBQA metrics. Exact Match (EM) measures whether the predicted answer set exactly matches the gold answer set. F1 computes entity-level precision and recall over executed an-swers. Training configuration details are provided in Appendix A. 
+
+4.2 Main Results 
+
+Tables 1–3 show that GAPD achieves the best result on every reported benchmark metric. On GrailQA, it raises overall EM/F1 from 83.9/86.1 to 87.8/89.5, corresponding to relative gains of 4.6%/3.9%, and improves every split; the gains are especially clear on compositional and zero-shot questions, where local errors in intermediate rela-tions often determine the final answer. On WebQSP, GAPD improves F1 from 83.4 to 86.1 (+3.2% rela-tive), and on GraphQ from 53.8 to 55.1 (+2.4% relative). The margins are not uniform across datasets, but the direction is consistent: adding token-level guidance during RL improves executed-answer accuracy beyond the outcome-reward base-line. Compared with the strongest commercial LLMs plugged into the KBQA-R1 interaction har-ness, GAPD is substantially stronger on WebQSP, GrailQA, and GraphQ, despite using an 8B open backbone. 
+
+4.3 Ablations and Training Analysis 
+
+We next isolate which components support the gains in Tables 1–3. Table 4 compares full GAPD with outcome-only RL, teacher variants, and align-ment ablations. Figure 2 provides optimization and interaction-efficiency analysis. Table 4 shows three ablation patterns. First, out-come reward alone is consistently lower, showing that token-level GAPD supervision provides use-ful optimization signal beyond the rollout-level reward. Second, Qwen3-32B and Qwen3-14B teacher variants (Yang et al., 2025), both trained 
+
+Table 4: Ablation study for GAPD.                       
+
+> Variant WebQSP GrailQA GraphQ
+> GAPD 86.1 89.5 55.1
+> Outcome reward only 83.4 86.1 53.8
+> Teacher Variants (Yang et al., 2025)
+> Qwen3-32B 84.8 87.2 54.1 Qwen3-14B 83.9 86.2 52.9
+> Alignment Ablations
+> Turn-index alignment (w/o E NTITY -A NCHOR MATCHING )79.3 81.2 49.2 First-turn only 85.0 87.9 54.7
+
+with the SFT dataset, improve over outcome-only RL on most datasets but remain below full GAPD. This suggests that policy-consistent gold-action-conditioned self-teacher distributions are more use-ful than simply using a larger external teacher. Be-cause the self-teacher reuses the current policy un-der gold-action conditioning, it also avoids loading an additional teacher model and requires much less GPU memory than the Qwen3 teacher variants. Third, alignment is critical: turn-index alignment without E NTITY -A NCHOR MATCHING sharply re-duces F1, while first-turn-only supervision recov-ers much of the score but still trails full GAPD. The latter result is expected because first turns are naturally aligned, but later turns need state-based matching to assign the token-level guide to the cor-rect branch. Figure 2(a) supports the same interpretation from the optimization side. The reward curves show that adding GAPD leads to higher training rewards while preserving smooth on-policy optimization. Figure 2(b) evaluates each method as a com-plete KBQA system by plotting average F1 against the average number of interactions or calls per query. GAPD occupies the upper-left region with 76.9 average F1 and 2.68 interactions per query. This is more accurate and slightly cheaper than the KBQA-R1 baseline (74.4 F1, 2.91 interactions), and it is also substantially stronger than the best re-cent LLM harness run, Claude 4.6 Sonnet (71.6 F1, 5.45 interactions). Thus the gain is not obtained by spending more environment calls, but by making the learned policy more accurate within a compact action trajectory. Coefficient sensitivity is reported in Appendix C; performance is stable across λgapd = 0 .1–1.0.
+
+5 Case Study 
+
+Figure 3 compresses three dashboard examples into a paper-facing view; full traces and token tables are in Appendix H. Each example shows the student 0 20 40 60 80           
+
+> Step
+> 0.8
+> 0.9
+> 1.0
+> Training reward
+> WebQSP
+> 050 100 150 200 250
+> Step
+> 0.90
+> 0.95
+> 1.00
+> 1.05
+> GrailQA
+> 020 40 60 80
+> Step
+> 0.85
+> 0.90
+> 0.95
+> 1.00
+> GraphQ
+> w/o GAPD w/ GAPD
+
+(a) Training reward curves 3 5 8 13 28 46  
+
+> Avg. interactions per query (log scale)
+> 60
+> 65
+> 70
+> 75
+> 80
+> Average F1 (%)
+> GLM-5
+> Kimi-K2.5
+> GPT-5.3
+> Claude 4.6 Sonnet KBQA-R1
+> KBQA-o1
+> GAPD
+> Better
+
+(b) Interaction efficiency 
+
+Figure 2: Training dynamics and interaction efficiency. Left: reward curves comparing w/o GAPD and w/ GAPD runs; each curve plots mean reward (outcome reward + format reward), with faint per-step values and EMA-smoothed values using α = 0 .2. Right: interaction-efficiency comparison, reporting average F1 over three benchmarks against average interactions or calls per query on a log scale. 
+
+action, the aligned gold action, and the token-level guide on the matched student-generated span. The three cases illustrate complementary fail-ure modes. In the time-zone example, the student samples a non-canonical daylight-saving relation surface that is repaired by relation retrieval, and the guide concentrates on the divergent relation tokens rather than uniformly across the whole gen-erated turn. In the island comparison example, the question asks for a strict larger-than constraint, while the student uses a non-strict comparator; the strongest negative score lands exactly on the comparator token. In the grain-whisky example, ENTITY -A NCHOR MATCHING first matches the intermediate entity state before applying a gold ac-tion, so the penalty is assigned to the wrong branch rather than to the already-correct first action. 
+
+6 Related Work 
+
+Knowledge Base Question Answering. Classic KBQA systems map questions to executable logical forms such as SPARQL or S-expressions and exe-cute them over a KB (Berant et al., 2013; Gu et al., 2021). LLM prompting methods use demonstra-tions or code-style representations to generate and bind logical forms (Li et al., 2023; Nie et al., 2024). Fine-tuned KBQA generators combine schema re-trieval, ranking, or auxiliary grounding objectives with supervised logical-form generation (Shu et al., 2022; Ye et al., 2022; Luo et al., 2024a). Inter-active and agentic KBQA systems expose KB op-erations as tool calls, search actions, or RL roll-outs (Xiong et al., 2024; Luo et al., 2025; Sun et al., 2025a; Chen et al., 2025). Subgraph-based meth-ods retrieve a question-specific KB neighborhood before reasoning: earlier systems use graph neural reasoning or iterative retrieval (Sun et al., 2018, 2019; He et al., 2021), while recent retrievers con-strain the graph context passed to the reasoner or LLM (Zhang et al., 2022; Li et al., 2025b). Our work focuses on the RL training stage of action-based KBQA and asks how gold logical forms can provide dense supervision during on-policy updates. 
+
+RL for LLM Reasoning. RL methods such as PPO (Schulman et al., 2017) and GRPO (Shao et al., 2024) optimize LLM policies using scalar rewards. In reasoning and tool-use tasks, these rewards are often sparse and outcome-based. Re-cent agentic KBQA work also explores outcome-supervised training without process-level trajectory supervision (Chen et al., 2025). We complement outcome-based RL with token-level supervision derived from executable gold actions. 
+
+On-Policy Distillation. Knowledge distillation transfers soft teacher distributions to a student model (Hinton et al., 2015). Classical distilla-tion usually trains on fixed teacher-generated or dataset prefixes, whereas on-policy distillation sam-ples from the student’s current policy and obtains feedback on the trajectories the student actually vis-its (Song and Zheng, 2026). This idea is closely re-lated to interactive imitation learning, where query-ing an expert on learner-induced states reduces distribution shift between training and deploy-ment (Ross et al., 2011). For LLMs, GKD trains on student-generated outputs with teacher feedback and supports several divergence choices (Agar-wal et al., 2024), MiniLLM optimizes reverse KL through an on-policy objective (Gu et al., 2024). GAPD follows the same on-policy premise but tar-gets RL-based KBQA: GRPO samples the student rollout, executable gold logical forms are aligned to the student’s execution state, and the added dis-tillation signal is applied only to matched turns. A Which other time zones share the daylight-saving end date with Atlantic Time Zone?                                                       
+
+> Student action
+> Find_relation[m.042g7t| time.time_zone.daylight_savings_time_ends]
+> Aligned gold hint
+> Find_relation[m.042g7t|time.time_zone.day_dst_ends]
+> Full action-token guide
+> Find _relation [m.042 g7t|time .time _zone .day
+> light
+> top1=_dst _s avings _time _ends ]
+> Bwhat island is larger than 0.25 in maximum length?
+> Student action
+> Compare[ge|geography.island.max_length| 0.25^^http://www.w3.org/2001/XMLSchema#float]
+> Aligned gold hint
+> Compare[gt|geography.island.max_length| 0.25^^http://www.w3.org/2001/XMLSchema#float]
+> Full action-token guide
+> Compare [ge
+> top1=gt |geography .is land .max _length |0.25 ^^ http :// www .w 3 .org / 200 1 /XMLSchema #float ]
+> CFermentation base of grain whisky shares its fermentation base with what other distilled spirit?
+> Student action
+> Find_relation[expression1| distilled_spirits.fermentation_base.spirit_products]
+> Aligned gold hint
+> Find_relation[expression1| distilled_spirits.distilled_spirit.fermentation_base]
+> Full action-token guide
+> Find _relation [expression 1|distilled _s pir its
+> .
+> top1=.dist fer mentation _base .s pirit _products ]−2
+> 0
+> 2
+> GAPD guide score
+
+Figure 3: Case studies of GAPD. Each example shows the student action aligned to a gold action and highlights where token-level guidance is applied on the divergent span. 
+
+7 Conclusion 
+
+We proposed GAPD, a framework for using gold KBQA actions during on-policy RL. Instead of re-lying only on final outcome reward, the method conditions the current model on aligned gold ac-tions to produce self-teacher distributions and dis-tills token-level guidance back into the student pol-icy. This provides a path toward dense and stable RL training for agentic KBQA. 
+
+Limitations 
+
+One practical limitation is training cost. Com-pared with outcome-reward-only RL, GAPD train-ing is roughly 1.5 × slower because the gold-action-conditioned self-teacher must score generated stu-dent tokens on supervised spans; Appendix Table 5 summarizes this train-time and test-time tradeoff. This overhead is a training-time tradeoff for finer token-level supervision. It does not introduce an external teacher model or any additional computa-tion at inference time. Instead, the learned policy navigates the knowledge graph more precisely and uses fewer LLM calls per query on average in our experiments, which can make testing faster despite the higher training cost. 
+
+References 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos, Matthieu Geist, and Olivier Bachem. 2024. On-policy distillation of language models: Learning from self-generated mistakes. In 
+
+International Conference on Learning Representa-tions .Anthropic. 2026. Claude Sonnet 4.6 system card. Offi-cial system card. Jonathan Berant, Andrew Chou, Roy Frostig, and Percy Liang. 2013. Semantic parsing on Freebase from question-answer pairs. In Proceedings of the 2013 Conference on Empirical Methods in Natural Lan-guage Processing , pages 1533–1544, Seattle, Wash-ington, USA. Association for Computational Linguis-tics. Kurt Bollacker, Colin Evans, Praveen Paritosh, Tim Sturge, and Jamie Taylor. 2008. Freebase: a col-laboratively created graph database for structuring human knowledge. In Proceedings of the 2008 ACM SIGMOD International Conference on Management of Data , SIGMOD ’08, page 1247–1250, New York, NY, USA. Association for Computing Machinery. Sebastian Borgeaud, Arthur Mensch, Jordan Hoff-mann, Trevor Cai, Eliza Rutherford, Katie Milli-can, George Bm Van Den Driessche, Jean-Baptiste Lespiau, Bogdan Damoc, Aidan Clark, Diego De Las Casas, Aurelia Guy, Jacob Menick, Roman Ring, Tom Hennigan, Saffron Huang, Loren Mag-giore, Chris Jones, Albin Cassirer, and 9 others. 2022. Improving language models by retrieving from tril-lions of tokens. In Proceedings of the 39th Interna-tional Conference on Machine Learning , volume 162 of Proceedings of Machine Learning Research , pages 2206–2240. PMLR. Shulin Cao, Jiaxin Shi, Zijun Yao, Xin Lv, Jifan Yu, Lei Hou, Juanzi Li, Zhiyuan Liu, and Jinghui Xiao. 2022. Program transfer for answering complex questions over knowledge bases. In Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 8128– 8140, Dublin, Ireland. Association for Computational Linguistics. Liyi Chen, Panrong Tong, Zhongming Jin, Ying Sun, Jieping Ye, and Hui Xiong. 2024. Plan-on-graph: Self-correcting adaptive planning of large language model on knowledge graphs. In Advances in Neural Information Processing Systems , volume 37. Zhuo Chen, Fei Wang, Zixuan Li, Zhao Zhang, Weiwei Ding, Chuanguang Yang, Yongjun Xu, Xiaolong Jin, and Jiafeng Guo. 2025. Knowcoder-a1: Incentivizing agentic reasoning capability with outcome supervi-sion for kbqa. arXiv preprint arXiv:2510.25101 .Ruoshuang Du, Xin Sun, Qiang Liu, Bowen Song, Zhongqi Chen, Weiqiang Wang, and Liang Wang. 2026. Multimodal adaptive retrieval augmented generation through internal representation learning. 
+
+Preprint , arXiv:2603.00511. Bowen Fang, Wen Ye, Yunyue Su, Jinghao Zhang, Qiang Liu, Yesheng Liu, Xin Sun, Shu Wu, Jiabing Yang, Baole Wei, and Liang Wang. 2026. Tool-weaver: Weaving collaborative semantics for scal-able tool use in large language models. Preprint ,arXiv:2601.21947. GLM-5 Team. 2026. GLM-5: From vibe cod-ing to agentic engineering. arXiv preprint arXiv:2602.15763 .Yu Gu, Sue Kase, Michelle T. Vanni, Brian M. Sadler, Percy Liang, Xifeng Yan, and Yu Su. 2021. Beyond i.i.d.: Three levels of generalization for question an-swering on knowledge bases. In Proceedings of the Web Conference 2021 , WWW ’21, page 3477–3488, New York, NY, USA. Association for Computing Machinery. Yu Gu and Yu Su. 2022. ArcaneQA: Dynamic program induction and contextualized encoding for knowl-edge base question answering. In Proceedings of the 29th International Conference on Computational Linguistics , pages 1718–1731, Gyeongju, Republic of Korea. International Committee on Computational Linguistics. Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. 2024. Minillm: On-policy distillation of large language models. In International Conference on Learning Representations .Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Peiyi Wang, Qihao Zhu, Runxin Xu, Ruoyu Zhang, Shirong Ma, Xiao Bi, and 1 others. 2025. Deepseek-r1 incentivizes reasoning in LLMs through reinforce-ment learning. Nature , 645(8081):633–638. Kelvin Guu, Kenton Lee, Zora Tung, Panupong Pasupat, and Mingwei Chang. 2020. Retrieval augmented language model pre-training. In Proceedings of the 37th International Conference on Machine Learning ,volume 119 of Proceedings of Machine Learning Research , pages 3929–3938. PMLR. Gaole He, Yunshi Lan, Jing Jiang, Wayne Xin Zhao, and Ji-Rong Wen. 2021. Improving multi-hop knowledge base question answering by learning intermediate supervision signals. In Proceedings of the 14th ACM International Conference on Web Search and Data Mining , WSDM ’21, page 553–561, New York, NY, USA. Association for Computing Machinery. Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. 2015. Distilling the knowledge in a neural network. arXiv preprint arXiv:1503.02531 .Xixin Hu, Xuan Wu, Yiheng Shu, and Yuzhong Qu. 2022. Logical form generation via multi-task learn-ing for complex question answering over knowledge bases. In Proceedings of the 29th International Con-ference on Computational Linguistics , pages 1687– 1696, Gyeongju, Republic of Korea. International Committee on Computational Linguistics. Gautier Izacard and Edouard Grave. 2021. Leveraging passage retrieval with generative models for open do-main question answering. In Proceedings of the 16th Conference of the European Chapter of the Associ-ation for Computational Linguistics: Main Volume ,pages 874–880, Online. Association for Computa-tional Linguistics. Vladimir Karpukhin, Barlas Oguz, Sewon Min, Patrick SH Lewis, Ledell Wu, Sergey Edunov, Danqi Chen, and Wen-tau Yih. 2020. Dense passage re-trieval for open-domain question answering. In 
+
+EMNLP (1) , pages 6769–6781. Kimi Team. 2026. Kimi K2.5: Visual agentic intelli-gence. Preprint , arXiv:2602.02276. Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio Petroni, Vladimir Karpukhin, Naman Goyal, Hein-rich Küttler, Mike Lewis, Wen-tau Yih, Tim Rock-täschel, Sebastian Riedel, and Douwe Kiela. 2020. Retrieval-augmented generation for knowledge-intensive nlp tasks. In Advances in Neural Infor-mation Processing Systems , volume 33, pages 9459– 9474. Curran Associates, Inc. Kun Li, Tianhua Zhang, Xixin Wu, Hongyin Luo, James R. Glass, and Helen M. Meng. 2025a. De-coding on graphs: Faithful and sound reasoning on knowledge graphs through generation of well-formed chains. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Vol-ume 1: Long Papers) , pages 24349–24364, Vienna, Austria. Association for Computational Linguistics. Mufei Li, Siqi Miao, and Pan Li. 2025b. Simple is effec-tive: The roles of graphs and large language models in knowledge-graph-based retrieval-augmented gen-eration. In International Conference on Learning Representations .Tianle Li, Xueguang Ma, Alex Zhuang, Yu Gu, Yu Su, and Wenhu Chen. 2023. Few-shot in-context learning on knowledge base question answering. In Proceed-ings of the 61st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) ,pages 6966–6980, Toronto, Canada. Association for Computational Linguistics. Haoran Luo, Haihong E, Yikai Guo, Qika Lin, Xiaobao Wu, Xinyu Mu, Wenhao Liu, Meina Song, Yifan Zhu, Anh Tuan Luu, and 1 others. 2025. KBQA-o1: Agen-tic knowledge base question answering with monte carlo tree search. arXiv preprint arXiv:2501.18922 .Haoran Luo, Haihong E, Zichen Tang, Shiyao Peng, Yikai Guo, Wentai Zhang, Chenghao Ma, Guant-ing Dong, Meina Song, Wei Lin, Yifan Zhu, and Anh Tuan Luu. 2024a. ChatKBQA: A generate-then-retrieve framework for knowledge base question answering with fine-tuned large language models. In Findings of the Association for Computational Linguistics ACL 2024 , pages 2039–2056, Bangkok, Thailand and virtual meeting. Association for Com-putational Linguistics. Linhao Luo, Yuan-Fang Li, Reza Haffari, and Shirui Pan. 2024b. Reasoning on graphs: Faithful and inter-pretable large language model reasoning. In Interna-tional Conference on Learning Representations .Costas Mavromatis and George Karypis. 2025. GNN-RAG: Graph neural retrieval for efficient large lan-guage model reasoning on knowledge graphs. In 
+
+Findings of the Association for Computational Lin-guistics: ACL 2025 , pages 16682–16699, Vienna, Austria. Association for Computational Linguistics. Zhijie Nie, Richong Zhang, Zhongyuan Wang, and Xudong Liu. 2024. Code-style in-context learning for knowledge-based question answering. Proceed-ings of the AAAI Conference on Artificial Intelligence ,38(17):18833–18841. OpenAI. 2026. Introducing GPT-5.3-Codex. Official product announcement. Stéphane Ross, Geoffrey J. Gordon, and J. Andrew Bag-nell. 2011. A reduction of imitation learning and structured prediction to no-regret online learning. In 
+
+Proceedings of the Fourteenth International Confer-ence on Artificial Intelligence and Statistics , pages 627–635. John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. 2017. Proxi-mal policy optimization algorithms. arXiv preprint arXiv:1707.06347 .Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, Y. K. Li, Y. Wu, and Daya Guo. 2024. Deepseekmath: Pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 .Yiheng Shu, Zhiwei Yu, Yuhan Li, Börje Karlsson, Tingting Ma, Yuzhong Qu, and Chin-Yew Lin. 2022. TIARA: Multi-grained retrieval for robust question answering over large knowledge base. In Proceed-ings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 8108–8121, Abu Dhabi, United Arab Emirates. Association for Computational Linguistics. Mingyang Song and Mao Zheng. 2026. A survey of on-policy distillation for large language models. arXiv preprint arXiv:2604.00626 .Yu Su, Huan Sun, Brian Sadler, Mudhakar Srivatsa, Izzeddin Gür, Zenghui Yan, and Xifeng Yan. 2016. On generating characteristic-rich question sets for QA evaluation. In Proceedings of the 2016 Con-ference on Empirical Methods in Natural Language Processing , pages 562–572, Austin, Texas. Associa-tion for Computational Linguistics. Yunyue Su, Jinshuai Zhang, Bowen Fang, Wen Ye, Jing-hao Zhang, Bowen Song, Weiqiang Wang, Qiang Liu, and Liang Wang. 2025. Toolscaler: Scalable generative tool calling via structure-aware semantic tokenization. In Findings of the Association for Com-putational Linguistics: EMNLP 2025 , pages 556– 578, Suzhou, China. Association for Computational Linguistics. Haitian Sun, Tania Bedrax-Weiss, and William Cohen. 2019. PullNet: Open domain question answering with iterative retrieval on knowledge bases and text. In Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing and the 9th International Joint Conference on Natural Lan-guage Processing (EMNLP-IJCNLP) , pages 2380– 2390, Hong Kong, China. Association for Computa-tional Linguistics. Haitian Sun, Bhuwan Dhingra, Manzil Zaheer, Kathryn Mazaitis, Ruslan Salakhutdinov, and William Cohen. 2018. Open domain question answering using early fusion of knowledge bases and text. In Proceed-ings of the 2018 Conference on Empirical Methods in Natural Language Processing , pages 4231–4242, Brussels, Belgium. Association for Computational Linguistics. Jiashuo Sun, Chengjin Xu, Lumingyuan Tang, Saizhuo Wang, Chen Lin, Yeyun Gong, Lionel Ni, Heung-Yeung Shum, and Jian Guo. 2024. Think-on-graph: Deep and responsible reasoning of large language model on knowledge graph. In International Confer-ence on Learning Representations .Xin Sun, Zhongqi Chen, Qiang Liu, Shu Wu, Bowen Song, Weiqiang Wang, Zilei Wang, and Liang Wang. 2026. Predict the retrieval! test time adapta-tion for retrieval augmented generation. Preprint ,arXiv:2601.11443. Xin Sun, Zhongqi Chen, Xing Zheng, Qiang Liu, Shu Wu, Bowen Song, Zilei Wang, Weiqiang Wang, and Liang Wang. 2025a. Kbqa-r1: Reinforcing large language models for knowledge base question an-swering. arXiv preprint arXiv:2512.10999 .Xin Sun, Qiang Liu, Shu Wu, Zilei Wang, and Liang Wang. 2023. Noise-robust semi-supervised learning for distantly supervised relation extraction. In Find-ings of the Association for Computational Linguis-tics: EMNLP 2023 , pages 13145–13157, Singapore. Association for Computational Linguistics. Xin Sun, Jianan Xie, Zhongqi Chen, Qiang Liu, Shu Wu, Yuehe Chen, Bowen Song, Zilei Wang, Weiqiang Wang, and Liang Wang. 2025b. Divide-then-align: Honest alignment based on the knowledge boundary of RAG. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Vol-ume 1: Long Papers) , pages 11461–11480, Vienna, Austria. Association for Computational Linguistics. Yawei Sun, Lingling Zhang, Gong Cheng, and Yuzhong Qu. 2020. Sparqa: Skeleton-based semantic parsing for complex questions over knowledge bases. Pro-ceedings of the AAAI Conference on Artificial Intelli-gence , 34(05):8952–8959. Yuhang Tian, Dandan Song, Zhijing Wu, Changzhi Zhou, Hao Wang, Jun Yang, Jing Xu, Ruanmin Cao, and HaoYu Wang. 2024. Augmenting reasoning ca-pabilities of LLMs with graph structures in knowl-edge base question answering. In Findings of the Association for Computational Linguistics: EMNLP 2024 , pages 11967–11977, Miami, Florida, USA. Association for Computational Linguistics. Yike Wu, Yi Huang, Nan Hu, Yuncheng Hua, Guilin Qi, Jiaoyan Chen, and Jeff Z. Pan. 2024. CoTKR: Chain-of-thought enhanced knowledge rewriting for com-plex knowledge graph question answering. In Pro-ceedings of the 2024 Conference on Empirical Meth-ods in Natural Language Processing , pages 3501– 3520, Miami, Florida, USA. Association for Compu-tational Linguistics. Guangzhi Xiong, Qiao Jin, Xiao Wang, Yin Fang, Haolin Liu, Yifan Yang, Fangyuan Chen, Zhixing Song, Dengyu Wang, Minjia Zhang, and 1 others. 2025a. Rag-gym: Optimizing reasoning and search agents with process supervision. arXiv preprint arXiv:2502.13957 .Guanming Xiong, Junwei Bao, and Wen Zhao. 2024. Interactive-KBQA: Multi-turn interactions for knowl-edge base question answering with large language models. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Vol-ume 1: Long Papers) , pages 10561–10582, Bangkok, Thailand. Association for Computational Linguistics. Guanming Xiong, Haochen Li, and Wen Zhao. 2025b. MCTS-KBQA: Monte carlo tree search for knowl-edge base question answering. arXiv preprint arXiv:2502.13428 .An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, and 1 oth-ers. 2025. Qwen3 technical report. Preprint ,arXiv:2505.09388. Xi Ye, Semih Yavuz, Kazuma Hashimoto, Yingbo Zhou, and Caiming Xiong. 2022. RNG-KBQA: Generation augmented iterative ranking for knowledge base ques-tion answering. In Proceedings of the 60th Annual Meeting of the Association for Computational Lin-guistics (Volume 1: Long Papers) , pages 6032–6043, Dublin, Ireland. Association for Computational Lin-guistics. Wen-tau Yih, Matthew Richardson, Chris Meek, Ming-Wei Chang, and Jina Suh. 2016. The value of se-mantic parse labeling for knowledge base question answering. In Proceedings of the 54th Annual Meet-ing of the Association for Computational Linguistics (Volume 2: Short Papers) , pages 201–206, Berlin, Germany. Association for Computational Linguis-tics. Donghan Yu, Sheng Zhang, Patrick Ng, Henghui Zhu, Alexander Hanbo Li, Jun Wang, Yiqun Hu, William Wang, Zhiguo Wang, and Bing Xiang. 2022. DecAF: Joint decoding of answers and logical forms for ques-tion answering over knowledge bases. arXiv preprint arXiv:2210.00063 .Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, Xiaochen Zuo, Yu Yue, Weinan Dai, Tiantian Fan, Gaohong Liu, Lingjun Liu, and 1 others. 2025. Dapo: An open-source llm reinforcement learning system at scale. arXiv preprint arXiv:2503.14476 .Jing Zhang, Xiaokang Zhang, Jifan Yu, Jian Tang, Jie Tang, Cuiping Li, and Hong Chen. 2022. Subgraph retrieval enhanced model for multi-hop knowledge base question answering. In Proceedings of the 60th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 5773– 5784, Dublin, Ireland. Association for Computational Linguistics. Lingxi Zhang, Jing Zhang, Yanling Wang, Shulin Cao, Xinmei Huang, Cuiping Li, Hong Chen, and Juanzi Li. 2023. FC-KBQA: A fine-to-coarse composition framework for knowledge base question answering. In Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 1002–1017, Toronto, Canada. Association for Computational Linguistics. 
+
+A Training Configuration 
+
+Backbone. All reported GAPD runs use Llama-3.1-8B-Instruct as the policy backbone. 
+
+SFT warm-start and RL. Training uses a two-stage recipe. First, the policy is warm-started by SFT on action trajectories generated from logical-form annotations, including referenced rejection sampling (RRS). Second, the policy is optimized with executable KB feedback using GRPO and token-level GAPD guidance on aligned student-generated token spans. The SFT stage uses a learn-ing rate of 5 × 10 −6 with cosine decay. The GRPO stage uses an actor learning rate of 1 × 10 −6 and 30% linear warmup. GrailQA is trained for 1 epoch due to its larger training set, while WebQSP and GraphQ are trained for 8 epochs. The train batch size is 256, and we report the final training-step checkpoint. 
+
+GRPO configuration. The rollout policy sam-ples n = 5 responses per prompt with tempera-ture 1.0 and top-p = 0 .99 . The PPO-style clip-ping ratios are ϵlow = 0 .2 and ϵhigh = 0 .28 , fol-lowing DAPO (Yu et al., 2025). The KL coef-ficient is β = 0 .001 . The reward weights are 
+
+λoutcome = 1 .0, λformat = 0 .1, and λgapd = 0 .5;raw GAPD guide scores are clipped to [−2, 2] be-fore scaling. For E NTITY -A NCHOR MATCHING ,we accept a matched gold state only when the Jac-card state-match score is at least τstate = 0 .95 . The Method Train time Avg. F1 Avg. test calls 
+
+Outcome-only RL 8.2h 74.4 2.91 GAPD 12.4h 76.9 2.68 
+
+Table 5: Training-time and test-efficiency tradeoff. GAPD incurs additional training cost because the gold-action-conditioned self-teacher scores student tokens on supervised spans. At test time, no teacher or gold action is used; the trained policy requires fewer LLM calls per query on average while achieving higher average F1. Training time is measured on WebQSP for 88 RL steps; average F1 and test calls are computed over WebQSP, GrailQA, and GraphQ. 
+
+Algorithm 1 GAPD Training Step 
+
+Require: prompt q, gold actions g, policy πθ , KB executor 
+
+E
+
+1: Roll out the student policy to obtain trajectory τ
+
+2: Execute student actions and collect entity-anchor states 
+
+{E(st)}
+
+3: Execute gold actions and collect entity-anchor states 
+
+{E(um)}
+
+4: Initialize distillation mask I ← ∅ 
+
+5: for each student turn t do 
+
+6: Match st to gold state um∗(t) using reached entity sets 7: Build teacher-side prompt ˜xt by adding gold action 
+
+gm∗(t)+1 
+
+8: Add student-generated token positions at turn t to I
+
+9: end for 
+
+10: Compute GRPO advantages from final answer reward 11: Score student tokens under the stop-gradient self-teacher 12: Convert teacher-student log-prob gaps into token-level GAPD advantages on I
+
+13: Update θ with a GRPO-style clipped loss using fused token advantages 
+
+PPO mini-batch size is 128 with dynamic micro-batching enabled. 
+
+Infrastructure. Training is conducted on 8 NVIDIA A100-80GB GPUs with FSDP model sharding. The Freebase backend uses Virtuoso with ODBC connection pooling, pool size 48, and query timeout 600 seconds. 
+
+B Training Algorithm 
+
+Algorithm 1 summarizes one on-policy training step of GAPD. The procedure starts from an ordi-nary student rollout under the current policy, exe-cutes both the sampled student actions and the gold action sequence, and then uses E NTITY -A NCHOR 
+
+MATCHING to identify student turns whose reached entity states can be aligned to gold states. Only these aligned turns receive gold-action-conditioned self-teacher scores. .1 .2 .5 1       
+
+> 84
+> 86
+> F1 WebQSP
+> .1 .2 .5 1
+> 86
+> 88
+> 90
+> GrailQA
+> .1 .2 .5 1
+> 54.0
+> 55.5
+> GraphQ
+> λgapd
+
+Figure 4: Sensitivity to the GAPD coefficient λgapd .Each panel reports F1 after varying λgapd ; the dashed gray horizontal line marks λgapd = 0 , i.e., the KBQA-R1 outcome-only RL baseline without GAPD. 
+
+C Coefficient Sensitivity 
+
+The coefficient sweep shows a useful range around 
+
+λgapd = 0 .1–1.0: very small weights underuse the guide, while the gains taper at λgapd = 1 .0 com-pared with the stronger λgapd = 0 .5 setting. Over-all, performance remains stable across a broad co-efficient range, indicating that GAPD is not overly sensitive to this hyperparameter. Figure 5 provides an additional guide-strength analysis. It reports the share of supervised gener-ated tokens with strong negative raw guide scores. Divergent actions consistently have heavier neg-ative tails, indicating that the token-level guide mainly acts as a localized suppressive correction on generated spans that depart from the gold-action-conditioned self-teacher. .001 .01 .05 .1 .5 1     
+
+> Negative-guide threshold tin g< − t
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> Supervised tokens (%)
+> 2.3x
+> 4.8x
+> 17.0x
+> 28.2x
+> 65.0x 68.3x
+> Matched
+> Divergent
+
+Figure 5: Negative-tail mass of the token-level GAPD guide. Bars show the share of supervised generated tokens whose raw guide score g falls below −t.
+
+D Baseline Details 
+
+We compare with representative KBQA systems under the settings reported by their original pa-pers or by the corresponding interaction harness. The baselines cover prompting-only systems, fine-tuned semantic parsers, and recent action-based or outcome-supervised KBQA agents. 
+
+Prompting methods. These systems use strong LLMs with in-context examples, retrieved KB context, or tool interaction, but do not train a task-specific policy with executable outcome re-ward. KB-BINDER (Li et al., 2023) uses few-shot logical-form demonstrations to produce a draft program and then binds the draft to executable KB items. KB-Coder (Nie et al., 2024) converts logical-form generation into a code-style in-context learning problem to reduce format errors. ARG-KBQA (Tian et al., 2024) augments LLM prompt-ing with question-related graph structures retrieved from the KB. Interactive-KBQA (Xiong et al., 2024) exposes KB interaction APIs to the LLM and decomposes complex questions through multi-turn tool use. ToG (Sun et al., 2024) and PoG (Chen et al., 2024) are prompting-based graph reason-ing agents that perform test-time graph exploration or planning; their reported Hits@1 results are not mixed into our F1/EM main tables. 
+
+KBQA-R1 Harness with commercial LLMs. 
+
+To test whether recent general-purpose LLMs can solve the task without KBQA-specific RL, we plug GLM-5 (GLM-5 Team, 2026), Kimi-K2.5 (Kimi Team, 2026), gpt-5.3-codex (OpenAI, 2026), and Claude 4.6 Sonnet (Anthropic, 2026) into the KBQA-R1 interaction harness (Sun et al., 2025a). These runs use the same action-style KB interface and executor, but the underlying LLMs are not fine-tuned on our training data. Because multi-turn KB execution with proprietary models is expensive, we evaluate this harness comparison on a 500-example subset containing 200 GrailQA, 200 WebQSP, and 100 GraphQ queries. 
+
+Fine-tuning and agentic KBQA methods. RnG-KBQA (Ye et al., 2022) first ranks candi-date logical forms retrieved from KB search and then generates the final logical form conditioned on the ranked candidates. DecAF (Yu et al., 2022) jointly decodes answers and logical forms for KBQA. TIARA (Shu et al., 2022) combines multi-grained retrieval over entities, schema items, and exemplary logical forms with constrained decod-ing. MCTS-KBQA (Xiong et al., 2025b) uses Monte Carlo tree search with step-wise rewards to explore KBQA reasoning paths with open-source instruction LLMs. KBQA-o1 (Luo et al., 2025) is an agentic KBQA framework that uses Monte-Carlo tree search with policy and reward models to explore KB action trajectories. KnowCoder-A1 (Chen et al., 2025) trains an agentic KBQA pol-icy with outcome supervision and curriculum-style optimization. KBQA-R1 (Sun et al., 2025a) is our primary outcome-reward-only RL baseline: it uses the same Llama-3.1-8B backbone, action space, Freebase executor, and SFT warm-start recipe, but optimizes GRPO with final-answer and format re-wards without token-level GAPD guidance. 
+
+GraphQ-specific baselines. For GraphQ, we ad-ditionally include established semantic-parsing and graph-reasoning baselines reported in prior KBQA work. SPARQA (Sun et al., 2020) uses skeleton-based semantic parsing for complex KB questions. 
+
+BERT+Ranking (Gu et al., 2021) ranks candidate parses with a BERT-based model. ArcaneQA (Gu and Su, 2022) combines generation with dynamic program induction and contextual schema encod-ing. CoTKR (Wu et al., 2024) uses chain-of-thought knowledge rewriting to convert retrieved KB evidence into reasoning-friendly text. 
+
+E Action Space 
+
+Following the action-based KBQA setting, we de-compose logical-form construction into a small set of executable operations over an evolving interme-diate expression. At each turn, the model emits an action inside the structured action block; the executor parses the action, updates the correspond-ing functional expression, and returns KB feedback that is appended to the next-turn context. This design avoids requiring the policy to generate a complete nested S-expression in one shot, while still keeping every intermediate step convertible to an executable logical form. Table 6 lists the action templates used in our rollouts. The first four columns specify the surface action, its argu-ments, the functional state update, and the equiva-lent logical-form fragment. In training, GAPD ap-plies token-level guidance only to matched student-generated spans; environment feedback remains context rather than a supervised target. 
+
+F Prompt Templates 
+
+Tables 7 and 8 show the two prompt fragments used during training. The student rollout prompt defines the action protocol, while the teacher-only reference block is inserted only when computing GAPD token guidance for a matched student state. Action Arguments Target Function Equivalent Logical Form                                                
+
+> Find_relation entity |relation expression = JOIN(‘ relation ’, START( entity )) (JOIN relation entity )
+> Merge expression1 |expression expression = AND( expression1 ,expression )(AND ( expression1 ) ( expression ))
+> Order MAX/MIN |expression |relation expression = ARG(‘ mode ’, expression , ‘ relation ’) (mode (expression )relation )
+> Compare le/lt/ge/gt |relation |number expression = CMP(‘ mode ’, ‘ relation ’, number ,expression )(mode relation number (expression ))
+> Time_constraint relation |time expression = TC( expression , ‘ relation ’, ‘ time ’) (TC ( expression )relation time )
+> Count expression expression = COUNT( expression )(COUNT ( expression ))
+
+Table 6: Action space used in the action-based KBQA setting. Each action is mapped to a functional update over the intermediate expression state and an equivalent logical-form template; the resulting S-expression is later translated into SPARQL for execution. 
+
+At inference time, the teacher-side block is never used.     
+
+> You are an expert assistant for querying the Freebase knowledge base using structured reasoning actions. Answer the given question about Freebase knowledge base. You MUST conduct reasoning inside <think>...</think> before emitting actions. After reasoning, provide structured actions inside
+> <action>...</action> .The system will return query results between
+> <information>...</information> .When ready, return the final answer inside <answer>...</answer> using MIDs or literal values.
+> Available Actions : {The Description of Actions}
+> Question: {QUESTION}.
+
+Table 7: Action-based reasoning prompt template for the student policy. 
+
+> Student context before the matched generation turn.
+> . . . dialogue history, actions, and KB observations . . .
+> Teacher-only reference block
+> [Reference action sequence. Do not mention or repeat this in your response, just silently use it as guidance.] {matched_gold_action} [End reference]
+> Assistant-turn prefix from the chat template; teacher logits are evaluated on the original student response tokens after this point.
+
+Table 8: Teacher-only prompt augmentation for comput-ing GAPD token guidance. The full dataset-specific ac-tion descriptions are inserted at the {The Description of Actions} placeholder and summarized in Table 6. 
+
+G Additional Subgraph-Based Baselines 
+
+Table 9 provides a focused comparison with subgraph-based KBQA baselines, including RoG, GNN-RAG, and SubgraphRAG. These methods retrieve or construct question-specific graph neigh-borhoods and perform reasoning over the resulting subgraph, so we report them separately as addi-tional graph-context baselines. We keep the com-parison in the appendix because the available com-parable results are WebQSP-only and therefore do not match the cross-dataset F1/EM setting of the main tables. Among the listed subgraph-based baselines, SubgraphRAG with GPT-4o reports the strongest WebQSP F1 of 78.2; the outcome-only KBQA-R1 baseline reaches 83.4, and GAPD fur-ther improves to 86.1. DoG (Li et al., 2025a) is discussed in related work but omitted from the table because we could not identify a directly compara-ble WebQSP F1 result. 
+
+Method Backbone WebQSP F1 
+
+RoG (Luo et al., 2024b) Llama2-7B 70.8 GNN-RAG (Mavromatis and Karypis, 2025) Llama2-7B 71.3 SubgraphRAG (Li et al., 2025b) Llama-3.1-8B 70.6 SubgraphRAG (Li et al., 2025b) GPT-4o 78.2 KBQA-R1 (Sun et al., 2025a) Llama-3.1-8B 83.4 GAPD Llama-3.1-8B 86.1 
+
+Table 9: Additional WebQSP comparison with graph/-subgraph reasoning baselines. 
+
+H Full Student Traces and Teacher Token Scores 
+
+We expand the three dashboard case studies into full appendix trajectory views. The aligned gold action is visible only to the self-teacher and is used only to compute token-level guide scores for safely matched spans; red and green cells mark negative and positive guide values. Figures 6–8 provide the full traces for the time-zone relation, strict-comparison, and distilled-spirits cases from the main text. 
+
+I AI Assistant Use 
+
+We used AI assistants to help modify experimental and analysis code and to polish manuscript word-ing. The authors reviewed and verified all gener-ated code, experiments, analyses, and final paper text. C1. could you provide me with the time zones in which day dst ends on the same day as that in atlantic time zone? 
+
+Turn 1 | matched gold step 0 
+
+Student output 
+
+<think> To find the time zones where the day of DST (Daylight Saving Time) ends is the same as in the Atlantic Time Zone, I need to first 
+
+identify the days when DST ends in the Atlantic Time Zone. </think><action> Find_relation [ m.042g7t | time.time_zone.daylight_savings_time_ends 
+
+] </action> 
+
+Gold-conditioned hint 
+
+Find_relation [ m.042g7t | time.time_zone.day_dst_ends ]
+
+Full matched-turn token scores (think + action) 
+
+<th 
+
+-0.00 
+
+ink 
+
+-0.00 
+
+>
+
+-0.01 
+
+T To 
+
++0.00 
+
+T find 
+
++0.02 
+
+T the 
+
++0.00 
+
+T time 
+
+-0.00 
+
+T zones 
+
+-0.00 
+
+T where 
+
++0.00 
+
+T the 
+
++0.01 
+
+T day 
+
++0.01 
+
+T of 
+
+-0.19 
+
+T DST 
+
++0.00 
+
+T (
+
+-0.06 
+
+T Day 
+
+-0.00 
+
+T light 
+
+-0.00 
+
+T Saving 
+
+-0.00 
+
+T Time 
+
+-0.00 
+
+T )
+
+-0.00 
+
+T ends 
+
++0.00 
+
+T is 
+
++0.01 
+
+T the 
+
+-0.00 
+
+T same 
+
+-0.00 
+
+T as 
+
+-0.00 
+
+T in 
+
++0.01 
+
+T the 
+
+-0.00 
+
+T Atlantic 
+
++0.00 
+
+T Time 
+
+-0.00 
+
+T Zone 
+
+-0.00 
+
+T ,
+
+-0.00 
+
+T I
+
++0.00 
+
+T need 
+
++0.32 
+
+T
+
+to 
+
++0.00 
+
+T first 
+
+-0.00 
+
+T identify 
+
++0.12 
+
+T the 
+
++0.00 
+
+T days 
+
+-0.07 
+
+T when 
+
+-0.01 
+
+T DST 
+
+-0.01 
+
+T ends 
+
++0.00 
+
+T in 
+
+-0.00 
+
+T the 
+
++0.00 
+
+T Atlantic 
+
+-0.00 
+
+T Time 
+
+-0.00 
+
+T Zone 
+
+-0.00 
+
+T .
+
+-0.00 
+
+T </ 
+
++0.00 
+
+T think 
+
+-0.00 
+
+T >< 
+
+-0.00 
+
+action 
+
+-0.00 
+
+>
+
+-0.00 
+
+A Find 
+
++0.00 
+
+A _relation 
+
++0.00 
+
+A [
+
++0.00 
+
+A m
+
++0.04 
+
+A .
+
++0.00 
+
+A 042 
+
+-0.00 
+
+A g
+
++0.00 
+
+A 7
+
+-0.00 
+
+A t
+
+-0.00 
+
+A |
+
++0.00 
+
+A time 
+
++0.00 
+
+A
+
+.time 
+
+-0.00 
+
+A _zone 
+
++0.00 
+
+A .day 
+
++0.34 
+
+A light 
+
+-2.00 
+
+A _s 
+
+-0.01 
+
+A avings 
+
++0.12 
+
+A _time 
+
++1.13 
+
+A _ends 
+
+-0.35 
+
+A ]
+
+-0.15 
+
+A </ 
+
+-0.06 
+
+A action 
+
+-0.00 
+
+A >
+
+-0.00 
+
+Environment feedback 
+
+<information> 
+
+No relation matched time.time_zone.daylight_savings_time_ends connected to m.042g7t; Selected the most similar relation 
+
+time.time_zone.day_dst_ends to execute, score=0.794 
+
+Based on your relation_arg, the most similar adjacent relation "time.time_zone.day_dst_ends" was selected for execution. The other top-5 most 
+
+similar relations are [ time.time_zone.offset_from_uct, time.time_zone.dst_offset_from_utc, time.time_zone.day_dst_begins, 
+
+time.time_zone.locations_in_this_time_zone, location.location.time_zones ]. If the current best match does not satisfy your intent, please choose 
+
+one from the top-5 list by quoting its exact relation id. If none of the top-5 fit, change your relation_arg to trigger a new similarity match 
+
+and obtain a different candidate list. 
+
+functions: 
+
+expression1 = START('m.042g7t') 
+
+expression1 = JOIN('(R time.time_zone.day_dst_ends)', expression1) 
+
+result_mid_list: [ m.030rjff (First Sunday in November) ]
+
+</information> 
+
+Turn 2 | matched gold step 1 
+
+Student output 
+
+<think> The day DST ends in the Atlantic Time Zone is the first Sunday in November. Now, I need to find all time zones where DST ends on the same 
+
+day. </think><action> Find_relation [ m.030rjff | time.time_zone.day_dst_ends ] </action> 
+
+Gold-conditioned hint 
+
+Find_relation [ expression1 | time.time_zone.day_dst_ends ]
+
+Full matched-turn token scores (think + action) 
+
+\n 
+
+-0.54 
+
+<th 
+
+-0.01 
+
+ink 
+
+-0.00 
+
+>
+
+-0.00 
+
+T The 
+
+-0.02 
+
+T day 
+
++0.16 
+
+T DST 
+
++0.42 
+
+T ends 
+
++0.00 
+
+T in 
+
+-0.00 
+
+T the 
+
+-0.00 
+
+T Atlantic 
+
+-0.00 
+
+T Time 
+
++0.00 
+
+T Zone 
+
+-0.00 
+
+T is 
+
++0.00 
+
+T the 
+
++0.02 
+
+T first 
+
+-0.04 
+
+T Sunday 
+
++0.00 
+
+T in 
+
++0.00 
+
+T November 
+
++0.00 
+
+T .
+
+-0.00 
+
+T Now 
+
++0.14 
+
+T ,
+
+-0.00 
+
+T I
+
+-0.00 
+
+T need 
+
+-0.00 
+
+T to 
+
++0.00 
+
+T find 
+
++0.00 
+
+T all 
+
++0.09 
+
+T time 
+
+-0.02 
+
+T zones 
+
+-0.00 
+
+T where 
+
++0.01 
+
+T DST 
+
++0.09 
+
+T
+
+ends 
+
+-0.09 
+
+T on 
+
+-0.00 
+
+T the 
+
++0.00 
+
+T same 
+
+-0.01 
+
+T day 
+
+-0.00 
+
+T .
+
+-0.00 
+
+T </ 
+
++0.00 
+
+T think 
+
+-0.00 
+
+T >< 
+
+-0.00 
+
+action 
+
+-0.00 
+
+>
+
++0.00 
+
+A Find 
+
+-0.11 
+
+A _relation 
+
++0.00 
+
+A [
+
+-0.00 
+
+A m
+
++0.04 
+
+A .
+
+-0.00 
+
+A 030 
+
++0.00 
+
+A r
+
++0.00 
+
+A j
+
+-0.00 
+
+A ff 
+
+-0.00 
+
+A |
+
+-0.00 
+
+A time 
+
++0.00 
+
+A .time 
+
++0.00 
+
+A _zone 
+
+-0.00 
+
+A .day 
+
+-0.00 
+
+A _dst 
+
++0.13 
+
+A _ends 
+
+-0.00 
+
+A ]
+
+-0.00 
+
+A </ 
+
+-0.00 
+
+A action 
+
+-0.00 
+
+A >
+
++0.12 
+
+Environment feedback 
+
+<information> 
+
+functions: 
+
+expression1 = START('m.042g7t') 
+
+expression1 = JOIN('(R time.time_zone.day_dst_ends)', expression1) 
+
+expression2 = START('m.030rjff') 
+
+expression2 = JOIN('time.time_zone.day_dst_ends', expression2) 
+
+result_mid_list (first 10 of 11): [ m.02hcv8 (Eastern Time Zone), m.02fqwt (Central Time Zone), m.02hczc (Mountain Time Zone), m.02lcqs (Pacific 
+
+Time Zone), m.0jwyh47 (America/Shiprock Time Zone), m.0y499mk (Cuba Time Zone), m.0y4dw25 (Saint Pierre and Miquelon Time Zone), m.02lcrv (Alaska 
+
+Time Zone), m.042g7t (Atlantic Time Zone), m.02lctm (Hawaii-Aleutian Time Zone), ... ]
+
+</information> 
+
+Turn 3 | no GAPD token supervision 
+
+Student output 
+
+<think> I have a list of time zones where DST ends on the same day as in the Atlantic Time Zone. Now, I need to exclude the Atlantic Time Zone 
+
+itself from the list. </think><answer> m.02hcv8 m.02fqwt m.02hczc m.02lcqs m.0y499mk m.0y4dw25 m.02lcrv m.02lctm m.05jphn </answer> 
+
+−2 
+
+0
+
+2
+
+> clipped guide score
+
+Figure 6: Full trajectory view for the time-zone case. The figure preserves the complete student–environment interaction chain and overlays full think-plus-action token scores for supervised turns. C2. what island is larger than 0.25 in maximum length? 
+
+Turn 1 | matched gold step 0 
+
+Student output 
+
+<think> 
+
+To find islands that are larger than 0.25 in maximum length, I need to first filter the islands based on their maximum length. 
+
+</think><action> 
+
+Compare [ ge | geography.island.max_length | 0.25^^http://www.w3.org/2001/XMLSchema#float ]
+
+</action> 
+
+Gold-conditioned hint 
+
+Compare [ gt | geography.island.max_length | 0.25^^http://www.w3.org/2001/XMLSchema#float ]
+
+Full matched-turn token scores (think + action) 
+
+<th 
+
+-0.00 
+
+ink 
+
+-0.00 
+
+>\n 
+
++0.01 
+
+T To 
+
+-0.00 
+
+T find 
+
+-0.01 
+
+T islands 
+
++0.28 
+
+T that 
+
++0.07 
+
+T are 
+
+-0.01 
+
+T larger 
+
+-0.00 
+
+T than 
+
+-0.00 
+
+T <space> 
+
++0.00 
+
+T 0
+
++0.00 
+
+T .
+
++0.00 
+
+T 25 
+
++0.00 
+
+T in 
+
+-0.01 
+
+T maximum 
+
++0.04 
+
+T length 
+
++0.00 
+
+T ,
+
++0.00 
+
+T I
+
++0.00 
+
+T need 
+
++0.00 
+
+T to 
+
+-0.00 
+
+T first 
+
+-0.17 
+
+T filter 
+
++0.09 
+
+T the 
+
++0.14 
+
+T islands 
+
+-0.04 
+
+T based 
+
++0.08 
+
+T on 
+
+-0.00 
+
+T their 
+
+-0.08 
+
+T maximum 
+
+-0.03 
+
+T
+
+length 
+
++0.01 
+
+T .\n 
+
++0.18 
+
+T </ 
+
++0.00 
+
+T think 
+
+-0.00 
+
+T >< 
+
+-0.00 
+
+action 
+
++0.00 
+
+A >\n 
+
++0.00 
+
+A Compare 
+
++0.00 
+
+A [
+
++0.00 
+
+A ge 
+
+-2.00 
+
+A |
+
+-0.00 
+
+A geography 
+
+-0.03 
+
+A .is 
+
+-0.01 
+
+A land 
+
+-0.00 
+
+A .max 
+
+-0.02 
+
+A _length 
+
+-0.00 
+
+A |
+
++0.00 
+
+A <space> 
+
+-0.02 
+
+A 0
+
+-0.00 
+
+A .
+
+-0.00 
+
+A 25 
+
+-0.00 
+
+A ^^ 
+
+-0.00 
+
+A http 
+
+-0.00 
+
+A :// 
+
+-0.00 
+
+A www 
+
+-0.00 
+
+A .w 
+
+-0.00 
+
+A 3
+
+-0.00 
+
+A .org 
+
+-0.00 
+
+A /
+
+-0.00 
+
+A 200 
+
+-0.00 
+
+A 1
+
+-0.00 
+
+A
+
+/XMLSchema 
+
+-0.00 
+
+A #
+
+-0.00 
+
+A float 
+
+-0.00 
+
+A ]\n 
+
+-0.05 
+
+A </ 
+
+-0.00 
+
+A action 
+
+-0.00 
+
+A >
+
+-0.00 
+
+A
+
+Environment feedback 
+
+<information> 
+
+functions: 
+
+expression1 = START('0.25^^http://www.w3.org/2001/XMLSchema#float') 
+
+expression1 = CMP('ge', 'geography.island.max_length', expression1) 
+
+result_mid_list (first 10 of 200): [ m.08_y__ (St. David's Island, Bermuda), m.06gxx1 (Cuttyhunk Island), m.027qx_6 (New Ireland), m.03nq5k (New 
+
+Hanover Island), m.027w6tw (Pessegueiro Island), m.03plwj (Afognak), m.02t60s (Ball's Pyramid), m.0379zq (Galveston Island), m.01hd63 (Saint 
+
+Croix, U.S. Virgin Islands), m.09ghw05 (Dana Island), ... ]
+
+</information> 
+
+Turn 2 | no GAPD token supervision 
+
+Student output 
+
+<think> 
+
+The comparison has returned a list of islands that are larger than 0.25 in maximum length. Next, I need to ensure that the entities are indeed of 
+
+the type 'Geography Island' and then provide the answer. 
+
+</think><action> 
+
+Merge [ expression1 | geography.island ]
+
+</action> 
+
+Environment feedback 
+
+<information> 
+
+functions: 
+
+expression1 = START('0.25^^http://www.w3.org/2001/XMLSchema#float') 
+
+expression1 = CMP('ge', 'geography.island.max_length', expression1) 
+
+expression2 = START('geography.island') 
+
+expression1 = AND(expression1, expression2) 
+
+result_mid_list (first 10 of 200): [ m.08_y__ (St. David's Island, Bermuda), m.06gxx1 (Cuttyhunk Island), m.027qx_6 (New Ireland), m.03nq5k (New 
+
+Hanover Island), m.027w6tw (Pessegueiro Island), m.03plwj (Afognak), m.02t60s (Ball's Pyramid), m.0379zq (Galveston Island), m.01hd63 (Saint 
+
+Croix, U.S. Virgin Islands), m.09ghw05 (Dana Island), ... ]
+
+</information> 
+
+Turn 3 | no GAPD token supervision 
+
+Student output 
+
+<think> 
+
+The merge operation has confirmed that all the returned entities are indeed of the type 'Geography Island'. I can now provide the answer. 
+
+</think><answer> m.08_y__ m.06gxx1 m.027qx_6 m.03nq5k m.027w6tw m.03plwj m.02t60s m.0379zq m.01hd63 m.09ghw05 ... (first 10 of 156 MIDs) 
+
+−2 
+
+0
+
+2
+
+> clipped guide score
+
+Figure 7: Full trajectory view for the island comparison case. The figure preserves the complete student–environment interaction chain and overlays think-plus-action token scores for the supervised comparison turn. For readability, long result_mid_list fields and answer MID lists are truncated to the first ten entries, with ellipses marking omitted MIDs. C3. fermentation base of grain whisky shares it's fermation base with what other distilled spirit? 
+
+Turn 1 | matched gold step 0 
+
+Student output 
+
+<think> To find the fermentation base of grain whisky and check if it shares the fermentation base with any other distilled spirits, I need to 
+
+first identify the fermentation base of grain whisky. </think><action> Find_relation [m.041j_x |
+
+distilled_spirits.distilled_spirit_type.fermentation_base] </action> 
+
+Gold-conditioned hint 
+
+Find_relation [ m.041j_x | distilled_spirits.distilled_spirit_type.fermentation_base ]
+
+Full matched-turn token scores (think + action) 
+
+<th 
+
+-0.00 
+
+ink 
+
++0.00 
+
+>
+
+-0.04 
+
+T To 
+
+-0.01 
+
+T find 
+
++0.05 
+
+T the 
+
++0.05 
+
+T fermentation 
+
++0.00 
+
+T base 
+
++0.00 
+
+T of 
+
++0.03 
+
+T grain 
+
+-0.00 
+
+T whisky 
+
+-0.00 
+
+T and 
+
+-0.12 
+
+T check 
+
+-0.24 
+
+T if 
+
++0.02 
+
+T it 
+
+-0.00 
+
+T shares 
+
+-0.18 
+
+T the 
+
+-0.14 
+
+T fermentation 
+
+-0.05 
+
+T base 
+
++0.00 
+
+T with 
+
++0.00 
+
+T any 
+
+-0.01 
+
+T other 
+
++0.00 
+
+T distilled 
+
+-0.00 
+
+T spirits 
+
++0.02 
+
+T ,
+
+-0.00 
+
+T I
+
++0.00 
+
+T need 
+
++0.14 
+
+T to 
+
++0.00 
+
+T
+
+first 
+
++0.02 
+
+T identify 
+
+-0.09 
+
+T the 
+
++0.00 
+
+T fermentation 
+
+-0.02 
+
+T base 
+
+-0.00 
+
+T of 
+
+-0.00 
+
+T grain 
+
+-0.00 
+
+T whisky 
+
++0.00 
+
+T .
+
+-0.00 
+
+T </ 
+
++0.01 
+
+T think 
+
+-0.00 
+
+T >< 
+
+-0.00 
+
+action 
+
+-0.00 
+
+>
+
+-0.00 
+
+A Find 
+
++0.00 
+
+A _relation 
+
++0.00 
+
+A [
+
++0.00 
+
+A m
+
+-0.18 
+
+A .
+
++0.00 
+
+A 041 
+
+-0.02 
+
+A j
+
+-0.01 
+
+A _x 
+
+-0.12 
+
+A |
+
+-0.00 
+
+A distilled 
+
++0.02 
+
+A _s 
+
+-0.00 
+
+A pir 
+
+-0.00 
+
+A its 
+
+-0.00 
+
+A .dist 
+
++0.66 
+
+A
+
+illed 
+
++0.00 
+
+A _s 
+
++0.00 
+
+A pirit 
+
+-0.00 
+
+A _type 
+
++0.49 
+
+A .
+
++0.01 
+
+A fer 
+
+-0.00 
+
+A mentation 
+
++0.00 
+
+A _base 
+
+-0.00 
+
+A ]
+
++0.03 
+
+A </ 
+
+-0.00 
+
+A action 
+
++0.00 
+
+A >
+
+-0.00 
+
+Environment feedback 
+
+<information> 
+
+functions: 
+
+expression1 = START('m.041j_x') 
+
+expression1 = JOIN('(R distilled_spirits.distilled_spirit_type.fermentation_base)', expression1) 
+
+result_mid_list: [ m.053wn (Maize), m.09696 (Wheat) ]
+
+</information> 
+
+Turn 2 | matched gold step 1 
+
+Student output 
+
+<think> I have found the fermentation base of grain whisky includes both Maize and Wheat. Now, I need to find other distilled spirits that use 
+
+these same fermentation bases. </think><action> Find_relation [expression1 | distilled_spirits.fermentation_base.spirit_products] </action> 
+
+Gold-conditioned hint 
+
+Find_relation [ expression1 | distilled_spirits.distilled_spirit.fermentation_base ]
+
+Full matched-turn token scores (think + action) 
+
+<th 
+
+-0.00 
+
+ink 
+
+-0.00 
+
+>
+
+-0.00 
+
+T I
+
++0.19 
+
+T have 
+
++0.06 
+
+T found 
+
+-0.06 
+
+T the 
+
++0.04 
+
+T fermentation 
+
++0.00 
+
+T base 
+
+-0.14 
+
+T of 
+
+-0.01 
+
+T grain 
+
+-0.00 
+
+T whisky 
+
+-0.00 
+
+T includes 
+
+-0.24 
+
+T both 
+
+-0.08 
+
+T Ma 
+
++0.01 
+
+T ize 
+
++0.00 
+
+T and 
+
++0.02 
+
+T Wheat 
+
+-0.00 
+
+T .
+
+-0.00 
+
+T Now 
+
++0.30 
+
+T ,
+
+-0.01 
+
+T I
+
+-0.00 
+
+T need 
+
+-0.00 
+
+T to 
+
++0.00 
+
+T find 
+
++0.00 
+
+T other 
+
++0.08 
+
+T distilled 
+
++0.00 
+
+T spirits 
+
++0.00 
+
+T that 
+
++0.00 
+
+T
+
+use 
+
+-0.25 
+
+T these 
+
++0.01 
+
+T same 
+
++0.09 
+
+T fermentation 
+
+-0.01 
+
+T bases 
+
++0.01 
+
+T .
+
+-0.00 
+
+T </ 
+
+-0.00 
+
+T think 
+
+-0.00 
+
+T >< 
+
+-0.00 
+
+action 
+
+-0.00 
+
+>
+
++0.00 
+
+A Find 
+
+-0.04 
+
+A _relation 
+
++0.00 
+
+A [
+
++0.00 
+
+A expression 
+
+-0.17 
+
+A 1
+
+-0.00 
+
+A |
+
++0.00 
+
+A distilled 
+
++0.00 
+
+A _s 
+
+-0.00 
+
+A pir 
+
++0.00 
+
+A its 
+
++0.00 
+
+A .
+
+-1.89 
+
+A fer 
+
+-0.00 
+
+A mentation 
+
++0.00 
+
+A _base 
+
+-0.00 
+
+A .s 
+
++0.02 
+
+A pirit 
+
+-0.02 
+
+A
+
+_products 
+
+-0.00 
+
+A ]
+
+-0.00 
+
+A </ 
+
+-0.00 
+
+A action 
+
+-0.00 
+
+A >
+
++0.12 
+
+Environment feedback 
+
+<information> 
+
+functions: 
+
+expression1 = START('m.041j_x') 
+
+expression1 = JOIN('(R distilled_spirits.distilled_spirit_type.fermentation_base)', expression1) 
+
+expression1 = JOIN('(R distilled_spirits.fermentation_base.spirit_products)', expression1) 
+
+result_mid_list: [ m.01p5b6 (Rye whiskey), m.0c59y (Bourbon whiskey) ]
+
+</information> 
+
+Turn 3 | no GAPD token supervision 
+
+Student output 
+
+<think> I have a list of distilled spirits that use the same fermentation base as grain whisky. However, to ensure I only get the distinct 
+
+spirits, I need to merge this with the ontology type of distilled spirits. </think><action> Merge [expression1 |
+
+distilled_spirits.distilled_spirit] </action> 
+
+Environment feedback 
+
+<information> 
+
+functions: 
+
+expression1 = START('m.041j_x') 
+
+expression1 = JOIN('(R distilled_spirits.distilled_spirit_type.fermentation_base)', expression1) 
+
+expression1 = JOIN('(R distilled_spirits.fermentation_base.spirit_products)', expression1) 
+
+expression2 = START('distilled_spirits.distilled_spirit') 
+
+expression1 = AND(expression1, expression2) 
+
+result_mid_list: [] 
+
+No results found. 
+
+</information> 
+
+Turn 4 | no GAPD token supervision 
+
+Student output 
+
+<think> The previous merge operation did not return any results, which seems there might have been an issue with the logic. However, the question 
+
+is asking for the shared component between the fermentation base of grains and other types of distilled spirits. The initial actions have laid 
+
+out the components. I will directly provide the answer. </think><answer> m.01p5b6 m.0c59y </answer> 
+
+−2 
+
+0
+
+2
+
+> clipped guide score
+
+Figure 8: Full trajectory view for the distilled-spirits case. The figure preserves the complete student–environment interaction chain and overlays full think-plus-action token scores for supervised turns.
