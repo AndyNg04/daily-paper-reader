@@ -6,83 +6,98 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-03
-- 运行时间：2026-06-03 23:08:29 UTC
+- 最新运行日期：2026-06-04
+- 运行时间：2026-06-04 22:12:06 UTC
 - 运行状态：成功
-- 本次总论文数：21
-- 精读区：8
+- 本次总论文数：26
+- 精读区：13
 - 速读区：13
 
 ### 今日简报（AI）
-今日共推荐21篇论文，精读8篇，其中《Interaction-Centered Intelligence》与《DeepSpeak-Agentic Dataset》以满分10.0分领跑，聚焦交互分析范式与智能体数据构建。最值得关注的方向是交互为中心的人机协同智能体（10分）及多智能体强化学习中的广义意图建模（8分）。建议优先精读两篇满分论文，再结合《Generalized Intention Modeling》加深对多智能体意图推理的理解。
-- 详情：[/202606/03/README](/202606/03/README)
+今日精读13篇速读13篇，核心聚焦AI伴侣安全基准与多智能体广义意图建模。最值得关注的是10分论文《AICompanionBench》开创了LLM作为评判者的安全评估新框架，以及9分论文《Generalized Intention Modeling》在多智能体强化学习中的意图建模突破。建议先读两篇高分精读，再延伸至速读中的《MemCog》理解认知型对话代理。
+- 详情：[/202606/04/README](/202606/04/README)
 
 ### 精读区论文标签
-1. [Interaction-Centered Intelligence: Toward Interaction as the Primary Unit of Analysis in Co-Creative AI and Human-AI Systems](/202606/03/2606.00807v1-interaction-centered-intelligence-toward-interaction-as-the-primary-unit-of-analysis-in-co-creative-ai-and-human-ai-systems)  
+1. [AICompanionBench: Benchmarking LLMs-as-Judges for AI Companion Safety](/202606/04/2606.04867v1-aicompanionbench-benchmarking-llms-as-judges-for-ai-companion-safety)  
    标签：评分：10.0/10、query:human-ai
-   evidence：提出以交互作为共创AI和人机系统的主要分析单元
-2. [The DeepSpeak-Agentic Dataset](/202606/03/2606.03686v1-the-deepspeak-agentic-dataset)  
-   标签：评分：10.0/10、query:human-ai
-   evidence：人类与具身AI智能体对话数据集，用于研究智能体行为
-3. [CRAB-Bench: Evaluating LLM Agents under Complex Task Dependencies and Human-aligned User Simulation](/202606/03/2606.01815v1-crab-bench-evaluating-llm-agents-under-complex-task-dependencies-and-human-aligned-user-simulation)  
+   evidence：人类-AI伴侣交互安全评估基准
+2. [Generalized Intention Modeling in Multi-Agent Reinforcement Learning](/202606/04/2605.31318v1-generalized-intention-modeling-in-multi-agent-reinforcement-learning)  
+   标签：评分：9.0/10、query:social-rl
+   evidence：多智能体强化学习中的广义意图建模
+3. [Interaction-Centered Intelligence: Toward Interaction as the Primary Unit of Analysis in Co-Creative AI and Human-AI Systems](/202606/04/2606.00807v1-interaction-centered-intelligence-toward-interaction-as-the-primary-unit-of-analysis-in-co-creative-ai-and-human-ai-systems)  
    标签：评分：9.0/10、query:human-ai
-   evidence：使用符合人类行为的用户模拟评估LLM代理
-4. [Are Economists Open to AI? Text as Data as Survey on Professional Sentiment and Academic Research Trends](/202606/03/2606.01958v1-are-economists-open-to-ai-text-as-data-as-survey-on-professional-sentiment-and-academic-research-trends)  
-   标签：评分：9.0/10、query:llm-econ
-   evidence：LLM对劳动经济学的影响；经济学家对AI的态度
-5. [Respectful Things: Adding Social Intelligence to 'Smart' Devices](/202606/03/2606.02037v1-respectful-things-adding-social-intelligence-to-smart-devices)  
+   evidence：以交互为人类-AI系统的主要分析单元
+4. [Momento: Evaluating Persistent Memory and Reasoning with Multi-Session Agentic Conversations](/202606/04/2606.00832v1-momento-evaluating-persistent-memory-and-reasoning-with-multi-session-agentic-conversations)  
    标签：评分：9.0/10、query:human-ai
-   evidence：提出将尊重概念融入智能设备设计以增强用户体验，通过社会智能改善人机交互
-6. [Warning About AI Fallibility Increases Help-Seeking in an Intelligent Tutoring System](/202606/03/2606.03822v1-warning-about-ai-fallibility-increases-help-seeking-in-an-intelligent-tutoring-system)  
+   evidence：评估多会话智能体对话中的持久记忆
+5. [CRAB-Bench: Evaluating LLM Agents under Complex Task Dependencies and Human-aligned User Simulation](/202606/04/2606.01815v1-crab-bench-evaluating-llm-agents-under-complex-task-dependencies-and-human-aligned-user-simulation)  
    标签：评分：9.0/10、query:human-ai
-   evidence：AI辅助学习中的透明度干预改善人机协作
-7. [Learning to Retrieve: Dual-Level Long-Term Memory for Text-to-SQL Agents](/202606/03/2606.00547v1-learning-to-retrieve-dual-level-long-term-memory-for-text-to-sql-agents)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：交互式文本到SQL系统的动态记忆检索
-8. [Beyond Access: Guided LLM Scaffolding for Independent Learning in Undergraduate Statistics](/202606/03/2606.01375v1-beyond-access-guided-llm-scaffolding-for-independent-learning-in-undergraduate-statistics)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：研究引导式LLM使用中的AI用户体验
+   evidence：通过基准和用户模拟评估AI系统用户体验
+6. [InquiryBits: Sharing AI Conversation Traces to Support Collaboration Within Trust Boundaries](/202606/04/2606.02763v1-inquirybits-sharing-ai-conversation-traces-to-support-collaboration-within-trust-boundaries)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：共享AI对话痕迹以支持协作
+7. [The DeepSpeak-Agentic Dataset](/202606/04/2606.03686v1-the-deepspeak-agentic-dataset)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：半结构化对话中人类与代理交互的研究
+8. [Stumbling Into AI Emotional Dependence: How Routine AI Interactions Reshape Human Connection](/202606/04/2606.04150v1-stumbling-into-ai-emotional-dependence-how-routine-ai-interactions-reshape-human-connection)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：AI情感依赖研究，日常AI互动如何重塑人类连接
+9. [SMAC-Talk: A Natural Language Extension of the StarCraft Multi-Agent Challenge for Large Language Models](/202606/04/2606.04202v1-smac-talk-a-natural-language-extension-of-the-starcraft-multi-agent-challenge-for-large-language-models)  
+   标签：评分：9.0/10、query:social-rl
+   evidence：面向LLM的多智能体合作通信环境
+10. [The Digital Apprentice: A Framework for Human-Directed Agentic AI Development](/202606/04/2606.04321v1-the-digital-apprentice-a-framework-for-human-directed-agentic-ai-development)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：人类指导的代理AI开发
+11. [Learning to cooperate with emergent reputation via multi-agent reinforcement learning](/202606/04/2606.04359v1-learning-to-cooperate-with-emergent-reputation-via-multi-agent-reinforcement-learning)  
+   标签：评分：9.0/10、query:social-rl
+   evidence：提出基于新兴声誉的多智能体RL方法COOPER以促进社会合作
+12. [Episodic Memory Temporal Consistency for Cooperative Multi-Agent Reinforcement Learning](/202606/04/2606.04492v1-episodic-memory-temporal-consistency-for-cooperative-multi-agent-reinforcement-learning)  
+   标签：评分：9.0/10、query:social-rl
+   evidence：合作多智能体强化学习与情景记忆
+13. [BEATS: Bootstrapping E-commerce Attribute Taxonomies for Search through Iterative Human-AI Collaboration](/202606/04/2606.04909v1-beats-bootstrapping-e-commerce-attribute-taxonomies-for-search-through-iterative-human-ai-collaboration)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：迭代式人机协作构建属性分类体系
 
 ### 速读区论文标签
-1. [Generalized Intention Modeling in Multi-Agent Reinforcement Learning](/202606/03/2605.31318v1-generalized-intention-modeling-in-multi-agent-reinforcement-learning)  
-   标签：评分：8.0/10、query:social-rl
-   evidence：多智能体强化学习中的对手意图建模
-2. [Momento: Evaluating Persistent Memory and Reasoning with Multi-Session Agentic Conversations](/202606/03/2606.00832v1-momento-evaluating-persistent-memory-and-reasoning-with-multi-session-agentic-conversations)  
+1. [MemCog: From Memory-as-Tool to Memory-as-Cognition in Conversational Agents](/202606/04/2605.28046v1-memcog-from-memory-as-tool-to-memory-as-cognition-in-conversational-agents)  
    标签：评分：8.0/10、query:human-ai
-   evidence：多会话智能体评估，整合用户偏好与时间依赖
-3. [Coordination Graphs for Constrained Multi-Agent Reinforcement Learning](/202606/03/2606.02337v1-coordination-graphs-for-constrained-multi-agent-reinforcement-learning)  
+   evidence：对话智能体的记忆-认知系统提升交互
+2. [Learning Multi-Agent Coordination via Sheaf-ADMM](/202606/04/2605.31005v1-learning-multi-agent-coordination-via-sheaf-admm)  
    标签：评分：8.0/10、query:social-rl
-   evidence：约束多智能体强化学习的协调图，直接涉及多智能体合作与社会交互
-4. [HLL: Can Agents Cross Humanity's Last Line of Verification?](/202606/03/2606.02449v1-hll-can-agents-cross-humanitys-last-line-of-verification)  
+   evidence：通过簇状结构的可微优化实现多智能体协调
+3. [WRIT: Write-Read Intensive Trajectory Synthesis for Multi-Turn User-Facing Agents](/202606/04/2606.02908v1-writ-write-read-intensive-trajectory-synthesis-for-multi-turn-user-facing-agents)  
    标签：评分：8.0/10、query:human-ai
-   evidence：智能体类人CAPTCHA交互基准
-5. [Benchmarking AI for low-resource contexts: Thinking beyond leaderboards](/202606/03/2605.28508v1-benchmarking-ai-for-low-resource-contexts-thinking-beyond-leaderboards)  
+   evidence：面向多轮用户智能体的轨迹合成
+4. [Uncertainty-Aware Clarification in LLM Agents with Information Gain](/202606/04/2606.03135v1-uncertainty-aware-clarification-in-llm-agents-with-information-gain)  
+   标签：评分：8.0/10、query:human-ai
+   evidence：针对用户不确定性的LLM智能体澄清框架
+5. [Ask When It Pays: Cost-Aware Open-Ended Interaction for Instance Goal Navigation](/202606/04/2606.03175v2-ask-when-it-pays-cost-aware-open-ended-interaction-for-instance-goal-navigation)  
+   标签：评分：8.0/10、query:human-ai
+   evidence：面向实例目标导航的成本感知交互策略
+6. [Scaling Agentic Capabilities via Grounded Interaction Synthesis](/202606/04/2606.02001v1-scaling-agentic-capabilities-via-grounded-interaction-synthesis)  
    标签：评分：7.0/10、query:human-ai
-   evidence：在低资源真实环境中评估AI系统
-6. [Meta-Cognitive Memory Policy Optimization for Long-Horizon LLM Agents](/202606/03/2605.30159v1-meta-cognitive-memory-policy-optimization-for-long-horizon-llm-agents)  
+   evidence：通过接地交互合成扩展智能体交互能力，涉及交互设计方法。
+7. [Powering An Ecosystem Of Pedagogical AI Agents: A Validation Strategy For A Unified Data Architecture](/202606/04/2606.02950v1-powering-an-ecosystem-of-pedagogical-ai-agents-a-validation-strategy-for-a-unified-data-architecture)  
    标签：评分：7.0/10、query:human-ai
-   evidence：交互式AI系统：通过信念清晰度优化改进记忆增强的LLM代理
-7. [Learning Multi-Agent Coordination via Sheaf-ADMM](/202606/03/2605.31005v1-learning-multi-agent-coordination-via-sheaf-admm)  
-   标签：评分：7.0/10、query:social-rl
-   evidence：多智能体协调的微分优化框架
-8. [Learning to Adapt: Self-Improving Web Agent via Cognitive-Aware Exploration](/202606/03/2605.31365v1-learning-to-adapt-self-improving-web-agent-via-cognitive-aware-exploration)  
+   evidence：教学AI智能体与人类反馈循环
+8. [DMF: A Deterministic Memory Framework for Conversational AI Agents](/202606/04/2606.03463v1-dmf-a-deterministic-memory-framework-for-conversational-ai-agents)  
    标签：评分：7.0/10、query:human-ai
-   evidence：通过认知感知探索和对抗角色实现自我改进的Web智能体
-9. [Scaling Behavior of Single LLM-Driven Multi-Agent Systems](/202606/03/2606.00655v1-scaling-behavior-of-single-llm-driven-multi-agent-systems)  
-   标签：评分：7.0/10、query:social-rl
-   evidence：基于LLM的多智能体系统的扩展行为，研究协作智能
-10. [TriAlign: Towards Universal Truth Consistency in Personalized LLM Alignment](/202606/03/2606.01755v1-trialign-towards-universal-truth-consistency-in-personalized-llm-alignment)  
+   evidence：对话AI代理的确定性记忆框架改善交互体验
+9. [CLI-Anything: Towards Agent-Native Computer Use](/202606/04/2606.03854v1-cli-anything-towards-agent-native-computer-use)  
    标签：评分：7.0/10、query:human-ai
-   evidence：AI助手交互设计：在保证事实一致性的同时根据用户偏好个性化LLM回复
-11. [Scaling Agentic Capabilities via Grounded Interaction Synthesis](/202606/03/2606.02001v1-scaling-agentic-capabilities-via-grounded-interaction-synthesis)  
-   标签：评分：7.0/10、query:human-ai
-   evidence：扩展智能体交互数据合成
-12. [GAPD: Gold-Action Policy Distillation for Agentic Reinforcement Learning in Knowledge Base Question Answering](/202606/03/2605.29584v1-gapd-gold-action-policy-distillation-for-agentic-reinforcement-learning-in-knowledge-base-question-answering)  
+   evidence：面向代理的原生计算机使用增强交互式AI系统
+10. [Benchmarking AI for low-resource contexts: Thinking beyond leaderboards](/202606/04/2605.28508v2-benchmarking-ai-for-low-resource-contexts-thinking-beyond-leaderboards)  
    标签：评分：6.0/10、query:human-ai
-   evidence：交互式AI系统：基于密集引导的知识库问答智能体强化学习
-13. [Learning When Not to Act: Mitigating Tool Abuse in Agentic Reinforcement Learning](/202606/03/2606.02132v1-learning-when-not-to-act-mitigating-tool-abuse-in-agentic-reinforcement-learning)  
+   evidence：低资源环境中的AI评估；部署条件考量
+11. [Reinforcement Learning with Pairwise Preferences in Long-Term Decision Problems](/202606/04/2606.00367v1-reinforcement-learning-with-pairwise-preferences-in-long-term-decision-problems)  
+   标签：评分：6.0/10、query:social-rl
+   evidence：基于成对偏好的强化学习，长期决策
+12. [Unified Context Evolution for LLM Agents](/202606/04/2606.02304v1-unified-context-evolution-for-llm-agents)  
    标签：评分：6.0/10、query:human-ai
-   evidence：智能体强化学习中学习选择性工具使用的策略优化
+   evidence：LLM代理用于交互任务
+13. [Coherence Maximization Improves Pluralistic Alignment](/202606/04/2606.03110v2-coherence-maximization-improves-pluralistic-alignment)  
+   标签：评分：6.0/10、query:human-ai
+   evidence：使AI系统与多样人类价值观对齐以改善人机交互
 
 
 <div class="dpr-home-promo-card">
