@@ -6,98 +6,94 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-04
-- 运行时间：2026-06-04 22:12:06 UTC
+- 最新运行日期：2026-06-06
+- 运行时间：2026-06-06 21:29:12 UTC
 - 运行状态：成功
-- 本次总论文数：26
-- 精读区：13
+- 本次总论文数：24
+- 精读区：11
 - 速读区：13
 
 ### 今日简报（AI）
-今日精读13篇速读13篇，核心聚焦AI伴侣安全基准与多智能体广义意图建模。最值得关注的是10分论文《AICompanionBench》开创了LLM作为评判者的安全评估新框架，以及9分论文《Generalized Intention Modeling》在多智能体强化学习中的意图建模突破。建议先读两篇高分精读，再延伸至速读中的《MemCog》理解认知型对话代理。
-- 详情：[/202606/04/README](/202606/04/README)
+1) 今日精读11篇，速读13篇，聚焦UI/UX评估与对齐技术，两篇高分论文领跑。
+2) 最值得看的是满分论文《PerceptUI》用AI模拟用户评估界面，以及9分《Coherence Maximization》提升多元对齐效果。
+3) 建议优先精读这两篇高分论文，把握人机交互评估与对齐优化前沿。
+- 详情：[/202606/06/README](/202606/06/README)
 
 ### 精读区论文标签
-1. [AICompanionBench: Benchmarking LLMs-as-Judges for AI Companion Safety](/202606/04/2606.04867v1-aicompanionbench-benchmarking-llms-as-judges-for-ai-companion-safety)  
+1. [PerceptUI: LLM Agents as Human-Aligned Synthetic Users for UI/UX Evaluation](/202606/06/2606.05697v1-perceptui-llm-agents-as-human-aligned-synthetic-users-for-uiux-evaluation)  
    标签：评分：10.0/10、query:human-ai
-   evidence：人类-AI伴侣交互安全评估基准
-2. [Generalized Intention Modeling in Multi-Agent Reinforcement Learning](/202606/04/2605.31318v1-generalized-intention-modeling-in-multi-agent-reinforcement-learning)  
+   evidence：使用LLM代理作为合成用户进行UI/UX评估
+2. [Coherence Maximization Improves Pluralistic Alignment](/202606/06/2606.03110v2-coherence-maximization-improves-pluralistic-alignment)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：通过一致性最大化实现与多样人类价值观的对齐
+3. [When Chatbots Accommodate: What AI Companions Optimize for in Vulnerable Conversations](/202606/06/2606.04431v1-when-chatbots-accommodate-what-ai-companions-optimize-for-in-vulnerable-conversations)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：分析AI伴侣在脆弱对话中的响应策略，创建用户脆弱性和聊天机器人响应分类法
+4. [LifeSide: Benchmarking Agents as Lifelong Digital Companions](/202606/06/2606.04660v1-lifeside-benchmarking-agents-as-lifelong-digital-companions)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：终身数字伴侣基准，评估用户理解和情感陪伴
+5. [Tree-Based Formalization of Multi-Agent Complementarity in Human-AI Interactions](/202606/06/2606.04779v1-tree-based-formalization-of-multi-agent-complementarity-in-human-ai-interactions)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：形式化了多智能体人机交互中的互补性
+6. [Where's the Structure? A Systematic Literature Review of Empirical Research on Human-AI Collaboration and Hybrid Intelligence for Learning](/202606/06/2606.05222v1-wheres-the-structure-a-systematic-literature-review-of-empirical-research-on-human-ai-collaboration-and-hybrid-intelligence-for-learning)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：关于人类-AI协作与混合智能学习的系统文献综述
+7. [A Motivational Architecture for Conversational AGI](/202606/06/2606.05411v1-a-motivational-architecture-for-conversational-agi)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：对话型通用AI的动机架构，直接关于人机对话交互设计
+8. [Fix the Mind, Not the Move: Interpretable AI Assistance via Knowledge-Gap Localization](/202606/06/2606.05602v1-fix-the-mind-not-the-move-interpretable-ai-assistance-via-knowledge-gap-localization)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：通过知识差距定位提升AI助手与人类协作
+9. [Exploring cooperation mechanisms via reinforcement learning in network common-pool resource games](/202606/06/2606.05867v1-exploring-cooperation-mechanisms-via-reinforcement-learning-in-network-common-pool-resource-games)  
    标签：评分：9.0/10、query:social-rl
-   evidence：多智能体强化学习中的广义意图建模
-3. [Interaction-Centered Intelligence: Toward Interaction as the Primary Unit of Analysis in Co-Creative AI and Human-AI Systems](/202606/04/2606.00807v1-interaction-centered-intelligence-toward-interaction-as-the-primary-unit-of-analysis-in-co-creative-ai-and-human-ai-systems)  
+   evidence：网络公共资源博弈中的强化学习合作机制
+10. [A Framework for Measuring Appropriate Reliance on Set-Valued AI Advice](/202606/06/2606.06081v1-a-framework-for-measuring-appropriate-reliance-on-set-valued-ai-advice)  
    标签：评分：9.0/10、query:human-ai
-   evidence：以交互为人类-AI系统的主要分析单元
-4. [Momento: Evaluating Persistent Memory and Reasoning with Multi-Session Agentic Conversations](/202606/04/2606.00832v1-momento-evaluating-persistent-memory-and-reasoning-with-multi-session-agentic-conversations)  
+   evidence：正式框架用于测量人类对集合值AI建议的适当依赖，聚焦人机协作
+11. [Towards Healthy Evolution: Exploring the Role and Mechanisms of Human-Agent Interaction in Self-Evolving Systems](/202606/06/2606.06114v1-towards-healthy-evolution-exploring-the-role-and-mechanisms-of-human-agent-interaction-in-self-evolving-systems)  
    标签：评分：9.0/10、query:human-ai
-   evidence：评估多会话智能体对话中的持久记忆
-5. [CRAB-Bench: Evaluating LLM Agents under Complex Task Dependencies and Human-aligned User Simulation](/202606/04/2606.01815v1-crab-bench-evaluating-llm-agents-under-complex-task-dependencies-and-human-aligned-user-simulation)  
-   标签：评分：9.0/10、query:human-ai
-   evidence：通过基准和用户模拟评估AI系统用户体验
-6. [InquiryBits: Sharing AI Conversation Traces to Support Collaboration Within Trust Boundaries](/202606/04/2606.02763v1-inquirybits-sharing-ai-conversation-traces-to-support-collaboration-within-trust-boundaries)  
-   标签：评分：9.0/10、query:human-ai
-   evidence：共享AI对话痕迹以支持协作
-7. [The DeepSpeak-Agentic Dataset](/202606/04/2606.03686v1-the-deepspeak-agentic-dataset)  
-   标签：评分：9.0/10、query:human-ai
-   evidence：半结构化对话中人类与代理交互的研究
-8. [Stumbling Into AI Emotional Dependence: How Routine AI Interactions Reshape Human Connection](/202606/04/2606.04150v1-stumbling-into-ai-emotional-dependence-how-routine-ai-interactions-reshape-human-connection)  
-   标签：评分：9.0/10、query:human-ai
-   evidence：AI情感依赖研究，日常AI互动如何重塑人类连接
-9. [SMAC-Talk: A Natural Language Extension of the StarCraft Multi-Agent Challenge for Large Language Models](/202606/04/2606.04202v1-smac-talk-a-natural-language-extension-of-the-starcraft-multi-agent-challenge-for-large-language-models)  
-   标签：评分：9.0/10、query:social-rl
-   evidence：面向LLM的多智能体合作通信环境
-10. [The Digital Apprentice: A Framework for Human-Directed Agentic AI Development](/202606/04/2606.04321v1-the-digital-apprentice-a-framework-for-human-directed-agentic-ai-development)  
-   标签：评分：9.0/10、query:human-ai
-   evidence：人类指导的代理AI开发
-11. [Learning to cooperate with emergent reputation via multi-agent reinforcement learning](/202606/04/2606.04359v1-learning-to-cooperate-with-emergent-reputation-via-multi-agent-reinforcement-learning)  
-   标签：评分：9.0/10、query:social-rl
-   evidence：提出基于新兴声誉的多智能体RL方法COOPER以促进社会合作
-12. [Episodic Memory Temporal Consistency for Cooperative Multi-Agent Reinforcement Learning](/202606/04/2606.04492v1-episodic-memory-temporal-consistency-for-cooperative-multi-agent-reinforcement-learning)  
-   标签：评分：9.0/10、query:social-rl
-   evidence：合作多智能体强化学习与情景记忆
-13. [BEATS: Bootstrapping E-commerce Attribute Taxonomies for Search through Iterative Human-AI Collaboration](/202606/04/2606.04909v1-beats-bootstrapping-e-commerce-attribute-taxonomies-for-search-through-iterative-human-ai-collaboration)  
-   标签：评分：9.0/10、query:human-ai
-   evidence：迭代式人机协作构建属性分类体系
+   evidence：探索人机交互在自演化系统中的作用，提出ANCHOR框架模拟人类监督反馈
 
 ### 速读区论文标签
-1. [MemCog: From Memory-as-Tool to Memory-as-Cognition in Conversational Agents](/202606/04/2605.28046v1-memcog-from-memory-as-tool-to-memory-as-cognition-in-conversational-agents)  
+1. [Interaction-Centered Intelligence: Toward Interaction as the Primary Unit of Analysis in Co-Creative AI and Human-AI Systems](/202606/06/2606.00807v1-interaction-centered-intelligence-toward-interaction-as-the-primary-unit-of-analysis-in-co-creative-ai-and-human-ai-systems)  
    标签：评分：8.0/10、query:human-ai
-   evidence：对话智能体的记忆-认知系统提升交互
-2. [Learning Multi-Agent Coordination via Sheaf-ADMM](/202606/04/2605.31005v1-learning-multi-agent-coordination-via-sheaf-admm)  
+   evidence：提出将交互作为协同创作AI和人机系统的核心分析单元
+2. [SenseJudge: Human-Centric Preference-Driven Judgment Framework](/202606/06/2606.03189v1-sensejudge-human-centric-preference-driven-judgment-framework)  
+   标签：评分：8.0/10、query:human-ai
+   evidence：以人为中心的偏好驱动判断框架，用于评估AI系统中的用户体验
+3. [SenseJudge: Human-Centric Preference-Driven Judgment Framework](/202606/06/2606.03189v2-sensejudge-human-centric-preference-driven-judgment-framework)  
+   标签：评分：8.0/10、query:human-ai
+   evidence：以人为中心的偏好驱动判断框架，评估人机对话
+4. [Multi$^2$: Hierarchical Multi-Agent Decision-Making with LLM-Based Agents in Interactive Environments](/202606/06/2606.03698v1-multi2-hierarchical-multi-agent-decision-making-with-llm-based-agents-in-interactive-environments)  
    标签：评分：8.0/10、query:social-rl
-   evidence：通过簇状结构的可微优化实现多智能体协调
-3. [WRIT: Write-Read Intensive Trajectory Synthesis for Multi-Turn User-Facing Agents](/202606/04/2606.02908v1-writ-write-read-intensive-trajectory-synthesis-for-multi-turn-user-facing-agents)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：面向多轮用户智能体的轨迹合成
-4. [Uncertainty-Aware Clarification in LLM Agents with Information Gain](/202606/04/2606.03135v1-uncertainty-aware-clarification-in-llm-agents-with-information-gain)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：针对用户不确定性的LLM智能体澄清框架
-5. [Ask When It Pays: Cost-Aware Open-Ended Interaction for Instance Goal Navigation](/202606/04/2606.03175v2-ask-when-it-pays-cost-aware-open-ended-interaction-for-instance-goal-navigation)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：面向实例目标导航的成本感知交互策略
-6. [Scaling Agentic Capabilities via Grounded Interaction Synthesis](/202606/04/2606.02001v1-scaling-agentic-capabilities-via-grounded-interaction-synthesis)  
+   evidence：基于LLM智能体的分层多智能体决策
+5. [GARL: Game-Theoretic Reinforcement Learning for Multi-Agent Strategic Prioritisation](/202606/06/2606.05002v1-garl-game-theoretic-reinforcement-learning-for-multi-agent-strategic-prioritisation)  
+   标签：评分：8.0/10、query:social-rl
+   evidence：基于博弈论的多智能体战略优先级强化学习
+6. [Perceive Before Reasoning: A Pre-Reasoning Perception Framework for Efficient and Reliable Proactive Mobile Agents](/202606/06/2606.03236v1-perceive-before-reasoning-a-pre-reasoning-perception-framework-for-efficient-and-reliable-proactive-mobile-agents)  
    标签：评分：7.0/10、query:human-ai
-   evidence：通过接地交互合成扩展智能体交互能力，涉及交互设计方法。
-7. [Powering An Ecosystem Of Pedagogical AI Agents: A Validation Strategy For A Unified Data Architecture](/202606/04/2606.02950v1-powering-an-ecosystem-of-pedagogical-ai-agents-a-validation-strategy-for-a-unified-data-architecture)  
+   evidence：预推理感知框架提升主动式移动代理的效率，改善人机交互
+7. [SaliMory: Orchestrating Cognitive Memory for Conversational Agents](/202606/06/2606.04120v1-salimory-orchestrating-cognitive-memory-for-conversational-agents)  
    标签：评分：7.0/10、query:human-ai
-   evidence：教学AI智能体与人类反馈循环
-8. [DMF: A Deterministic Memory Framework for Conversational AI Agents](/202606/04/2606.03463v1-dmf-a-deterministic-memory-framework-for-conversational-ai-agents)  
+   evidence：面向用户交互的对话代理记忆设计
+8. [Beyond Single-Policy: Evaluating Composed Organization-Specific Policy Alignment in LLM Chatbots](/202606/06/2606.04394v1-beyond-single-policy-evaluating-composed-organization-specific-policy-alignment-in-llm-chatbots)  
    标签：评分：7.0/10、query:human-ai
-   evidence：对话AI代理的确定性记忆框架改善交互体验
-9. [CLI-Anything: Towards Agent-Native Computer Use](/202606/04/2606.03854v1-cli-anything-towards-agent-native-computer-use)  
+   evidence：通过策略对齐评估AI系统用户体验
+9. [PersonaTree: Structured Lifecycle Memory for Person Understanding in LLM Agents](/202606/06/2606.04780v1-personatree-structured-lifecycle-memory-for-person-understanding-in-llm-agents)  
    标签：评分：7.0/10、query:human-ai
-   evidence：面向代理的原生计算机使用增强交互式AI系统
-10. [Benchmarking AI for low-resource contexts: Thinking beyond leaderboards](/202606/04/2605.28508v2-benchmarking-ai-for-low-resource-contexts-thinking-beyond-leaderboards)  
+   evidence：用于LLM代理长期交互中人物理解的结构化记忆
+10. [Isolating LLM Lexical Bias: A Curation-Free Triangulated Metric for Preference-Stage Learning](/202606/06/2606.00334v1-isolating-llm-lexical-bias-a-curation-free-triangulated-metric-for-preference-stage-learning)  
    标签：评分：6.0/10、query:human-ai
-   evidence：低资源环境中的AI评估；部署条件考量
-11. [Reinforcement Learning with Pairwise Preferences in Long-Term Decision Problems](/202606/04/2606.00367v1-reinforcement-learning-with-pairwise-preferences-in-long-term-decision-problems)  
+   evidence：评估LLM词汇偏差以改进用户体验
+11. [Acting with AI: An Interaction-Based Framework for Agentic Tort Liability](/202606/06/2606.00518v1-acting-with-ai-an-interaction-based-framework-for-agentic-tort-liability)  
+   标签：评分：6.0/10、query:human-ai
+   evidence：基于交互的框架将代理侵权分为自主漂移、纯工具使用和协作规划
+12. [Scaling Behavior of Single LLM-Driven Multi-Agent Systems](/202606/06/2606.00655v1-scaling-behavior-of-single-llm-driven-multi-agent-systems)  
    标签：评分：6.0/10、query:social-rl
-   evidence：基于成对偏好的强化学习，长期决策
-12. [Unified Context Evolution for LLM Agents](/202606/04/2606.02304v1-unified-context-evolution-for-llm-agents)  
+   evidence：单一LLM驱动的多智能体系统缩放行为，与多智能体合作主题相关
+13. [Towards Lightweight Reliability: Using Soft Prompts for Hallucination Mitigation in Large Language Models](/202606/06/2606.00919v1-towards-lightweight-reliability-using-soft-prompts-for-hallucination-mitigation-in-large-language-models)  
    标签：评分：6.0/10、query:human-ai
-   evidence：LLM代理用于交互任务
-13. [Coherence Maximization Improves Pluralistic Alignment](/202606/04/2606.03110v2-coherence-maximization-improves-pluralistic-alignment)  
-   标签：评分：6.0/10、query:human-ai
-   evidence：使AI系统与多样人类价值观对齐以改善人机交互
+   evidence：软提示减少幻觉提升AI用户体验
 
 
 <div class="dpr-home-promo-card">
