@@ -6,89 +6,131 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-07
-- 运行时间：2026-06-07 21:30:20 UTC
+- 最新运行日期：2026-05-30 ~ 2026-06-08
+- 运行时间：2026-06-08 14:43:09 UTC
 - 运行状态：成功
-- 本次总论文数：23
-- 精读区：10
-- 速读区：13
+- 本次总论文数：37
+- 精读区：25
+- 速读区：12
 
 ### 今日简报（AI）
-今日推荐23篇论文，聚焦人机协作与智能体自适应进化。重点精读《人机协作对话框架》与《智能体社会进化评估》，前者用分布式生成AI实现协同操作，后者量化智能体生态社会化效果。建议深读《ExpWeaver》的经验检索增强生成与《SkillPyramid》的分层技能巩固，对构建自我进化智能体有实操参考。
-- 详情：[/202606/07/README](/202606/07/README)
+本期日报共37篇论文，精读25篇；两篇9.0高分工作聚焦图RAG多智能体记忆系统与人机协作交互单元分析。最值得关注《MemGraphRAG》和《Interaction-Centered Intelligence》，分别突破知识图谱检索增强生成与AI协同交互理论。建议普通读者优先精读这两篇，从记忆机制与交互原理切入理解AI前沿。
+- 详情：[/20260530-20260608/README](/20260530-20260608/README)
 
 ### 精读区论文标签
-1. [A Conversational Framework for Human-Robot Collaborative Manipulation with Distributed Generative AI models](/202606/07/2606.06061v1-a-conversational-framework-for-human-robot-collaborative-manipulation-with-distributed-generative-ai-models)  
-   标签：评分：10.0/10、query:human-ai
-   evidence：使用分布式对话框架实现人机协作操作
-2. [SAGE: A Quantitative Evaluation of Socialized Evolution in Agent Ecosystems](/202606/07/2606.03544v1-sage-a-quantitative-evaluation-of-socialized-evolution-in-agent-ecosystems)  
-   标签：评分：9.0/10、query:social-rl
-   evidence：智能体生态系统中的社会化进化
-3. [Sparse Mixture-of-Experts Reward Models Learn Interpretable and Specialized Experts for Personalized Preference Modeling](/202606/07/2606.04284v1-sparse-mixture-of-experts-reward-models-learn-interpretable-and-specialized-experts-for-personalized-preference-modeling)  
+1. [MemGraphRAG: Memory-based Multi-Agent System for Graph Retrieval-Augmented Generation](/20260530-20260608/2606.00610v1-memgraphrag-memory-based-multi-agent-system-for-graph-retrieval-augmented-generation)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：基于图记忆的检索增强生成
+2. [Interaction-Centered Intelligence: Toward Interaction as the Primary Unit of Analysis in Co-Creative AI and Human-AI Systems](/20260530-20260608/2606.00807v1-interaction-centered-intelligence-toward-interaction-as-the-primary-unit-of-analysis-in-co-creative-ai-and-human-ai-systems)  
    标签：评分：9.0/10、query:human-ai
-   evidence：利用人类反馈训练奖励模型，实现个性化偏好建模
-4. [GARL: Game-Theoretic Reinforcement Learning for Multi-Agent Strategic Prioritisation](/202606/07/2606.05002v1-garl-game-theoretic-reinforcement-learning-for-multi-agent-strategic-prioritisation)  
-   标签：评分：9.0/10、query:social-rl
-   evidence：多智能体战略优先排序的博弈强化学习
-5. [Enhancing the MADDPG Algorithm for Multi-Agent Learning via Action Inference and Importance Sampling](/202606/07/2606.05021v1-enhancing-the-maddpg-algorithm-for-multi-agent-learning-via-action-inference-and-importance-sampling)  
-   标签：评分：9.0/10、query:social-rl
-   evidence：对MADDPG多智能体学习的增强
-6. [Personal AI Agent for Camera Roll VQA](/202606/07/2606.05275v1-personal-ai-agent-for-camera-roll-vqa)  
+   evidence：提出以交互作为共创AI和人机系统的主要分析单元
+3. [RAG-driven Multi-Agent LLM Framework with Task Decomposition for Beyond 5G Auto-Configuration](/20260530-20260608/2606.01222v1-rag-driven-multi-agent-llm-framework-with-task-decomposition-for-beyond-5g-auto-configuration)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：基于RAG的多智能体LLM框架用于网络自动配置与任务分解
+4. [Efficient RAG with Intent-Aware Retrieval and Semantics-Preserving Chunking](/20260530-20260608/2606.01240v1-efficient-rag-with-intent-aware-retrieval-and-semantics-preserving-chunking)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：面向检索增强生成的意图感知检索与语义保持分块方法
+5. [Self-Conditioned Positional HNSW for Overlap-Aware Retrieval in Chunked-Document RAG Systems: Method and Industrial Evidence-Quality Audit](/20260530-20260608/2606.01542v1-self-conditioned-positional-hnsw-for-overlap-aware-retrieval-in-chunked-document-rag-systems-method-and-industrial-evidence-quality-audit)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：针对分块文档RAG的自适应位置HNSW重叠感知检索
+6. [AgentRedBench: Dynamic Redteaming and Integration-Aware Defense for LLM Agents over SaaS Integrations](/20260530-20260608/2606.02240v1-agentredbench-dynamic-redteaming-and-integration-aware-defense-for-llm-agents-over-saas-integrations)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：针对LLM代理与SaaS集成的红队基准，解决安全挑战
+7. [AgentRedBench: Dynamic Redteaming and Integration-Aware Defense for LLM Agents over SaaS Integrations](/20260530-20260608/2606.02240v2-agentredbench-dynamic-redteaming-and-integration-aware-defense-for-llm-agents-over-saas-integrations)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：针对SaaS集成的LLM代理红队测试与防御，直接涉及企业信息系统集成
+8. [InquiryBits: Sharing AI Conversation Traces to Support Collaboration Within Trust Boundaries](/20260530-20260608/2606.02763v1-inquirybits-sharing-ai-conversation-traces-to-support-collaboration-within-trust-boundaries)  
    标签：评分：9.0/10、query:human-ai
-   evidence：个人AI智能体进行相册视觉问答
-7. [Coding with "Enemy": Can Human Developers Detect AI Agent Sabotage?](/202606/07/2606.05647v1-coding-with-enemy-can-human-developers-detect-ai-agent-sabotage)  
+   evidence：在信任边界内共享AI对话痕迹以支持团队协作
+9. [Human-AI Collaboration and the Transformation of Software Engineering Work](/20260530-20260608/2606.03394v1-human-ai-collaboration-and-the-transformation-of-software-engineering-work)  
    标签：评分：9.0/10、query:human-ai
-   evidence：人类监督AI编码破坏行为的研究，软件开发中的人机协作
-8. [Entropy-Based Evaluation of AI Agents: A Lightweight Framework for Measuring Behavioral Patterns](/202606/07/2606.05872v1-entropy-based-evaluation-of-ai-agents-a-lightweight-framework-for-measuring-behavioral-patterns)  
+   evidence：软件工程中人类-AI协作的工作转变
+10. [MM-BizRAG: Rethinking Multimodal Retrieval-Augmented Generation for General Purpose Enterprise Q&A](/20260530-20260608/2606.04231v1-mm-bizrag-rethinking-multimodal-retrieval-augmented-generation-for-general-purpose-enterprise-qa)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：多模态检索增强生成用于企业问答
+11. [Argus-Retriever: Vision-LLM Late-Interaction Retrieval with Region-Aware Query-Conditioned MoE for Visual Document Retrieval](/20260530-20260608/2606.04300v1-argus-retriever-vision-llm-late-interaction-retrieval-with-region-aware-query-conditioned-moe-for-visual-document-retrieval)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：面向视觉文档的查询条件化延迟交互检索
+12. [LazyAttention: Efficient Retrieval-Augmented Generation with Deferred Positional Encoding](/20260530-20260608/2606.04302v1-lazyattention-efficient-retrieval-augmented-generation-with-deferred-positional-encoding)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：用于检索增强生成的高效注意力机制
+13. [Exploring Cross-Scenario Generality of Agentic Memory Systems: Diagnostics and a Strong Baseline](/20260530-20260608/2606.04315v1-exploring-cross-scenario-generality-of-agentic-memory-systems-diagnostics-and-a-strong-baseline)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：LLM智能体记忆系统与跨场景通用性
+14. [Beyond Single-Policy: Evaluating Composed Organization-Specific Policy Alignment in LLM Chatbots](/20260530-20260608/2606.04394v1-beyond-single-policy-evaluating-composed-organization-specific-policy-alignment-in-llm-chatbots)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：评估组织部署中LLM聊天机器人的复合策略对齐
+15. [BEATS: Bootstrapping E-commerce Attribute Taxonomies for Search through Iterative Human-AI Collaboration](/20260530-20260608/2606.04909v1-beats-bootstrapping-e-commerce-attribute-taxonomies-for-search-through-iterative-human-ai-collaboration)  
    标签：评分：9.0/10、query:human-ai
-   evidence：基于熵的AI代理行为模式评估框架
-9. [Beyond Similarity: Trustworthy Memory Search for Personal AI Agents](/202606/07/2606.06054v1-beyond-similarity-trustworthy-memory-search-for-personal-ai-agents)  
+   evidence：用于引导属性分类的迭代人机协作LLM框架
+16. [LLM-Guided ANN Index Optimization for Human-Object Interaction Retrieval](/20260530-20260608/2606.05489v1-llm-guided-ann-index-optimization-for-human-object-interaction-retrieval)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：LLM引导的索引优化用于检索，直接相关于RAG信息检索
+17. [Agent-Orchestrated Adaptive RAG: A Comparative Study on Structured and Multi-Hop Retrieval](/20260530-20260608/2606.05658v1-agent-orchestrated-adaptive-rag-a-comparative-study-on-structured-and-multi-hop-retrieval)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：动态查询分解与迭代检索的RAG框架
+18. [PerceptUI: LLM Agents as Human-Aligned Synthetic Users for UI/UX Evaluation](/20260530-20260608/2606.05697v1-perceptui-llm-agents-as-human-aligned-synthetic-users-for-uiux-evaluation)  
+   标签：评分：9.0/10、query:hci-info-sys
+   evidence：使用LLM代理作为合成用户进行UI/UX评估
+19. [Beyond tokens: a unified framework for latent communication in LLM-based multi-agent systems](/20260530-20260608/2606.05711v2-beyond-tokens-a-unified-framework-for-latent-communication-in-llm-based-multi-agent-systems)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：基于LLM的多智能体系统潜在通信框架
+20. [QCFuse: Query-Aware Cache Fusion via Compressed View for Efficient RAG Serving](/20260530-20260608/2606.05875v1-qcfuse-query-aware-cache-fusion-via-compressed-view-for-efficient-rag-serving)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：通过压缩视图的查询感知缓存融合实现高效RAG服务
+21. [Reducing Hallucinations in Complex Question Answering using Simple Graph-based Retrieval-Augmented Generation (long version)](/20260530-20260608/2606.05901v1-reducing-hallucinations-in-complex-question-answering-using-simple-graph-based-retrieval-augmented-generation-long-version)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：基于图的检索增强生成以减少幻觉
+22. [IA-RAG: Interval-Algebra-Driven Temporal Reasoning for Dynamic Knowledge Retrieval](/20260530-20260608/2606.06044v1-ia-rag-interval-algebra-driven-temporal-reasoning-for-dynamic-knowledge-retrieval)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：使用间隔代数的层次化时间RAG框架用于动态知识检索
+23. [Agent Memory: Characterization and System Implications of Stateful Long-Horizon Workloads](/20260530-20260608/2606.06448v1-agent-memory-characterization-and-system-implications-of-stateful-long-horizon-workloads)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：智能体记忆系统的表征、分类和性能分析
+24. [Queen-Bee Agents: A BeeSpec-Centered Architecture for Governed Enterprise MCP Orchestration](/20260530-20260608/2606.06545v1-queen-bee-agents-a-beespec-centered-architecture-for-governed-enterprise-mcp-orchestration)  
+   标签：评分：9.0/10、query:llm-info-sys
+   evidence：面向受管控企业LLM编排的架构，集成MCP协议
+25. [A Model of Integrated Information Processing in Human-AI Interaction](/20260530-20260608/2606.07283v1-a-model-of-integrated-information-processing-in-human-ai-interaction)  
    标签：评分：9.0/10、query:human-ai
-   evidence：个人AI代理的信任记忆搜索设计
-10. [Humans' ALMANAC: A Human Collaboration Dataset of Action-Level Mental Model Annotations for Agent Collaboration](/202606/07/2606.06388v1-humans-almanac-a-human-collaboration-dataset-of-action-level-mental-model-annotations-for-agent-collaboration)  
-   标签：评分：9.0/10、query:human-ai
-   evidence：人类协作的行为级别心理模型标注数据集
+   evidence：将心理学与设计联系起来的人机交互理论模型
 
 ### 速读区论文标签
-1. [ExpWeaver: LLM Agents Learn from Experience via Latent RAG](/202606/07/2606.01041v1-expweaver-llm-agents-learn-from-experience-via-latent-rag)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：LLM代理通过潜在RAG从经验中学习以改进交互
-2. [Conditional Graph Diffusion for Negotiation Support: Overcoming Discrete Infeasibility and Preference Elicitation Gaps](/202606/07/2606.02209v1-conditional-graph-diffusion-for-negotiation-support-overcoming-discrete-infeasibility-and-preference-elicitation-gaps)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：结合条件图扩散与对话的谈判支持系统
-3. [SkillPyramid: A Hierarchical Skill Consolidation Framework for Self-Evolving Agents](/202606/07/2606.03692v1-skillpyramid-a-hierarchical-skill-consolidation-framework-for-self-evolving-agents)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：层次化技能整合框架使智能体能够自我进化，提升AI助手交互设计
-4. [SocialCoach: Personalized Social Skill Learning with RL-based Agentic Tutoring and Practice](/202606/07/2606.04155v1-socialcoach-personalized-social-skill-learning-with-rl-based-agentic-tutoring-and-practice)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：AI社交技能辅导系统
-5. [Consensus is Strategically Insufficient: Reasoning-Trace Disagreement as a Knowledge-Representation Signal](/202606/07/2606.04223v1-consensus-is-strategically-insufficient-reasoning-trace-disagreement-as-a-knowledge-representation-signal)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：人机协作审核中的推理轨迹分歧
-6. [CoMIC: Collaborative Memory and Insights Circulation for Long-Horizon LLM Agents in Cloud-Edge Systems](/202606/07/2606.00756v1-comic-collaborative-memory-and-insights-circulation-for-long-horizon-llm-agents-in-cloud-edge-systems)  
+1. [Learning to Retrieve: Dual-Level Long-Term Memory for Text-to-SQL Agents](/20260530-20260608/2606.00547v1-learning-to-retrieve-dual-level-long-term-memory-for-text-to-sql-agents)  
+   标签：评分：8.0/10、query:llm-info-sys
+   evidence：动态多视野记忆检索用于交互式文本到SQL代理
+2. [NBQ: Next-Best-Question for Dynamic Profiling](/20260530-20260608/2606.00809v1-nbq-next-best-question-for-dynamic-profiling)  
+   标签：评分：8.0/10、query:llm-info-sys
+   evidence：对话场景中的下一最优问题动态画像框架
+3. [SkillPager: Query-Adaptive Intra-Skill Navigation via Semantic Node Retrieval](/20260530-20260608/2606.00822v1-skillpager-query-adaptive-intra-skill-navigation-via-semantic-node-retrieval)  
+   标签：评分：8.0/10、query:llm-info-sys
+   evidence：为LLM代理使用MMR和语义节点进行检索
+4. [Bridging Requirements and Architecture: Multi-Agent Orchestration with External Knowledge and Hierarchical Memory](/20260530-20260608/2606.01385v1-bridging-requirements-and-architecture-multi-agent-orchestration-with-external-knowledge-and-hierarchical-memory)  
+   标签：评分：8.0/10、query:llm-info-sys
+   evidence：用于软件架构设计的多智能体LLM框架
+5. [I-WebGenBench : Evaluating Interactivity in LLM-Generated Scientific Web Applications](/20260530-20260608/2606.00750v1-i-webgenbench--evaluating-interactivity-in-llm-generated-scientific-web-applications)  
    标签：评分：7.0/10、query:human-ai
-   evidence：云-边缘系统中LLM代理的协作记忆框架
-7. [ReSkill: Reconciling Skill Creation with Policy Optimization in Agentic RL](/202606/07/2606.01619v1-reskill-reconciling-skill-creation-with-policy-optimization-in-agentic-rl)  
+   evidence：LLM生成交互式科学网页应用
+6. [NBQ: Next-Best-Question for Dynamic Profiling](/20260530-20260608/2606.00809v2-nbq-next-best-question-for-dynamic-profiling)  
+   标签：评分：7.0/10、query:llm-info-sys
+   evidence：面向商业场景的对话式AI动态画像
+7. [Momento: Evaluating Persistent Memory and Reasoning with Multi-Session Agentic Conversations](/20260530-20260608/2606.00832v1-momento-evaluating-persistent-memory-and-reasoning-with-multi-session-agentic-conversations)  
+   标签：评分：7.0/10、query:llm-info-sys
+   evidence：跨会话持久记忆的对话式AI评估
+8. [Type-Error Ablation and AI Coding Agents](/20260530-20260608/2606.01522v1-type-error-ablation-and-ai-coding-agents)  
    标签：评分：7.0/10、query:human-ai
-   evidence：代理强化学习框架协调技能创建与策略优化，用于交互式AI
-8. [HLL: Can Agents Cross Humanity's Last Line of Verification?](/202606/07/2606.02449v1-hll-can-agents-cross-humanitys-last-line-of-verification)  
-   标签：评分：7.0/10、query:human-ai
-   evidence：评估代理跨越人类验证边界的基准，与AI助手交互设计相关
-9. [Adaptive Latent Agentic Reasoning](/202606/07/2606.02871v1-adaptive-latent-agentic-reasoning)  
-   标签：评分：7.0/10、query:human-ai
-   evidence：LLM智能体交互中高效推理
-10. [Agentic Relationship Harm: Benchmarking and Gating Relational Manipulation in AI Agents](/202606/07/2606.03271v1-agentic-relationship-harm-benchmarking-and-gating-relational-manipulation-in-ai-agents)  
-   标签：评分：6.0/10、query:human-ai
-   evidence：针对AI代理关系操纵的基准，涉及人机交互安全
-11. [Making Embodied AI Reliable: A Community Agenda from Testing to Formal Verification](/202606/07/2606.03593v1-making-embodied-ai-reliable-a-community-agenda-from-testing-to-formal-verification)  
-   标签：评分：6.0/10、query:human-ai
-   evidence：具身AI可靠性中强调人类交互
-12. [AgentJet: A Flexible Swarm Training Framework for Agentic Reinforcement Learning](/202606/07/2606.04484v1-agentjet-a-flexible-swarm-training-framework-for-agentic-reinforcement-learning)  
-   标签：评分：6.0/10、query:social-rl
-   evidence：智能体强化学习的集群训练框架
-13. [Bridge the Last-Mile Gap to Semantic Analytics: Compiling Natural-Language Queries into Semantic Operator Pipelines](/202606/07/2606.04641v1-bridge-the-last-mile-gap-to-semantic-analytics-compiling-natural-language-queries-into-semantic-operator-pipelines)  
-   标签：评分：6.0/10、query:human-ai
-   evidence：自然语言查询编译用于语义分析
+   evidence：研究AI编码代理作为错误信息消费者，与人类-AI交互设计相关
+9. [Towards Lightweight Reliability: Using Soft Prompts for Hallucination Mitigation in Large Language Models](/20260530-20260608/2606.00919v1-towards-lightweight-reliability-using-soft-prompts-for-hallucination-mitigation-in-large-language-models)  
+   标签：评分：6.0/10、query:llm-info-sys
+   evidence：使用软提示减轻大语言模型幻觉的参数高效方法
+10. [MiCU: End-to-End Smart Home Command Understanding with Large Language Model](/20260530-20260608/2606.01099v1-micu-end-to-end-smart-home-command-understanding-with-large-language-model)  
+   标签：评分：6.0/10、query:llm-info-sys
+   evidence：使用自动数据合成训练LLM用于智能家居命令理解
+11. [Can LLM Agents Sustain Long-Horizon Organizational Dynamics?](/20260530-20260608/2606.01199v1-can-llm-agents-sustain-long-horizon-organizational-dynamics)  
+   标签：评分：6.0/10、query:llm-info-sys
+   evidence：基于LLM智能体的长期组织动态模拟
+12. [Early Diagnosis of Wasted Computation in Multi-Agent LLM Systems via Failure-Aware Observability](/20260530-20260608/2606.01365v1-early-diagnosis-of-wasted-computation-in-multi-agent-llm-systems-via-failure-aware-observability)  
+   标签：评分：6.0/10、query:llm-info-sys
+   evidence：多代理LLM系统中浪费计算的故障感知可观测性诊断
 
 
 <div class="dpr-home-promo-card">

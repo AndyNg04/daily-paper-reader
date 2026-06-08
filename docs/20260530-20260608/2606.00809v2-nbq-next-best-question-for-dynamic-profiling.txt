@@ -1,0 +1,884 @@
+Title: NBQ: Next-Best-Question for Dynamic Profiling
+
+URL Source: https://arxiv.org/pdf/2606.00809v2
+
+Published Time: Wed, 03 Jun 2026 00:54:31 GMT
+
+Number of Pages: 15
+
+Markdown Content:
+# NBQ: Next-Best-Question for Dynamic Profiling 
+
+# Yimin Shi 
+
+yiminshi@comp.nus.edu.sg National University of Singapore Singapore, Singapore 
+
+# Clarice Wang 
+
+clarice7@seas.upenn.edu University of Pennsylvania Philadelphia, PA, USA 
+
+# Haixun Wang 
+
+haixun@gmail.com EvenUp San Francisco, CA, USA 
+
+# Xiaokui Xiao 
+
+xkxiao@nus.edu.sg National University of Singapore Singapore, Singapore 
+
+## Abstract 
+
+Many real-world conversational settings for knowledge discov-ery, including podcasts, hiring screens, and marketplaces, need a purpose-driven understanding of a person. For this, the most effec-tive path is to ask the Next Best Question (NBQ) at each turn: the question with the highest expected information gain given what’s already been learned and the conversation’s goal. We propose the 
+
+NBQ framework, a plug-and-play smart asker that, given any topic, seeds a diverse pool of hundreds to thousands of candidate ques-tions, maintains a compact, continuously updated user state that tracks coverage and confidence, selects the next question after every answer to maximize incremental value within the pre-specified turn budget, and finally distills the unstructured Q&A dialogue into a structured, vector-based user profile ready for downstream mining tasks. As a demanding application, we instantiate NBQ for recipro-cal matchmaking , where “reciprocal” means compatibility must be mutual, i.e., a match of two people is valid only when one fits the other’s preferences, and vice versa. Therefore, each person is mod-eled with two representations: (i) who they are (self-description) and (ii) whom they prefer (counterpart preferences). NBQ asks ques-tions to refine both vectors and thereby increase the match success probability. To scale matching to real-world platforms with mil-lions of concurrent users and continuously updated profiles, we introduce QuickMatch , an efficient retrieval layer that recasts re-ciprocal matching from quadratic pairwise scoring to approximate vector search. With modest storage overhead, QuickMatch updates each user’s top matches in real time. Compared with random or conventional generative questioning baselines, NBQ improves the quality of user profiling by up to 13.6% and 14.0% in terms of AC@T and AR@T. Meanwhile, QuickMatch accelerates retrieval by up to 22.9 × while maintaining a high recall of up to 0.989. 
+
+## CCS Concepts 
+
+• Information systems → Personalization ; Recommender systems ; Information retrieval ; • Computing methodologies →
+
+Natural language processing . 
+
+> This work is licensed under a Creative Commons Attribution 4.0 International License.
+> KDD ’26, Jeju Island, Republic of Korea
+> ©2026 Copyright held by the owner/author(s). ACM ISBN 979-8-4007-2259-2/2026/08 https://doi.org/10.1145/3770855.3817658
+
+## Keywords 
+
+User Profiling, Reciprocal Recommendation, Large Language Mod-els, Scalable Retrieval 
+
+ACM Reference Format: 
+
+Yimin Shi, Clarice Wang, Haixun Wang, and Xiaokui Xiao. 2026. NBQ: Next-Best-Question for Dynamic Profiling. In Proceedings of the 32nd ACM SIGKDD Conference on Knowledge Discovery and Data Mining V.2 (KDD ’26), August 09–13, 2026, Jeju Island, Republic of Korea. ACM, New York, NY, USA, 15 pages. https://doi.org/10.1145/3770855.3817658 
+
+Resource Availability: 
+
+The source code of this paper has been made publicly available at https: //doi.org/10.5281/zenodo.20504410. 
+
+## 1 Introduction 
+
+Interviews for conversational knowledge discovery are pervasive in communication: a podcast host probing for untold stories; a recruiter estimating job fit under a tight turn budget; a clinician triaging symptoms; a sales rep running discovery; a tutor diagnos-ing misconceptions; a journalist verifying claims; a UX researcher mapping needs; a concierge teasing out preferences. These work-flows succeed or stall on the same fulcrum: what we ask next . At each turn of a conversation, given partial answers, time constraints, and a concrete purpose, the interviewer must choose the Next Best Question (NBQ) for profiling. This is inherently a sequential and 
+
+ambiguous decision problem: we adapt a sequence of questions, one step at a time, using what we have learned so far to decide where to probe next. Unlike answer-oriented assistants that primarily react, an NBQ agent leads , steering the dialogue toward a goal. A conventional questionnaire-based solution struggles because user answers can be inherently open, random, incomplete, or even off-topic. With limited user patience and a tight turn budget, static forms can waste turns on questions with lower values and miss chances to resolve the real uncertainty. Therefore, the interviewer agent needs an adaptive questioning policy that selects the next question that is expected to maximize the terminal utility under a strict interview budget. Existing approaches, however, fall short of this goal in different ways. Prior conversation planning methods learn dialogue policies that optimize long-horizon conversational task rewards. For ex-ample, HiCR [ 11 ] learns a hierarchical policy for a conversational recommender system and SCOPE [ 1] learns Markov decision pro-cess based on quantifiable metrics. However, these methods rely on task-specific supervision signals that are often hard to obtain  
+
+> arXiv:2606.00809v2 [cs.AI] 2 Jun 2026 KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea Yimin Shi, Clarice Wang, Haixun Wang, and Xiaokui Xiao
+
+in practice, especially when the interview target itself is qualita-tive and ambiguous. Recent user-elicitation methods prompt Large Language Models (LLMs) to ask questions under descriptive re-quirements. Specifically, MockLLM [ 26 ] and GATE [ 13 ] specify constraints such as avoiding repetition and favoring questions that reveal the most unknown information. Although these methods pursue a related objective, they do not explicitly model how each question and user answer contribute to the conversation target, nor do they assume a dialogue budget. Moreover, they do not provide a clear path to convert the free-form Q&A dialogue into an operable representation for downstream use. Taken together, there is a gap: we lack a purpose-driven, budget-aware, and plug-and-play adap-tive questioning interviewer that explicitly models uncertainty in partial and stochastic user answers, reasons about the relevance between historical answers and future questions, and produces structured dialogue representations for downstream applications. This gap motivates our design of NBQ , an AI-driven interviewing framework that leads the conversation. Unlike customer-support or QA assistants that react to human queries, NBQ proactively decides what to ask next to drive the dialogue toward a declared purpose. For a given topic or interviewee and an objective 𝛼 , NBQ : (i) synthe-sizes a comprehensive, diverse pool of candidate questions tailored to the topic/person; (ii) maintains a compact, continuously updated state that tracks both coverage (what has been asked or implied) and 
+
+confidence (how well we know it); (iii) selects, at each turn within the budget, the next question that maximizes expected incremental value toward 𝛼 given the dialogue so far; and (iv) distills the con-versation into a structured profile (e.g., a vector) for downstream use. NBQ is designed to be domain-agnostic and plug-and-play, i.e., it can work with any topic by instantiating the above components. As a demanding application, we focus on reciprocal matchmaking ,where success requires mutual satisfaction: who a person is must align with what another person seeks , and vice versa. This setting surfaces three key design challenges: 
+
+Purpose-driven questioning. The value of a question is relative to the interview’s goal (e.g., predictive validity in hiring, personality alignment in dating). NBQ must evaluate the expected gain of each candidate question against that goal, given the conversation so far. 
+
+Representation with uncertainty. Open answers from the re-spondent can carry overlapping signals; one response can inform multiple dimensions. NBQ must propagate credit to correlated at-tributes, track residual uncertainty, and favor questions that shrink uncertainty where it most affects the objective. 
+
+Real-time, large-scale retrieval. Each answer should immedi-ately sharpen both self and preference profiles and refresh mutual-compatible candidates fast enough to keep the interview fluid, even at population scale (hundreds of thousands to millions of users). In this paper, we formalize NBQ as a sequential, purpose-driven interview design problem, beginning with a precise problem state-ment . We then describe the framework of our solution in Section 3 and leave the detailed algorithm discussion in Section 4. We then instantiate the framework for reciprocal matchmaking in Section 5, introducing a user representation method which distills free-form dialogue to vectors, and a mutual-compatibility objective that proac-tively considers the bidirectional satisfaction. To avoid quadratic pairwise matching, we propose QuickMatch , which relaxes recip-rocal compatibility into a tight pre-filtering condition that is im-plementable via approximate vector search, followed by an exact final check. Notably, compared to random and user-elicitation base-lines, NBQ can consistently improve profiling quality with respect to AC@T and AR@T by up to 13.6% and 14.0%, respectively. Mean-while, QuickMatch accelerates candidate retrieval by up to 22.9 ×
+
+while maintaining a high recall of up to 0.989, confirming the frame-work’s effectiveness and efficiency. To summarize, we make the following main contributions: 
+
+• We propose NBQ , which generates a comprehensive question set, and adaptively selects the next-best-question to maximize the expected incremental information gain. 
+
+• We present a transformation-based, task-agnostic user represen-tation that distills profiles from unstructured dialogue. 
+
+• We propose QuickMatch , which scales reciprocal matching via efficient pre-filtering using approximate vector range search. 
+
+• We conduct experiments across scenarios and perspectives to demonstrate the effectiveness and efficiency of key components. All source codes, prompts, and datasets are available at: https:// github.com/Hanc1999/Next-Best-Question. 
+
+## 2 Problem Statement 
+
+We formalize three core problems that the paper addresses: question-pool construction , adaptive next-question selection , and for the match-making application, reciprocal profiling and scalable match retrieval .
+
+Question-Pool Construction. Given a topic or scenario 𝛼 (e.g., hir-ing, podcasting, clinical intake), the problem of question-pool con-struction asks for a set of candidate questions Q ( 𝛼 ) = {𝑞 1, . . . , 𝑞 𝑛 }
+
+that covers a set of relevant sub-dimensions of scenario 𝛼 . We require the set Q ( 𝛼 ) to satisfy certain predefined metrics such as coverage, diversity, and quality. These metrics are intended to be computable from question and answer representations. 
+
+Adaptive Next-Best Question Selection. An interview with re-spondent 𝑢 proceeds for at most 𝑇 turns. After 𝑡 ≤ 𝑇 turns, the dialogue prefix is 𝐷 𝑡 = {( 𝑞 1, 𝑎 1), . . . , (𝑞 𝑡 , 𝑎 𝑡 )} . Let 𝐽 (𝐷 𝑡 ; 𝛼 ) ∈ R be an abstract utility function that scores the usefulness of the conver-sation so far for a topic 𝛼 (e.g., narrative value, decision accuracy, risk reduction). The problem here is to choose the next best ques-tion that is expected to maximize terminal utility under a strict turn budget 𝑇 : 𝑞 𝑡 +1 = arg max 𝑞 ∈ Q E𝑞 [𝐽 (𝐷 𝑇 ; 𝛼 )] , where the expectation is over the answer randomness. 
+
+Efficient Reciprocal Matchmaking. In reciprocal matching, each user 𝑢 is profiled along two axes: a self-description (𝑠 ) representation describing who they are, and a match-preference (𝑚 ) representa-tion describing what they seek in a partner. Let 𝑠 and 𝑚 be their representations distilled from the dialogue 𝐷 , we define a mutual compatibility function 𝑔 : (𝑠 𝑖 , 𝑚 𝑖 , 𝑠 𝑗 , 𝑚 𝑗 ) ↦ → [ 0, 1], which takes the dual representations of two users 𝑢 𝑖 and 𝑢 𝑗 and returns a normal-ized matching score. The function 𝑔 is required to be reciprocal (i.e., 
+
+𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) = 𝑔 (𝑢 𝑗 , 𝑢 𝑖 )) , bounded (i.e., 𝑔 ∈ [ 0, 1]), and monotone in alignment. Our objective is to maintain and expose, for each user 
+
+𝑢 𝑖 , the set of top-matching candidates which maximizes the overall utility Í𝑖 ∈ U 
+
+Í𝑗 ∈TopK (𝑖 ) 𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) in real time as answers arrive and user profiles update. The system must satisfy three key constraints: NBQ: Next-Best-Question for Dynamic Profiling KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea 
+
+Figure 1: NBQ workflow: question-pool construction, adaptive profiling, user representation, and reciprocal matching. 
+
+(i) streaming updates , the representations 𝑠 and 𝑚 are refreshed im-mediately upon each new (𝑞, 𝑎 ) pair; (ii) low latency , the ranked set 
+
+TopK 𝑡 (𝑖 ) must be refreshed within a fixed time bound, independent of the total user population; and (iii) scalability , both space and computation per refresh should remain sublinear in |U| . The spe-cific design of 𝑔 and the underlying retrieval structures are detailed in subsequent sections. These requirements pose great challenges for data management and determine whether the delivered sys-tem is scalable enough to operate in real-world environments with millions of users online at the same time. 
+
+## 3 Method Overview 
+
+Dynamic Question Selection. We use 𝛼 to denote the conversa-tional profiling objective , i.e., the topic or goal that drives the inter-view (e.g., professional experience in hiring, partner expectation in matchmaking). We first define a universal candidate question pool 
+
+Q ( 𝛼 ), the set of candidate questions tailored to 𝛼 , that is shared across all users within the same scenario 𝛼 . In practice, the pool con-tains approximately hundreds to thousands of unique and diverse questions, carefully designed to cover all relevant information we aim to collect from users. To quantify how well the system under-stands each user at any point during the conversation, we introduce the concept of a user state , formally defined as a vector s ∈ R| Q | .Each entry s[𝑖 ] ∈ [ 0, 1] corresponds to the degree of completeness, or confidence, that question 𝑞 𝑖 has been addressed. Initially, when no questions have been asked, we know nothing about the user; hence, all entries of 𝑠 are initialized to zero. In an ideal scenario, where a user responds accurately to every question in Q, all entries would approach one, indicating a complete understanding of the user. However, in practice, it is unrealistic to ask every question due to constraints on conversation time and user patience. There-fore, we limit the turn budget as 𝑇 ≪ |Q| , requiring the agent to strategically select which questions to pose within these 𝑇 turns to maximize the total information gain , the overall conversation utility, defined as the sum of the entries in the user state vector: 
+
+IG = Í| Q |  
+
+> 𝑖 =1
+
+s[𝑖 ].
+
+A critical insight guiding our design is that questions in Q often exhibit correlations; that is, answers provided by a user may simul-taneously address multiple related questions to varying degrees. For instance, answers to “Describe your ideal weekend,” often help to reveal the respondent’s social preferences and lifestyle choices ,which also inform correlated questions such as “ Who do you like to be with? ” and “ Do you like being outdoors? ”. Leveraging this, we not only update the user state entry corresponding to the asked question but also incrementally update the entries of other asso-ciated questions. However, when answering the same question, different users will respond from varying perspectives shaped by their unique personal experiences and values. As a result, it is in-feasible to pre-select a globally optimal subset of 𝑇 questions; we need to adaptively select the next best question at each turn from Q
+
+based on the user’s individual responses, dynamically adjusting our questioning strategy to maximize the overall conversation utility. To address this challenge, we propose a greedy adaptive question selection algorithm, denoted as NBQ . At each conversation turn 𝑡 , it selects the next best question 𝑞 ∗ 
+
+> 𝑡 +1
+
+∈ Q that is expected to yield the largest incremental information gain: 
+
+𝑞 ∗  
+
+> 𝑡 +1
+
+= arg max   
+
+> 𝑞 ∈ Q
+
+E𝑞 [IG 𝑡 +1] − IG 𝑡 
+
+= arg max   
+
+> 𝑞 ∈ Q
+
+1⊤ (E𝑞 [s𝑡 +1] − s𝑡 ) (1) 
+
+Reciprocal Matching. One of the most demanding downstream ap-plications of conversational profiling is reciprocal matching, where the system needs to collect a user’s profile along two axes: (i) self-description and (ii) preferences towards counterparts. To achieve this, we construct two corresponding question sets and apply NBQ 
+
+for two 𝑇 -turn adaptive profiling conversations. To leverage the re-sulting dialogues for matching while filtering out noise (e.g., overly niche details, specific expression habits, response length), we trans-form each unstructured Q&A transcript into a readable, concise, high-level user representation. Formally, we represent each user as a structured pair (𝑠, 𝑚 ), where 𝑠 summarizes her self-characteristics and 𝑚 captures her desired traits of the potential counterpart. Both 
+
+𝑠 and 𝑚 preserve the semantic richness and are further encoded into a shared embedding space for better actionability. The goal of the reciprocal matching system is to identify user pairs with high mutual compatibility. We present a symmetric com-patibility function 𝑔 that proactively considers the bidirectionality of candidate satisfaction and penalizes the imbalanced situations. KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea Yimin Shi, Clarice Wang, Haixun Wang, and Xiaokui Xiao 
+
+Formally, given two users 𝑢 𝑖 and 𝑢 𝑗 , we define a satisfaction func-tion 𝑓 𝑖 𝑗 = 𝑓 (𝑚 𝑖 , 𝑠 𝑗 ) to measure how well user 𝑢 𝑗 ’s characteristics align with user 𝑢 𝑖 ’s preferences, vice versa, 𝑓 𝑗𝑖 = 𝑓 (𝑚 𝑗 , 𝑠 𝑖 ) measures the satisfaction in the opposite direction. A successful match should maximize both of these scores. 
+
+## 4 Adaptive Profiling 
+
+In this section, we present the design details of NBQ , the adap-tive profiling module based on relevance analysis, which operates through the following four main steps: (i) recursively construct the subdimension set D ( 𝛼 ) for scenario 𝛼 and generate the question set Q correspondingly; (ii) for every pair of questions, pre-compute their relevance 𝑟 (𝑞 𝑖 , 𝑞 𝑗 ); (iii) at each turn 𝑡 , given a new answer 
+
+𝑎 𝑡 , compute its relevance to the historical answers 𝐴 𝑡 −1 and to all questions in Q, and update the user state s; (iv) select, for the next turn, the question that maximizes the expected information gain. 
+
+## 4.1 Question Set Generation 
+
+The question set comprises two subsets: Q = {Q 𝑠 , Q𝑚 }, where Q𝑠 
+
+targets the user’s self-information and Q𝑚 focuses on her match preference. To ensure that the question set is sufficiently compre-hensive to cover all topics relevant to the subsequent reciprocal recommendation scenario 𝛼 , we first recursively construct a subdi-mension tree based on a small seed set of root dimensions D𝑟𝑜𝑜𝑡 .
+
+SubdimDiv . We propose the SubdimDiv algorithm to construct the subdimension tree D through an iterative top-down process. Start-ing from the seed root dimension layer D0, we expand the set over 
+
+𝐿 iterations. At each iteration 𝑙 , every subdimension in the previ-ous layer D𝑙 −1 is further decomposed into children subdimensions. More specifically, conditioned on the given application scenario 𝛼 ,we leverage LLMs to generate 𝑘 min to 𝑘 max new subdimensions with finer granularity and approximately equal importance. We require the division to be natural, and the resulting subdimensions should well cover the semantic scope of their parent. This recursive ex-pansion process naturally introduces different levels of granularity and supports hierarchical understanding across dimensions. After processing the last layer, the resulting new subdimensions com-pose the new subdimension tree layer D𝑙 . The algorithm returns the union of all these layers as the result, i.e., D = {D 0, . . . , D𝐿 }.Pseudocode and prompts are provided in Appendix B and E.1. 
+
+## 4.2 Relevance Prediction 
+
+A core insight in the design of NBQ is that user responses often carry overlapping content relevant to multiple questions. To exploit this, we introduce relevance , which quantifies how much the answer to one question can help infer information about another. Formally, for any pair of questions (𝑞 𝑖 , 𝑞 𝑗 ) ∈ Q × Q , we define their relevance 
+
+𝑟 (𝑞 𝑖 , 𝑞 𝑗 ) ∈ [ 0, 1] as the degree of content overlap between the user responses they are expected to elicit. Similarly, we define 𝑟 (𝑞 𝑖 , 𝑎 𝑗 )
+
+and 𝑟 (𝑎 𝑖 , 𝑎 𝑗 ) as the relevance between questions and answers, and between answers themselves, respectively. For simplicity of pre-sentation, we focus on the question–question relevance prediction, with other forms following the same pipeline. Recent works have shown that LLMs can effectively judge the relevance between a user query and retrieved content [ 3, 29 ]. Mo-tivated by this, we leverage LLMs to reason and estimate the rel-evance between questions. Following Xiong et al . [38] and Tian et al . [30] , we define six distinct relevance levels, each followed by a descriptive definition and a quantized overlap rate. As the output, the LLM is instructed to generate a certainty distribution over these levels that sums to 1. We then convert this distribution into a single continuous relevance score by taking a certainty-weighted average across all six levels. We provide full details in Appendix E.3. However, directly applying LLMs to score relevance for every pair of questions is impractical. The number of pairwise compar-isons grows quadratically with the number of questions, leading to unaffordable computational costs. To address this, we propose a lightweight relevance predictor: it first analyzes the answer con-tent each question is expected to elicit, and then learns a mapping from the similarity between the two analyses to a relevance score. Specifically, for each question 𝑞 ∈ Q , we use LLMs to predict the 
+
+answer elements that are most likely to appear in a user’s response, denoted by ˆ𝑎 . For example, for “Describe your ideal weekend,” an LLM may predict answer elements such as social relationships , week-end lifestyle , and entertainment activities . We carefully design the prompt so that the predicted elements are non-overlapping , balanced ,
+
+complete , and self-contained . Prompts provided in Appendix E.4. Next, we assume and learn a monotone mapping between the relevance score and the answer analysis similarity. We construct the calibration dataset by uniformly sampling question pairs from 
+
+Q, and for each pair (𝑞 𝑖 , 𝑞 𝑗 ), we obtain both the relevance rating 
+
+ˆ𝑟 𝑖 𝑗 and the analysis similarity score ¯𝑟 𝑖 𝑗 = cos ( ˆa𝑖 , ˆa𝑗 ), which is the cosine similarity between the semantic embeddings of ˆ𝑎 𝑖 and ˆ𝑎 𝑗 .To reduce variance caused by LLM stochasticity, we repeat both computations three times and average the results. We then fit the following polynomial curve, 𝑓 (¯𝑟 ) = Í𝑑 𝑘 =0 𝑤 𝑘 ¯𝑟 𝑘 , optimizing param-eters w to minimize the squared error between 𝑓 ( ¯𝑟 𝑖 𝑗 ) and ˆ𝑟 𝑖 𝑗 over all sampled question pairs in the calibration set. At inference time, we predict the relevance between two questions (𝑞 𝑖 , 𝑞 𝑗 ) as 
+
+𝑟 𝑖 𝑗 = clip [0,1]
+
+ 𝑓  ¯𝑟 𝑖 𝑗 
+
+ = min {1, max {0, 𝑓  ¯𝑟 𝑖 𝑗 
+
+ }} .
+
+Since pairwise question relevance is used in the question selection process and does not depend on the respondent, we precompute 
+
+R ∈ R| Q | × | Q | with R[𝑖, 𝑗 ] = 𝑟 𝑖 𝑗 . This shifts the main cost of NBQ to an offline stage and amortizes it across all users. We empirically validate this learned mapping in Section 6.7. 
+
+## 4.3 User State Updating 
+
+The question state dynamically reflects the extent to which a ques-tion can be addressed based on the user’s current responses. Initially, since we know nothing about the respondent, we set all the ques-tions’ scores to zero, i.e., s0 [𝑖 ] = 0, ∀𝑞 𝑖 ∈ Q . At turn 𝑡 , after receiving a new user response 𝑎 𝑡 , we compute the incremental information gain it contributes to each question 𝑞 𝑖 as: 
+
+𝛿 (𝑎 𝑡 | 𝑞 𝑖 , 𝐴 𝑡 −1) = 𝑟 (𝑎 𝑡 , 𝑞 𝑖 ) − 𝑟 (𝑎 𝑡 , 𝐴 𝑡 −1 | 𝑞 𝑖 ) ,
+
+where 𝑟 (𝑎 𝑡 , 𝑞 𝑖 ) denotes the relevance between the answer and the question, and 𝑟 (𝑎 𝑡 , 𝐴 𝑡 −1 | 𝑞 𝑖 ) represents the relevance between 𝑎 𝑡 
+
+and the existing answer set 𝐴 𝑡 −1 with respect to 𝑞 𝑖 . Intuitively, a larger 𝑟 (𝑎 𝑡 , 𝑞 𝑖 ) means that 𝑎 𝑡 is more informative for answering 𝑞 𝑖 ,NBQ: Next-Best-Question for Dynamic Profiling KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea 
+
+thus yielding higher incremental information gain. The second term acts as a redundancy penalty: it deducts the portion of 𝑎 𝑡 ’s contribu-tion with respect to 𝑞 𝑖 that is already covered by earlier conversation turns. More specifically, to compute 𝑟 (𝑎 𝑡 , 𝑞 𝑖 ), we follow the same procedure as for question–question relevance. We first ask the LLM to summarize the main content elements included in 𝑎 𝑡 into a text 
+
+ˆ𝑎 𝑡 , and encode it into a semantic embedding ˆa𝑡 . We then map the cosine similarity between ˆa𝑡 and ˆa𝑖 through the calibration function 
+
+𝑓 and clip the result to [0, 1]: 𝑟 (𝑎 𝑡 , 𝑞 𝑖 ) = clip [0,1] (𝑓 (cos ( ˆa𝑡 , ˆa𝑖 ))) .
+
+When calculating 𝑟 (𝑎 𝑡 , 𝐴 𝑡 −1 | 𝑞 𝑖 ), a naive approach is to compute the average relevance between 𝑎 𝑡 and each past answer 𝑎 𝑗 , ∀𝑎 𝑗 ∈
+
+𝐴 𝑡 −1. However, this ignores the fact that different past answers may contribute unequally to the question 𝑞 𝑖 . To address this, we define the relevance between 𝑎 𝑡 and the existing question-specific knowledge regarding 𝑞 𝑖 as the following weighted sum: 
+
+𝑟 (𝑎 𝑡 , 𝐴 𝑡 −1 | 𝑞 𝑖 ) = 𝑡 −1Í
+
+> 𝑗 =1
+
+ 𝛿 𝑖 (𝑎 𝑗 ) · 𝑟 (𝑎 𝑡 , 𝑎 𝑗 ) ,
+
+where 𝛿 𝑖 (𝑎 𝑗 ) denotes the incremental information gain that the historical answer 𝑎 𝑗 has contributed to question 𝑞 𝑖 , which is actually the previous redundancy-adjusted relevance between them. The term 𝑟 (𝑎 𝑡 , 𝑎 𝑗 ) denotes the relevance between the current answer 
+
+𝑎 𝑡 and the previous answer 𝑎 𝑗 . The relevance between two user answers, 𝑟 (𝑎 𝑡 , 𝑎 𝑗 ), is computed and calibrated in the same way as question–question and answer–question relevance: 𝑟 (𝑎 𝑡 , 𝑎 𝑗 ) =
+
+clip [0,1]
+
+ 𝑓  cos  ˆa𝑡 , ˆa𝑗 
+
+ . Intuitively, this relevance measurement pays more attention to past answers that are important to the question 𝑞 𝑖 while downweighting those with limited effect. 
+
+## 4.4 Question selection 
+
+When selecting the next question to ask, NBQ applies a greedy policy that maximizes the expected overall information gain provided by the user’s next response. The optimization problem described in Eq. (1) is instantiated as follows: 
+
+𝑞 ∗ 
+
+> 𝑡 +1
+
+= arg max   
+
+> 𝑞 𝑖 ∈ Q
+
+E𝑞 𝑖 
+
+∑︁ 𝑞 𝑗 ∈ Q 
+
+𝛿 (𝑎 𝑡 +1 | 𝑞 𝑗 , 𝐴 𝑡 )
+
+
+
+= arg max  
+
+> 𝑞 𝑖 ∈ Q
+
+∑︁ 𝑞 𝑗 ∈ Q 
+
+𝛿 ( ˆ𝑎 𝑖 | 𝑞 𝑗 , 𝐴 𝑡 ),
+
+where we approximate the unknown next response 𝑎 𝑡 +1 with the predicted answer elements ˆ𝑎 𝑖 for candidate question 𝑞 𝑖 .We next formulate the incremental information gain compu-tation for all question candidates in matrix form. Recall that we pre-compute a symmetric relevance matrix R over questions. We use R to estimate the relevance between the next answer to each candidate question and all other questions. Let R𝑎 ∈ R𝑇 × | Q | denote the relevance between the 𝑇 historical answers and all candidate questions, where R𝑎 [𝑡, 𝑖 ] = 𝑟 (𝑎 𝑡 , 𝑞 𝑖 ). Let ∆ ∈ R𝑇 × | Q | denote the incremental information gain matrix between all historical answers and all questions, i.e., ∆[𝑡, 𝑖 ] = 𝛿 𝑗 (𝑎 𝑡 ) = 𝛿 (𝑎 𝑡 |𝑞 𝑖 , 𝐴 𝑡 −1). We then select the next question by maximizing the following objective function over all candidates: 
+
+𝑞 ∗ 
+
+> 𝑡 +1
+
+= arg max  
+
+> 𝑞 𝑖 ∈ Q
+
+   R − R⊤ 
+
+> 𝑎
+
+∆1 [𝑖 ],
+
+where 1 ∈ R| Q | is the all-ones column vector, it sums each row of R − R⊤ 
+
+> 𝑎
+
+∆, yielding for each candidate question the expected incremental information gain aggregated over all questions. 
+
+## 5 Matching Mechanism 
+
+In this section, to support reciprocal matchmaking as the down-stream application, we discuss (i) how we convert the user transcript into a structured and operable representation, (ii) the design of mu-tual compatibility scores, and (iii) QuickMatch , an approximate retrieval layer that scales the online matching. 
+
+## 5.1 User Representation 
+
+The reciprocal recommendation needs to be performed in a mutual manner, where each user serves both as a candidate and as a seeker. We therefore represent each user 𝑢 as (𝑠, 𝑚 ), where 𝑠 describes the user’s self characteristics and 𝑚 describes the qualities she seeks in a partner. To obtain 𝑠 and 𝑚 , NBQ conducts two 𝑇 -turn conversa-tions with each user and outputs corresponding Q&A transcripts. A vanilla method is to directly represent 𝑠 and 𝑚 as their corre-sponding dialogue transcript. However, this approach introduces several sources of noise. First, the resulting presentation is sensitive to surface-form factors such as personal tone, phrasing style, or conversational habits, which are largely irrelevant to the reciprocal matchmaking target. Second, the same high-level characteristic can be expressed in very different ways across users, leading to inconsistent representations. For example, users who favor “movies about space travel” or “stories about future technologies” indicate the same interest in sci-fi themes. To overcome these noise sources, we propose an LLM-based transformation that converts the raw conversation into a more concise, robust user profile, capturing the user’s essential traits and preferences. Specifically, we instruct the LLM to abstract away su-perficial linguistic details and focus on persona-level insights, with main operations as follows: Insight Extraction , Key Signal Retention ,and Structured Expression . We provide the operation details and full prompts in Appendix E.2. To enable quantitative matching, we encode texts 𝑠 and 𝑚 to semantic embedding vectors s and m using general transformer-based encoder models. They capture the user profile information in a numerical form, allowing direct comparison between users. 
+
+## 5.2 Matching Criteria 
+
+We then define a satisfaction score to quantify one-directional compatibility between two users. For a given pair of users (𝑢 𝑖 , 𝑢 𝑗 ),let 𝑓 𝑖 𝑗 ∈ [ 0, 1] denote how well 𝑢 𝑗 fits 𝑢 𝑖 ’s preferences: 
+
+𝑓 𝑖 𝑗 = 12 cos (m𝑖 , s𝑗 ) + 12 = 12
+
+m𝑖 · s𝑗 
+
+∥m𝑖 ∥∥ s𝑗 ∥ + 12 .
+
+A high 𝑓 𝑖 𝑗 indicates that 𝑢 𝑗 has the attributes that 𝑢 𝑖 is looking for; conversely, a low 𝑓 𝑖 𝑗 implies 𝑢 𝑗 likely does not meet 𝑢 𝑖 ’s criteria. Note that in general 𝑓 𝑖 𝑗 ≠ 𝑓 𝑗𝑖 , since one user can be satisfied with a second even if the second isn’t satisfied with the first, reflecting asymmetric preferences. To obtain a symmetric measure of mutual compatibility, we applied the harmonic mean to aggregate the two KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea Yimin Shi, Clarice Wang, Haixun Wang, and Xiaokui Xiao 
+
+directional scores 𝑓 𝑖 𝑗 and 𝑓 𝑗𝑖 :
+
+𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) = 2 𝑓 𝑖 𝑗 · 𝑓 𝑗𝑖 
+
+𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 
+
+(2) where we define 𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) = 0 when 𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 = 0. The harmonic mean is particularly suitable here because it produces a high value only when both sides are jointly satisfied; if either 𝑓 𝑖 𝑗 or 𝑓 𝑗𝑖 is small, 𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) will be strongly penalized. This ensures that a high compatibility score arises only from truly reciprocal alignment, preventing matches driven by one-sided attraction. 
+
+## 5.3 Fast Approximation 
+
+Retrieving all user pairs whose reciprocal matching score 𝑔 (𝑢 𝑖 , 𝑢 𝑗 )
+
+exceeds a threshold 𝜃 by comparing all candidate pairs requires quadratic computational complexity 𝑂 (|U| 2), which is infeasible in real-world matching platforms with hundreds of thousands to millions of concurrent users. To make retrieval scalable, we propose 
+
+QuickMatch , a two-stage approximation method. It (i) derives a tight necessary condition for retrieval, (ii) pre-filters candidate pairs via approximate vector search, and (iii) exactly computes mutual compatibility for the remaining pairs. 
+
+Efficient Pre-filtering. We derive a necessary condition by relat-ing the compatibility score to the dot product of two user embed-dings concatenated in reverse order (detailed proofs in Appendix A). 
+
+Theorem 1. Let 𝑓 𝑖 𝑗 , 𝑓 𝑗𝑖 ∈ ( 0, 1]. If 𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) ≥ 𝜃 , then necessarily 
+
+[¯s𝑖 ; ¯ m𝑖 ] · [ ¯m𝑗 ; ¯ s𝑗 ] ≥ 4𝜃 − 2 where ¯m = m 
+
+> ∥m∥
+
+and ¯s = s 
+
+> ∥s∥
+
+.
+
+This motivates a practical user indexing strategy. For each user 𝑢 𝑖 ,we store two normalized concatenations, [¯s; ¯m] and [ ¯m; ¯s]. Given a query user 𝑢 𝑖 , we use [¯s𝑖 ; ¯m𝑖 ] as the query vector and compute inner products with the reversed representations of other users, i.e., 
+
+[ ¯m𝑗 ; ¯s𝑗 ] for all 𝑢 𝑗 ∈ U \ { 𝑢 𝑖 }. By Theorem 1, selecting all candidate users whose inner products are at least 4𝜃 − 2 guarantees that we include every user 𝑢 𝑗 satisfying 𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) ≥ 𝜃 .We have now transformed the original filtering condition into a standard range search problem. Range search has been extensively studied, and its approximate versions can be effectively accelerated using vector indexing techniques such as IV_FLAT [ 8], IVF_SQ8 [ 8 ], and HNSW [ 16 ]. It is supported as a scalable primitive in modern vector databases such as Milvus, Redis, pgvector, GaussDB-Vector, AnalyticDB-V, FAISS, and PUCK [ 2, 6, 9, 19 , 21 , 27 , 33 , 35 ]. These systems can handle billion-scale vector search very efficiently [ 24 ]. We therefore delegate the range search component in QuickMatch 
+
+to an off-the-shelf vector database, which retrieves candidate pairs satisfying [¯s𝑖 ; ¯m𝑖 ] · [ ¯m𝑗 ; ¯s𝑗 ] ≥ 4𝜃 − 2 using approximate search to balance effectiveness and practical cost. After this pre-filtering step, we obtain a candidate set that satisfies the necessary condition. We then perform exact verification on these candidates by computing 
+
+𝑔 (𝑢 𝑖 , 𝑢 𝑗 ), and retain precisely those pairs with 𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) ≥ 𝜃 .
+
+Gap Analysis. The practical efficiency of QuickMatch depends on two factors: (i) the gap between the pre-filtered candidates and the true matches, i.e., whether the necessary condition used for range search is sufficiently tight; and (ii) the efficiency of approximated vector range search. Here, we focus on the first factor and analyze the theoretical error analysis of the gap between the necessary condition and the exact mutual-compatibility score. 
+
+Theorem 2. Let 𝑓 𝑖 𝑗 , 𝑓 𝑗𝑖 ∈ ( 0, 1] and 𝜃 ≥ 12 . If a user pair (𝑢 𝑖 , 𝑢 𝑗 )
+
+satisfies [¯s𝑖 ; ¯ m𝑖 ] · [ ¯m𝑗 ; ¯ s𝑗 ] ≥ 4𝜃 − 2 then 𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) ≥ 𝜃 − (1−𝜃 )2 
+
+> 𝜃
+
+.
+
+In Theorem 2, we assume 𝜃 ≥ 12 , since in practice we typically filter only pairs that are at least moderately compatible. We derive the gap term as (1 − 𝜃 )2/𝜃 , where the numerator (1 − 𝜃 )2 decays quadratically as 𝜃 grows, while the denominator 𝜃 increases linearly. Hence, the gap shrinks to 0 as 𝜃 → 1 and is essentially determined by (1−𝜃 )2. Equivalently, letting 𝜃 = 1−𝜖 gives the gap equals 𝜖 2 
+
+> 1−𝜖
+
+=
+
+𝜖 2 + 𝑂 (𝜖 3). For instance, when 𝜃 = 0.9, the difference between the compatibility score of pre-filtering results and the target threshold is bounded by (1 − 0.9)2/0.9 ≈ 0.0111 ; when 𝜃 = 0.85 , the bound is 
+
+0.0264 . These results indicate that when the threshold 𝜃 is relatively high, the approximation error remains very small, suggesting that our necessary condition is tight and reliable in practical settings. 
+
+## 6 Experiments 
+
+In this section, we evaluate the proposed NBQ , focusing on its ap-plication to reciprocal matchmaking. We further assess the effec-tiveness of the transformation-based user representation, as well as the accuracy and efficiency of the proposed QuickMatch . We aim to answer the following five research questions: 
+
+• RQ1 : How effectively can NBQ elicit respondent profiles? 
+
+• RQ2 : How do different LLM backbones and semantic embedding models influence NBQ ’s performance? 
+
+• RQ3 : How effectively does the transformation-based user repre-sentation improve matching accuracy? 
+
+• RQ4 : How accurate and efficient is QuickMatch in retrieving high-scoring matches at scale? 
+
+• RQ5 : How effective are NBQ components? Experiments are conducted on a Linux machine with 32 Intel(R) Core(TM) i9-14900KF and 62GB RAM. 
+
+## 6.1 Dataset Description 
+
+OpenMatch. We use OpenBench [ 32 ] benchmark for the user pro-filing evaluation. To focus on the adaptive setting and reciprocal matchmaking downstream, following the synthesis and evaluation pipeline of OpenBench, we further synthesize the OpenMatch re-spondent instances under two scenarios: romantic matchmaking and job interviews. We synthesize 100 respondents for the roman-tic matchmaking scenario and 20 for the job interview scenario, each based on a self-information script consisting of 10 topics and a corresponding questionnaire with 10 questions, yielding 1,200 questions in total. For the matching evaluation, we divide romantic matchmaking respondents into two subsets, ROMANTIC-MAN and ROMANTIC-WOMAN, each containing 50 instances. We then con-struct 50 distinct one-to-one true match pairs across the two respon-dent subsets. For each matched pair, we correspondingly synthe-size mate-preference scripts based on each other’s self-information scripts. Full details provided in Appendix C. 
+
+RandUser-100K. To evaluate the scalability and accuracy of our proposed QuickMatch , we construct this synthetic dataset with 100,000 users. Each user is represented by a pair of embeddings 
+
+(s, m), where both are uniformly randomized in a 16-dimensional space. Specifically, we sample each dimension from [0, 1] and nor-malize the vectors to unit length so that all embeddings lie on the NBQ: Next-Best-Question for Dynamic Profiling KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea 
+
+Table 1: Performance evaluation in AC@T and AR@T on OpenMatch across three scenarios.                                                                                                                                                                       
+
+> Models ROMANTIC-MAN ROMANTIC-WOMAN JOB
+> AC@3 AR@3 AC@4 AR@4 AC@5 AR@5 AC@3 AR@3 AC@4 AR@4 AC@5 AR@5 AC@3 AR@3 AC@4 AR@4 AC@5 AR@5 GPT-5 0.619 0.673 0.702 0.752 0.778 0.822 0.600 0.649 0.700 0.746 0.777 0.811 0.595 0.613 0.703 0.722 0.743 0.748 GPT-5-mini 0.606 0.662 0.677 0.737 0.772 0.817 0.585 0.632 0.661 0.705 0.748 0.770 0.605 0.620 0.683 0.700 0.742 0.758 Gemini-2.5-Pro 0.602 0.665 0.687 0.741 0.764 0.809 0.597 0.640 0.679 0.722 0.769 0.800 0.580 0.598 0.665 0.687 0.720 0.735 Qwen-3-80B 0.537 0.597 0.616 0.669 0.679 0.733 0.533 0.563 0.608 0.651 0.656 0.689 0.593 0.608 0.682 0.695 0.753 0.763 Deepseek-V3.1 0.608 0.667 0.701 0.757 0.783 0.825 0.583 0.622 0.697 0.733 0.763 0.783 0.605 0.627 0.705 0.715 0.783 0.788 Llama-3.3-70B 0.613 0.660 0.689 0.737 0.757 0.808 0.581 0.623 0.686 0.707 0.760 0.790 0.616 0.627 0.723 0.736 0.785 0.797 MockLLM 0.549 0.611 0.654 0.709 0.739 0.779 0.538 0.588 0.630 0.668 0.727 0.762 0.587 0.600 0.627 0.642 0.665 0.678 GATE 0.604 0.655 0.714 0.758 0.779 0.817 0.624 0.663 0.705 0.745 0.782 0.818 0.612 0.632 0.658 0.673 0.708 0.718
+> RandAsk 0.595 0.651 0.677 0.729 0.735 0.784 0.619 0.672 0.687 0.739 0.738 0.775 0.698 0.713 0.760 0.770 0.778 0.792
+> NBQ 0.703
+> +13.6%
+> 0.767
+> +14.0%
+> 0.793
+> +11.1%
+> 0.843
+> +11.2%
+> 0.845
+> +7.9%
+> 0.895
+> +8.5%
+> 0.689
+> +10.4%
+> 0.744
+> +10.7%
+> 0.775
+> +9.9%
+> 0.817
+> +9.5%
+> 0.850
+> +8.7%
+> 0.877
+> +7.2%
+> 0.707
+> +1.3%
+> 0.713
+> +0.0%
+> 0.808
+> +6.3%
+> 0.820
+> +6.5%
+> 0.873
+> +11.2%
+> 0.885
+> +11.0%
+
+same hypersphere. We choose a 16-dimensional space to ensure adequate coverage of the sphere without requiring an excessively large number of vectors, enabling efficient and reliable evaluation of large-scale matching performance. 
+
+## 6.2 Experiment Settings 
+
+Baselines. To evaluate the performance of user profiling, we com-pare NBQ with three groups of baselines as follows: 
+
+• OpenBench interview methods, in which we apply prompt en-gineering following the original framework [32], explicitly em-phasize the main dimensions of interest in each conversation and clearly specify both the total dialogue-turn budget and the remaining turn quota at each step. Regarding the backbone mod-els, we include three commercial LLMs (GPT-5, GPT-5-mini, and Gemini-2.5-Pro) and three open-source models (Qwen-3-80B, DeepSeek-V3.1, and Llama-3.3-70B). These models represent the latest generation of LLMs, all capable of multi-turn conversation and reasoning [ 34 , 40 ], thereby serving as competitive baselines. 
+
+• LLM-based user-preference elicitation methods: MockLLM [ 26 ]and GATE [ 13 ], using GPT-5 as the backbone. For MockLLM, to ensure fair alignment with the other baselines, the agent has no access to public information. For GATE, we use the generating open-ended questions setting. To ensure a fair comparison, we specify the main dimensions of interest for the conversation. 
+
+• RandAsk : An ablation variant that replaces NBQ ’s adaptive ques-tion selection with random sampling. 
+
+Experiment Configurations. When constructing the question set for both scenarios, we initialize D0 with the main dimensions of interest used to construct OpenMatch. For each dimension in D0,we generate 10 questions, yielding a question set with |Q| = 100 .We apply GPT-4o to generate relevance ratings and apply GPT-4.1 for answer element analysis, both average three independent runs. We average results over three independent runs and then fit a cubic polynomial curve for calibration. We use OpenAI’s text-embedding-3-large (O-3-large) as the default semantic encoding model with a dimension of 1024. Unless stated otherwise, these settings are fixed for all experiments. 
+
+Evaluation Metrics. Following OpenBench [ 32 ], we evaluate pro-filing quality using Answer Accuracy (AC) and Answer Rate (AR). We report AC@T and AR@T under a turn budget 𝑇 . AC@T is the fraction of questions answered correctly after a 𝑇 -turn dialogue, and AR@T is the fraction for which the transcript can provide confident supporting references within 𝑇 turns. Together, these metrics quantify how well the agent elicits accurate and compre-hensive information under limited interaction. For reciprocal rec-ommendation, we use Hit@K, where 𝐾 denotes the number of retrieved candidates per user. For a user 𝑢 𝑖 with true match 𝑢 𝑗 ,
+
+𝐻𝑖𝑡 @𝐾 = I 𝑢 𝑗 ∈ TopK (𝑢 𝑖 ).
+
+## 6.3 Profile Elicitation Performance (RQ1) 
+
+Table 1 reports the performance of NBQ and all baselines in terms of AC@T and AR@T on the OpenMatch dataset, across both roman-tic matchmaking and job interview scenarios. The best results are highlighted in bold, while the second-best results are underlined. Relative improvements over the best-performing baseline for each metric. As shown in Table 1, NBQ consistently achieves the best results across all scenarios, dataset subsets, and evaluation metrics. On the ROMANTIC-MAN subset, it improves AC@T and AR@T by an average of 10.9% and 11.2% across T ∈ { 3, 4, 5}, with the largest margins of 13.6% and 14.0%. On the ROMANTIC-WOMAN subset, 
+
+NBQ achieves comparable gains, improving the two metrics by an average of 9.7% and 9.1%, with the largest improvements of 10.4% and 10.7%. On the JOB scenario, NBQ improves two metrics by an average of 6.3% and 5.8%, with the largest margins of 11.2% and 11.0%. These consistent improvements demonstrate that our adap-tive profiling process can effectively probe more useful information from the respondent than the baselines. Among the first-group baselines, i.e., the interviewer agents from OpenBench with different LLM backbones, GPT-5 achieves the strongest performance in most settings on ROMANTIC-MAN and ROMANTIC-WOMAN, while DeepSeek-V3.1 is generally the best open-sourced backbone and delivers the second strongest re-sults within the group, outperforming Gemini-2.5-Pro and other LLMs. In the JOB scenario, Llama-3.3-70B stands out as the strongest backbone in this group and outperforms both commercial and open-sourced alternatives. For the second group of user-eliciting methods based on LLM prompt engineering, GATE attains better results in more cases and serves as the second-best among all compared methods in the romantic matchmaking scenario. In the third base-line group, RandAsk shows relatively worse performance, further KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea Yimin Shi, Clarice Wang, Haixun Wang, and Xiaokui Xiao 
+
+Table 2: NBQ with different LLM backbones. Backbones ROM-M ROM-W JOB 
+
+AC@5 AR@5 AC@5 AR@5 AC@5 AR@5 GPT-4.1 0.845 0.895 0.850 0.877 0.873 0.885 GPT-5 0.845 0.885 0.857 0.884 0.880 0.888 
+
+Gemini-2.5-flash 0.845 0.897 0.865 0.888 0.875 0.885 
+
+Table 3: NBQ with different encoding models. Encoding ROM-M ROM-W JOB 
+
+AC@5 AR@5 AC@5 AR@5 AC@5 AR@5 O-3-large 0.845 0.895 0.850 0.877 0.873 0.885 O-3-small 0.829 0.887 0.817 0.844 0.883 0.897 G-text-001 0.849 0.893 0.831 0.860 0.897 0.903 
+
+highlighting that random exploration, without proactively and dy-namically considering the dialogue state, cannot effectively elicit user information with wide coverage and high confidence. It serves as an ablation study that underscores the effectiveness of our adap-tive question selection strategy in guiding the dialogue. A clear gap between the baselines and NBQ remains across all three dataset sub-sets and all metrics, suggesting that neither random sampling nor prompting alone, even with a state-of-the-art LLM backbone and thinking mode, can accurately model how historical answers should guide future questions. This confirms that explicitly modeling user state and the question–answer relevance in NBQ is necessary. 
+
+## 6.4 Model Choice Study (RQ2) 
+
+LLM Backbones. To assess the robustness of NBQ across different language model backbones when analyzing questions and real user answers, we compare GPT-4.1, GPT-5, and Gemini-2.5-flash on the OpenMatch dataset, regarding AC@5 and AR@5. As shown in Table 2, different backbones yield highly consistent performance, with a maximum observed difference of about 1.8%. This indicates that our framework is not sensitive to the choice of backbone model, and its effectiveness mainly stems from the proposed adaptive profiling mechanism rather than from specific backbone choices. 
+
+Embedding Models. We further examine the influence of differ-ent embedding models utilized during the relevance prediction on the performance of NBQ . All embeddings are fixed to 1024 di-mensions for fair comparison. The evaluated models include text-embedding-3-small (O3-Small), text-embedding-3-large (O3-Large) and gemini-embedding-001 (G-text-001). Among them, O3-Large and G-text-001 yield better performance, while O3-Small performs relatively worse. The overall performance gap is bounded within 4.0%, suggesting that our method maintains robustness under dif-ferent embedding choices and does not rely on a particular encoder. 
+
+## 6.5 Reciprocal Matching Performance (RQ3) 
+
+In this subsection, we evaluate the end-to-end effectiveness of 
+
+NBQ in reciprocal matching on the OpenMatch dataset. Each user participates in three independent 5-turn conversations for both self-information ( 𝑠 ) and mate-preference ( 𝑚 ). We retrieve the top 
+
+𝐾 = {1, 2, 5, 10 } matches from a pool of 100 candidates, and report the 𝐻𝑖𝑡 @𝐾 averaged across these runs to ensure the robustness of 
+
+Table 4: Matching accuracy with different representations. Metric ROM-M ROM-W 
+
+Non-T Transformed Non-T Transformed Hit@1 0.027 0.073 (+174.5%) 0.040 0.060 (+50.0%) 
+
+Hit@2 0.093 0.093 (+0.0%) 0.060 0.113 (+88.8%) 
+
+Hit@5 0.180 0.213 (+18.5%) 0.140 0.253 (+80.9%) 
+
+Hit@10 0.287 0.413 (+44.2%) 0.247 0.373 (+51.3%)   
+
+> .6
+> .65
+> .7
+> .725
+> .75
+> .775
+> 0.4
+> 0.6
+> 0.8
+> 1
+> Recall
+> .6
+> .65
+> .7
+> .725
+> .75
+> .775
+> 100
+> 150
+> 200
+> 250
+> Latency (ms) IVF1024-Flat IVF1024-SQ8 HNSW32
+> 𝜃
+
+Figure 2: Recall and latency under varying 𝜃 .
+
+the results. For the Non-transformed (Non-T) setting, we directly encode each user’s raw dialogue regarding self-information and mate-preference into embeddings, while the Transformed method applies the structured transformation introduced in Section 5.1 to summarize high-level insights and filter out superficial noises. As shown in Table 4, the transformation-based representation consistently outperforms the non-transformed version across all candidate sizes. On the MAN-50 subset, it yields an average im-provement of 59.2% and up to 174.5%. On the WOMAN-50 subset, it achieves an average gain of 67.8% and up to 88.8%. These consistent improvements demonstrate that the transformation step effectively enhances representation quality, leading to more accurate and ro-bust reciprocal matching across different user groups. 
+
+## 6.6 Efficient Matching Evaluation (RQ4) 
+
+To assess the scalability and efficiency of QuickMatch , we run ex-periments on RandUser-100K using FAISS as the backend for range search and evaluate three index strategies: IVF1024-Flat, IVF1024-SQ8, and HNSW32. To ensure a sufficient coverage of candidates, we set 𝑛𝑝𝑟𝑜𝑏𝑒 = 256 for IVF-based indexes and 𝑒 𝑓 𝑆𝑒𝑎𝑟𝑐ℎ = 256 
+
+for HNSW. We randomly sample 100 query users to measure both recall and latency, repeat each experiment three times, and report the average results. We evaluate under six different matching 𝜃 
+
+thresholds ranging from 0.6 to 0.775. In this dataset, roughly 10.9% of the user pairs have matching score exceed 𝜃 = 0.60 , 3.7% exceed 
+
+0.65 , 0.14% exceed 0.75 , and 0.05% exceed 0.775 . 𝜃 = 0.775 corre-sponds to a realistic high-precision setting, where on average it retrieves about 50 top matches per user out of the 100K candidates. 
+
+Accuracy. Fig. 2 reports the recall of different index types un-der varying thresholds. The recall generally increases with higher thresholds, as fewer high-score pairs need to be retrieved. For the NBQ: Next-Best-Question for Dynamic Profiling KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea 
+
+Table 5: Validation of the relevance mapping. Method Pearson ↑ Spearman ↑ RMSE ↓ ECE ↓
+
+Raw cosine 0.743 0.744 0.408 0.400 Polynomial (deg=3) 0.771 0.744 0.075 0.005 
+
+practical matching cases with 𝜃 ≥ 0.75 , HNSW32 achieves near-exact recall of 0.958 and 0.989, respectively, showing that it can closely reproduce the exact results while being much faster. The IVF1024 indexes also maintain strong performance, with IVF1024-Flat achieving a recall of 0.7426 even when retrieving roughly 3–4 thousand candidates per query. 
+
+Efficiency. Fig. 2 summarizes the average query latency under the same thresholds. The exact brute-force baseline costs about 2016.3 ms per query. In contrast, IVF1024-Flat achieves an average 16.3 × speedup, ranging from 8.5 × to 20.8 ×. IVF1024-SQ8 further im-proves efficiency through quantization, reaching an average 16.8 ×
+
+speedup with a minimum of 9.0 ×. The HNSW32 index provides the best balance between accuracy and efficiency, with an average 18.4 × speedup, up to 22.9 × in high-threshold scenarios. All index-ing methods exhibit the same trend: as 𝜃 increases, QuickMatch 
+
+accelerates further because fewer candidates are explored. Overall, the experiments on RandUser-100K demonstrate that 
+
+QuickMatch achieves both high effectiveness and scalability. Even under strict matching thresholds, the proposed method preserves near-exact recall while reducing latency significantly, confirming its practicality for large-scale reciprocal matching systems. 
+
+## 6.7 Component Analysis (RQ5) 
+
+Validation of the Relevance Mapping. We validate the polyno-mial calibration curve that maps the answer-analysis similarity to the true relevance. We randomly split the unique 4,000 sampled question pairs into five folds, hold out one fold for testing each time, fit the cubic polynomial on the remaining four folds, and evaluate how well its predictions agree with the LLM-generated relevance ratings on the held-out fold. We report the Pearson and Spearman correlations, the root-mean-square error (RMSE), and the expected calibration error (ECE), averaged over all independent runs. As shown in Table 5, the learned polynomial mapping is well aligned with the LLM-generated ratings and substantially reduces the cali-bration error, lowering the ECE from 0.400 (raw cosine) to 0.005 
+
+while also improving the correlation and RMSE. This confirms that the calibrated relevance mapping is accurate and well calibrated. 
+
+Component Ablation. To quantify the contribution of each core component, we conduct four finer-grained ablations on the ROM-MAN subset: (i) w/o Relevance removes the calibrated relevance predictor; (ii) w/o Redundancy removes the redundancy-penalty term in the user-state update and keeps only the marginal state gain; (iii) + Diversity replaces the information-gain selection with a diversity-driven rule that selects the question least related to those already asked; and (iv) + Q* replaces the SubdimDiv -generated question set with 100 questions directly generated by the LLM. As shown in Table 6, NBQ consistently achieves the best performance across all metrics. The largest gains are +6.0% AC@5 / +4.4% AR@5 over w/o Relevance , +3.0% AC@3 / +2.5% AR@3 over w/o Redun-dancy , +6.7% AC@4 / +6.3% AR@3 over + Diversity , and +5.9% 
+
+Table 6: NBQ component ablation study on ROM-MAN. Variant AC@3 AR@3 AC@4 AR@4 AC@5 AR@5 
+
+NBQ w/o Relevance 0.691 0.764 0.777 0.839 0.797 0.857 
+
+NBQ w/o Redundancy 0.682 0.748 0.769 0.823 0.840 0.885 
+
+NBQ + Diversity 0.660 0.722 0.743 0.810 0.800 0.850 
+
+NBQ + Q* 0.679 0.746 0.749 0.810 0.800 0.857 
+
+NBQ 0.703 0.767 0.793 0.843 0.845 0.895 
+
+AC@4 / +4.5% AR@5 over + Q* . These results indicate that each core component, i.e., the calibrated relevance, the redundancy han-dling, the information-gain-based selection, and the comprehensive question-set generation, contributes to the overall profiling quality. 
+
+## 7 Related Work 
+
+AI Interviewer & Conversation Planner. Our work is closest to agents that actively plan multi-turn interviews to profile users via question selection or generation. Recent methods learn dialogue policies to optimize long-horizon conversation rewards, including (hierarchical) policy-learning frameworks in Conversational Recom-mender Systems (CRS) [ 11 , 14 ], retrieval-augmented pipelines that ground turns on external evidence [ 10 ], and planning approaches that model conversations as stochastic processes in a semantic space [ 1]. However, a key challenge is that informativeness re-wards are hard to define because supervision often comes from downstream outcomes (e.g., customer purchases), and most meth-ods rely on task-specific training or external knowledge; empirical CRS studies further highlight the difficulty to align generic con-versation rewards with information-gain—centric profiling [ 39 ]. In contrast, our policy is plug-and-play and selects the next best ques-tion without retraining. Recent related elicitation systems such as MockLLM [ 26 ] and GATE [ 13 ] use prompting to guide question ask-ing (e.g., avoiding repetition and maximizing marginal information gain), but they do not explicitly model question–answer relevance and do not assume a strict turn budget. Active learning also stud-ies informativeness-driven querying [ 22 ], but its standard setting selects unlabeled samples for annotation. NBQ addresses a different problem: choosing open-ended natural-language questions in an evolving dialogue and estimating their value from partial, free-form answers under a tight turn budget. 
+
+Reciprocal Recommender System. Reciprocal recommenders op-timize mutual satisfaction, with online dating as a canonical domain. Classical systems (e.g., RECON [ 20 ]) and later large-scale design studies optimize for mutual interest using static attributes or histor-ical interactions [ 36 ]. Recent work incorporates richer two-sided signals, such as reciprocal sequential recommendation (ReSeq) [ 43 ]and knowledge-aware, explainable matching (KAERR) [ 12 ], typi-cally operating on existing structured profiles, logged interactions, or knowledge graphs. LLM-based methods can further enrich ex-isting profiles before matching; for instance, MockLLM [ 26 ] syn-thesizes pairwise interview dialogues and uses LLMs for two-sided evaluation, but this is mainly a re-ranking strategy over small candi-date sets because exhaustive pairwise LLM evaluation does not scale to large platforms. Unlike these works that assume profiles already exist, we study reciprocal matching in a cold-start, interview-style KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea Yimin Shi, Clarice Wang, Haixun Wang, and Xiaokui Xiao 
+
+setting: NBQ elicits user profiles via a conversation and make real-time matches directly based on the resulting dialogues. We defer approximate vector search related work to Appendix D. 
+
+## 8 Conclusion 
+
+In this work, we formalize the NBQ problem and its challenging downstream application, reciprocal matchmaking. To address the in-herent randomness in users’ open-ended responses, NBQ adaptively selects the next best question from a pre-generated comprehen-sive question set to greedily maximize the incremental information gain at each conversation turn. We also propose a transformation-based user representation that extracts high-level insights from user dialogues and supports arbitrary downstream tasks. Finally, 
+
+QuickMatch replaces the quadratic scan with approximate range-search–based pre-filtering, enabling low-latency retrieval of highly compatible matches at scale. One limitation is that adapting NBQ to a new scenario still requires some manual initialization. Automating this scenario-level setup is an important direction for future work. 
+
+## Acknowledgments 
+
+This work was supported by the National Research Foundation, Singapore and Infocomm Media Development Authority under its Trust Tech Funding Initiative. 
+
+## References 
+
+[1] Zhiliang Chen, Xinyuan Niu, Chuan-Sheng Foo, and Bryan Kian Hsiang Low. 2025. Broaden your SCOPE! Efficient Multi-turn Conversation Planning for LLMs with Semantic Space. In International Conference on Learning Representations (ICLR ’25), Spotlight . https://openreview.net/forum?id=3cgMU3TyyE [2] Matthijs Douze, Alexandr Guzhva, Chengqi Deng, Jeff Johnson, Gergely Szilvasy, Pierre-Emmanuel Mazaré, Maria Lomeli, Lucas Hosseini, and Hervé Jégou. 2024. The faiss library. arXiv preprint arXiv:2401.08281 (2024). [3] Naghmeh Farzi and Laura Dietz. 2025. Criteria-Based LLM Relevance Judgments. In Proceedings of the 2025 International ACM SIGIR Conference on Innovative Concepts and Theories in Information Retrieval (ICTIR) . 254–263. [4] Aristides Gionis, Piotr Indyk, Rajeev Motwani, et al . 1999. Similarity search in high dimensions via hashing. In Vldb , Vol. 99. 518–529. [5] Yunchao Gong, Svetlana Lazebnik, Albert Gordo, and Florent Perronnin. 2012. Iterative quantization: A procrustean approach to learning binary codes for large-scale image retrieval. IEEE transactions on pattern analysis and machine intelligence 35, 12 (2012), 2916–2929. [6] Baidu Inc. 2023. PUCK: A High-Performance Approximate Nearest Neighbor Search Library. https://github.com/baidu/puck. [7] Herve Jegou, Matthijs Douze, and Cordelia Schmid. 2010. Product quantization for nearest neighbor search. IEEE transactions on pattern analysis and machine intelligence 33, 1 (2010), 117–128. [8] Jeff Johnson, Matthijs Douze, and Hervé Jégou. 2019. Billion-scale similarity search with GPUs. IEEE Transactions on Big Data 7, 3 (2019), 535–547. [9] Andrew Kane. 2021. pgvector: Open-Source Vector Similarity Search Extension for PostgreSQL. https://github.com/pgvector/pgvector. [10] Sara Kemper, Justin Cui, Kai Dicarlantonio, Kathy Lin, Danjie Tang, Anton Ko-rikov, and Scott Sanner. 2024. Retrieval-Augmented Conversational Recommen-dation with Prompt-based Semi-Structured Natural Language State Tracking. In Proceedings of the 47th International ACM SIGIR Conference on Research and Development in Information Retrieval (SIGIR ’24) . ACM, Washington, DC, USA, 1–5. doi:10.1145/3626772.3657670 [11] Heeseon Kim, Hyeongjun Yang, and Kyong Ho Lee. 2023. Confident Action Decision via Hierarchical Policy Learning for Conversational Recommendation. In Proceedings of the ACM Web Conference 2023 (WWW ’23) . ACM, Austin, TX, USA, 1386–1395. doi:10.1145/3543507.3583536 [12] Kai-Huang Lai, Zhe-Rui Yang, Pei-Yuan Lai, Chang-Dong Wang, Mohsen Guizani, and Min Chen. 2024. Knowledge-Aware Explainable Reciprocal Recommendation. In Proceedings of the AAAI Conference on Artificial Intelligence , Vol. 38. 8636–8644. doi:10.1609/aaai.v38i8.28708 [13] Belinda Z Li, Alex Tamkin, Noah Goodman, and Jacob Andreas. 2025. Elicit-ing Human Preferences with Language Models. In The Thirteenth International Conference on Learning Representations .[14] Allen Lin, Ziwei Zhu, Jianling Wang, and James Caverlee. 2023. Enhancing User Personalization in Conversational Recommenders. In Proceedings of the ACM Web Conference 2023 (WWW ’23) . doi:10.48550/arXiv.2302.06656 Extended version: arXiv:2302.06656. [15] Jiarui Luo, Miao Qiao, Chaoji Zuo, and Dong Deng. 2025. Tag-Filtered Approxi-mate Nearest Neighbor Search. In 2025 IEEE 41st International Conference on Data Engineering (ICDE) . IEEE, 3642–3654. [16] Yu A Malkov and Dmitry A Yashunin. 2018. Efficient and robust approximate nearest neighbor search using hierarchical navigable small world graphs. IEEE transactions on pattern analysis and machine intelligence 42, 4 (2018), 824–836. [17] Behnam Neyshabur and Nathan Srebro. 2015. On symmetric and asymmetric lshs for inner product search. In International Conference on Machine Learning .PMLR, 1926–1934. [18] Hiroyuki Ootomo, Akira Naruse, Corey Nolet, Ray Wang, Tamas Feher, and Yong Wang. 2024. Cagra: Highly parallel graph construction and approximate nearest neighbor search for gpus. In 2024 IEEE 40th International Conference on Data Engineering (ICDE) . IEEE, 4236–4247. [19] James Jie Pan, Jianguo Wang, and Guoliang Li. 2024. Survey of vector database management systems. The VLDB Journal 33, 5 (2024), 1591–1615. [20] Luiz Pizzato, Tomek Rej, Thomas Chung, Irena Koprinska, and Judy Kay. 2010. RECON: a reciprocal recommender for online dating. In Proceedings of the fourth ACM conference on Recommender systems . 207–214. [21] Inc. Redis. [n. d.]. Redis as a Vector Database. https://redis.io/docs/latest/develop/ get-started/vector-database/. [22] Burr Settles. 2009. Active learning literature survey. (2009). [23] Anshumali Shrivastava and Ping Li. 2014. Asymmetric LSH (ALSH) for sublinear time maximum inner product search (MIPS). Advances in neural information processing systems 27 (2014). [24] Harsha Vardhan Simhadri, George Williams, Martin Aumüller, Matthijs Douze, Artem Babenko, Dmitry Baranchuk, Qi Chen, Lucas Hosseini, Ravishankar Krish-naswamny, Gopal Srinivasa, et al . 2022. Results of the NeurIPS’21 challenge on billion-scale approximate nearest neighbor search. In NeurIPS 2021 Competitions and Demonstrations Track . PMLR, 177–189. [25] Yitong Song, Kai Wang, Bin Yao, Zhida Chen, Jiong Xie, and Feifei Li. 2024. Effi-cient Reverse 𝑘 Approximate Nearest Neighbor Search Over High-Dimensional Vectors. In 2024 IEEE 40th International Conference on Data Engineering (ICDE) .IEEE, 4262–4274. [26] Hongda Sun, Hongzhan Lin, Haiyu Yan, Yang Song, Xin Gao, and Rui Yan. 2025. MockLLM: A Multi-Agent Behavior Collaboration Framework for Online Job Seeking and Recruiting. In Proceedings of the 31st ACM SIGKDD Conference on Knowledge Discovery and Data Mining V. 2 . 2714–2724. [27] Ji Sun, Guoliang Li, James Pan, Jiang Wang, Yongqing Xie, Ruicheng Liu, and Wen Nie. 2025. GaussDB-Vector: A Large-Scale Persistent Real-Time Vector Database for LLM Applications. Proceedings of the VLDB Endowment 18, 12 (2025), 4951–4963. [28] Yufei Tao, Ke Yi, Cheng Sheng, and Panos Kalnis. 2009. Quality and efficiency in high dimensional nearest neighbor search. In Proceedings of the 2009 ACM SIGMOD International Conference on Management of data . 563–576. [29] Paul Thomas, Seth Spielman, Nick Craswell, and Bhaskar Mitra. 2024. Large language models can accurately predict searcher preferences. In Proceedings of the 47th International ACM SIGIR Conference on Research and Development in Information Retrieval . 1930–1940. [30] Katherine Tian, Eric Mitchell, Allan Zhou, Archit Sharma, Rafael Rafailov, Huaxiu Yao, Chelsea Finn, and Christopher D Manning. 2023. Just ask for calibration: Strategies for eliciting calibrated confidence scores from language models fine-tuned with human feedback. arXiv preprint arXiv:2305.14975 (2023). [31] Yao Tian, Xi Zhao, and Xiaofang Zhou. 2022. DB-LSH: Locality-Sensitive Hashing with Query-based Dynamic Bucketing. In 2022 IEEE 38th International Conference on Data Engineering (ICDE) . IEEE, 2250–2262. [32] Clarice Wang, Yimin Shi, and Xiaokui Xiao. 2025. A Framework for Evaluating AI Agents in Open-Ended Conversations via Scripted Simulation. In Proceedings of the 31st ACM SIGKDD Conference on Knowledge Discovery and Data Mining V. 2. 5810–5818. [33] Jianguo Wang, Xiaomeng Yi, Rentong Guo, Hai Jin, Peng Xu, Shengjun Li, Xi-angyu Wang, Xiangzhou Guo, Chengming Li, Xiaohai Xu, et al . 2021. Milvus: A purpose-built vector data management system. In Proceedings of the 2021 international conference on management of data . 2614–2627. [34] Xingyao Wang, Zihan Wang, Jiateng Liu, Yangyi Chen, Lifan Yuan, Hao Peng, and Heng Ji. 2024. MINT: EVALUATING LLMS IN MULTI-TURN INTERACTION WITH TOOLS AND LANGUAGE FEEDBACK. In 12th International Conference on Learning Representations, ICLR 2024 .[35] Chuangxian Wei, Bin Wu, Sheng Wang, Renjie Lou, Chaoqun Zhan, Feifei Li, and Yuanzhe Cai. 2020. Analyticdb-v: A hybrid analytical engine towards query fusion for structured and unstructured data. Proceedings of the VLDB Endowment 
+
+13, 12 (2020), 3152–3165. [36] Peng Xia, Shuangfei Zhai, Benyuan Liu, Yizhou Sun, and Cindy Chen. 2016. Design of Reciprocal Recommendation Systems for Online Dating. Social Network Analysis and Mining 6, 1 (2016), 1–17. NBQ: Next-Best-Question for Dynamic Profiling KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea 
+
+[37] Jiadong Xie, Jeffrey Xu Yu, and Yingfan Liu. 2025. Fast Approximate Similarity Join in Vector Databases. Proceedings of the ACM on Management of Data 3, 3 (2025), 1–26. [38] Miao Xiong, Zhiyuan Hu, Xinyang Lu, Yifei Li, Jie Fu, Junxian He, and Bryan Hooi. 2023. Can llms express their uncertainty? an empirical evaluation of confidence elicitation in llms. arXiv preprint arXiv:2306.13063 (2023). [39] Lu Zhang, Chen Li, Yu Lei, Zhu Sun, and Guanfeng Liu. 2024. An empirical analysis on multi-turn conversational recommender systems. In Proceedings of the 47th International ACM SIGIR Conference on Research and Development in Information Retrieval . 841–851. [40] Yizhe Zhang, Jiarui Lu, and Navdeep Jaitly. 2024. Probing the Multi-turn Planning Capabilities of LLMs via 20 Question Games. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) .1495–1516. [41] Weijie Zhao, Shulong Tan, and Ping Li. 2020. Song: Approximate nearest neighbor search on gpu. In 2020 IEEE 36th International Conference on Data Engineering (ICDE) . IEEE, 1033–1044. [42] Xi Zhao, Zhonghan Chen, Kai Huang, Ruiyuan Zhang, Bolong Zheng, and Xiao-fang Zhou. 2024. Efficient Approximate Maximum Inner Product Search Over Sparse Vectors. In 2024 IEEE 40th International Conference on Data Engineering (ICDE) . IEEE, 3961–3974. [43] Bowen Zheng, Yupeng Hou, Wayne Xin Zhao, Yang Song, and Hengshu Zhu. 2023. Reciprocal Sequential Recommendation. In Proceedings of the 17th ACM Conference on Recommender Systems (RecSys) . —. doi:10.1145/3604915.3608798 
+
+## A Proof of Theorems A.1 Proof of Theorem 1 
+
+Theorem 1. Let 𝑓 𝑖 𝑗 , 𝑓 𝑗𝑖 ∈ ( 0, 1]. If 𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) ≥ 𝜃 , then necessarily 
+
+[¯s𝑖 ; ¯ m𝑖 ] · [ ¯m𝑗 ; ¯ s𝑗 ] ≥ 4𝜃 − 2 where ¯m = m 
+
+> ∥m∥
+
+and ¯s = s 
+
+> ∥s∥
+
+.
+
+Proof. Assume 𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) ≥ 𝜃 . By the definition of 𝑔 (Eq. (2)), 
+
+𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) = 2𝑓 𝑖 𝑗 · 𝑓 𝑗𝑖 
+
+𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 
+
+.
+
+We first show that 
+
+2𝑓 𝑖 𝑗 · 𝑓 𝑗𝑖 
+
+𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 
+
+≤ 𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 
+
+2 . (3) Indeed, 
+
+𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 
+
+2 − 2𝑓 𝑖 𝑗 · 𝑓 𝑗𝑖 
+
+𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 
+
+= (𝑓 𝑖 𝑗 − 𝑓 𝑗𝑖 )2
+
+2(𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 ) ≥ 0,
+
+where the denominator is nonnegative since 𝑓 𝑖 𝑗 , 𝑓 𝑗𝑖 ∈ [ 0, 1] and 
+
+𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 > 0. Combining 𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) ≥ 𝜃 with (3) yields 
+
+𝜃 ≤ 𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) ≤ 𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 
+
+2 ,
+
+and thus 
+
+𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 ≥ 2𝜃 . (4) Next, expand 𝑓 𝑖 𝑗 and 𝑓 𝑗𝑖 in terms of representation embeddings: 
+
+𝑓 𝑖 𝑗 = 1 + ¯m𝑖 · ¯s𝑗 
+
+2 , 𝑓 𝑗𝑖 = 1 + ¯s𝑖 · ¯m𝑗 
+
+2 .
+
+Where ¯m = m 
+
+> ∥m∥
+
+and ¯s = s 
+
+> ∥s∥
+
+. Therefore, 
+
+𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 = 1 + 12
+
+  ¯m𝑖 · ¯s𝑗 + ¯s𝑖 · ¯m𝑗 
+
+
+
+= 1 + 12 [¯s𝑖 ; ¯ m𝑖 ] · [ ¯m𝑗 ; ¯ s𝑗 ].
+
+Plugging this into (4) gives 
+
+1 + 12 [¯s𝑖 ; ¯ m𝑖 ] · [ ¯m𝑗 ; ¯ s𝑗 ] ≥ 2𝜃, 
+
+which is equivalent to 
+
+[¯s𝑖 ; ¯ m𝑖 ] · [ ¯m𝑗 ; ¯ s𝑗 ] ≥ 4𝜃 − 2.
+
+This completes the proof. □
+
+## A.2 Proof of Theorem 2 
+
+Theorem 2. Let 𝑓 𝑖 𝑗 , 𝑓 𝑗𝑖 ∈ ( 0, 1] and 𝜃 ≥ 12 . If a user pair (𝑢 𝑖 , 𝑢 𝑗 )
+
+satisfies [¯s𝑖 ; ¯ m𝑖 ] · [ ¯m𝑗 ; ¯ s𝑗 ] ≥ 4𝜃 − 2 then 𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) ≥ 𝜃 − (1−𝜃 )2 
+
+> 𝜃
+
+.
+
+Proof. Let 𝑠 = 𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 . By definition of 𝑔 (𝑢 𝑖 , 𝑢 𝑗 ), we have: 
+
+𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 
+
+2 − 𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) = 𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 
+
+2 − 2𝑓 𝑖 𝑗 · 𝑓 𝑗𝑖 
+
+𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 
+
+= (𝑓 𝑖 𝑗 − 𝑓 𝑗𝑖 )2
+
+2(𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 ) = (𝑓 𝑖 𝑗 − 𝑓 𝑗𝑖 )2
+
+2𝑠 .
+
+(5) Thus, for a fixed 𝑠 , the gap in Eq. (5) is monotonically increasing with |𝑓 𝑖 𝑗 − 𝑓 𝑗𝑖 |.Given 𝑓 𝑖 𝑗 , 𝑓 𝑗𝑖 ∈ ( 0, 1] and 𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 = 𝑠 , the maximum of |𝑓 𝑖 𝑗 − 𝑓 𝑗𝑖 |
+
+is achieved when one term is as large as possible and the other as small as possible. Specifically, if 𝑠 ≤ 1, the maximum is attained at 
+
+(𝑓 𝑖 𝑗 , 𝑓 𝑗𝑖 ) = (𝑠, 0), yielding |𝑓 𝑖 𝑗 − 𝑓 𝑗𝑖 | = 𝑠 . If 𝑠 ≥ 1, the maximum is attained at (𝑓 𝑖 𝑗 , 𝑓 𝑗𝑖 ) = (1, 𝑠 − 1), yielding |𝑓 𝑖 𝑗 − 𝑓 𝑗𝑖 | = 2 −𝑠 . Therefore, we have |𝑓 𝑖 𝑗 − 𝑓 𝑗𝑖 | ≤ min {𝑠, 2 − 𝑠 }, and hence 
+
+(𝑓 𝑖 𝑗 − 𝑓 𝑗𝑖 )2 ≤  min {𝑠, 2 − 𝑠 }2. (6) Using min {𝑠, 2 − 𝑠 } = 2 min {𝑠 /2, 1 − 𝑠 /2}, we rewrite Eq. (6) as 
+
+(𝑓 𝑖 𝑗 − 𝑓 𝑗𝑖 )2 ≤ 4 min {𝑠 /2, 1 − 𝑠 /2}2.
+
+Plugging this into Eq. (5) gives 
+
+𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 
+
+2 − 𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) ≤ 4(min {𝑠 /2, 1 − 𝑠 /2}) 2
+
+2𝑠 
+
+= (min {𝑠 /2, 1 − 𝑠 /2}) 2
+
+𝑠 /2 .
+
+(7) Now consider a pair (𝑢 𝑖 , 𝑢 𝑗 ) satisfying [¯s𝑖 ; ¯m𝑖 ] · [ ¯m𝑗 ; ¯s𝑗 ] ≥ 4𝜃 − 2.By Theorem 1, this implies 𝑓 𝑖 𝑗 +𝑓 𝑗𝑖  
+
+> 2
+
+≥ 𝜃 , i.e., 𝑠 ≥ 2𝜃 . The RHS of Eq. (7) is maximized when 𝑠 is minimized, so the worst case occurs at 𝑠 = 2𝜃 . Substituting 𝑠 = 2𝜃 into Eq. (7) yields 
+
+𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 
+
+2 − 𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) ≤ (min {𝜃, 1 − 𝜃 }) 2
+
+𝜃 .
+
+Finally, when 𝜃 ≥ 12 , we have min {𝜃, 1 − 𝜃 } = 1 − 𝜃 , and hence 
+
+𝑔 (𝑢 𝑖 , 𝑢 𝑗 ) ≥ 𝑓 𝑖 𝑗 + 𝑓 𝑗𝑖 
+
+2 − (1 − 𝜃 )2
+
+𝜃 ≥ 𝜃 − (1 − 𝜃 )2
+
+𝜃 ,
+
+which proves the theorem. □
+
+## B Algorithm Pseudocode 
+
+Here we present the pseudocode of the question set generation algorithm SubdimDiv , described in Section 4.1 and shown in Algo-rithm 1. KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea Yimin Shi, Clarice Wang, Haixun Wang, and Xiaokui Xiao 
+
+Algorithm 1: SubdimDiv 
+
+Input: Application scenario 𝛼 , root dimension set D0,minimum and maximum divisions (𝑘 min , 𝑘 max ), and tree height 𝐿 
+
+Output: Sub-dimension set D 
+
+> 1
+
+D0 ← D 0 ; 
+
+> 2
+
+D𝑙 ← ∅ , ∀𝑙 ∈ { 1, . . . , 𝐿 }; 
+
+> 3
+
+for 𝑡 ← 1 to 𝐿 do  
+
+> 4
+
+for each 𝑑 ∈ D 𝑡 −1 do  
+
+> 5
+
+𝑆 ← LLMDivide (𝑑, 𝛼, 𝑘 min , 𝑘 max ); 
+
+> 6
+
+D𝑡 ← D 𝑡 ∪ 𝑆 ; 
+
+> 7
+
+return D = {D 0, . . . , D𝐿 };
+
+## C Dataset Synthesis 
+
+Following the synthesis and evaluation pipeline of OpenBench [ 32 ], we synthesize the OpenMatch dataset under two scenarios: roman-tic matchmaking and job interviews. We synthesize 100 respondents for the romantic matchmaking scenario and 20 for the job inter-view scenario. The matchmaking respondents are divided into two subsets, ROMANTIC-MAN and ROMANTIC-WOMAN, each con-taining 50 respondents. For both scenarios, we first identify 10 core dimensions as the knowledge discovery targets. For each respon-dent, we then generate a high-level insight for every dimension, and use these insights to construct an experience-based script with 10 topics. 
+
+High-level insight synthesis. For each respondent 𝑢 , scenario, and script type (self-information and, when applicable, match-preference), we instruct LLMs to produce a concise, high-level 
+
+insight per dimension that captures the respondent’s trait or stance. For example, in romantic matchmaking, a Social Lifestyle insight could be “Quiet Companionability Seeker”; in job interviews, a Work Identity insight could be “Fractional Head-of-Product for Seed-Stage SaaS.” To encourage inter-user diversity at the insight level, we gen-erate insights in a batch mode. Specifically, we synthesize insights for a small batch of respondents at a time. When generating the insight of a target respondent on a given dimension, we list the already-generated insights of other respondents in the same batch for that dimension, and explicitly require the model to propose a different insight for the target respondent. This constraint reduces duplicates and increases the diversity within each scenario and script type. 
+
+From insights to script topics via coherent personal events. 
+
+We next translate high-level insights into concrete, experience-based script topics used by OpenBench. For each respondent script, we construct 10 topics. Each topic is grounded in a single personal event or episode that naturally integrates two randomly selected high-level insights of that respondent. Concretely, we sample two insights (e.g., Social Lifestyle and Communication Style ) and prompt the LLM to generate a coherent event narrative that jointly reflects both insights, rather than describing them in isolation. To avoid 
+
+intra-user inconsistency , when generating each event we provide the respondent’s remaining insights across other dimensions as context, and instruct the model to avoid conflicts across topics and dimensions (e.g., mutually exclusive preferences or incompatible identities). These 10 event narratives compose the respondent’s OpenBench script. 
+
+Behavior patterns and response simulation. Following Open-Bench, we annotate each topic with an appropriate behavior pattern (e.g., realistic expansion in responses, referential consistency). Dur-ing answer simulation, the LLM plays the role of respondent 𝑢 
+
+conditioned on her script. When asked a question that touches a particular dimension, the respondent is instructed to retrieve and describe a relevant personal event aligned with that dimension (or the most related topic), and then answer the question grounded in that event. This design encourages answers to be natural, while re-maining faithful to the respondent’s underlying high-level insights. 
+
+Scenario- and script-specific settings. For romantic matchmak-ing, we synthesize two scripts per respondent: (i) a self-information 
+
+script describing who they are, and (ii) a match-preference script describing what they seek in a partner. For job interviews, we syn-thesize only the self-information script. For each script, we generate 10 topics and a corresponding questionnaire of 10 questions, result-ing in 1,200 questions in total. 
+
+Reciprocal matching pairs and preference synthesis. For the reciprocal matching evaluation, we randomly construct 50 distinct one-to-one match pairs across the two respondent subsets for sim-plicity. That is, if user 𝑢 𝑖 is matched with user 𝑢 𝑗 , then 𝑢 𝑗 is also matched with 𝑢 𝑖 . Although the matches are randomly assigned, we treat them as pseudo-ground-truth for evaluation. For each pair 
+
+(𝑢 𝑖 , 𝑢 𝑗 ), we generate 𝑢 𝑖 ’s mate-preference script conditioned on 𝑢 𝑗 ’s self-information script, and vice versa, ensuring that preferences are explicitly aligned with the partner’s self profile. 
+
+## D Additional Related Work 
+
+Approximate Vector Search. There has been a long line of work on approximate vector search in high-dimensional vector space. These well-studied fields, including approximate nearest neighbor search (ANNS) and maximum inner product search (MIPS), differ in metric or non-metric settings, but share the goal of balancing query efficiency and accuracy when retrieving the most similar 
+
+candidates for the query vector. Their methodologies can be briefly classified into three families: hashing [ 4 , 17 , 23 , 28 , 31 , 42 ], quanti-zation [ 5 , 7 ], and proximity graphs [ 15 , 16 , 18 , 25 , 41 ]. Unlike most of these methods that target top-k queries, a range query retrieves all vectors within a given distance (or radius ) of the query vector. In database terms, this problem is known as a similarity join , which outputs all pairs of vectors with similarity higher than a given threshold. Range search queries can be supported by indexing tech-niques for ANNS and MIPS. Recent efforts, including SimJoin [ 37 ], go beyond independent per-point query searches by leveraging re-lationships between partial join results. In the reciprocal matching scenario, it is common to retrieve all candidate pairs with good com-patibility, i.e., higher than a pre-defined matching score threshold, which shares a similar setting with vector range search. However, it differs in that the mutual compatibility is based on the product of embedding similarities in both directions and thus cannot be directly supported by the approximate vector search techniques mentioned above. QuickMatch serves as a novel approach to reduce this gap by introducing a practically tight relaxation, augmenting the vector-based representations, and quantitatively bridging the threshold values on both sides. NBQ: Next-Best-Question for Dynamic Profiling KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea 
+
+## E Prompt Review E.1 Question generation prompt 
+
+The question generation prompts are demonstrated in Fig. 3. 
+
+## E.2 Representation transformation prompt 
+
+For the user representation transformation, we instruct LLMs to conduct the following main operations: 
+
+• Insight Extraction : Instead of simply rephrasing the Q&A content, to extract deeper insights into the user’s intrinsic traits and relational needs. With cautious, well-founded inference on the respondent’s natural characteristics and core preferences. 
+
+• Key Signal Retention : Critical signals for matching must be retained, including must-have and deal-breaker requirements. 
+
+• Structured Expression : The transformed paragraph should follow a uniform narrative structure with a clear beginning, detailed body, and brief conclusion, using direct descriptive lan-guage. Each paragraph should contain about 130–180 words to ensure clarity and comparability across users. The full version of transformation prompts (for self-information dialogue) is shown in Fig. 4. 
+
+## E.3 Relevance analysis prompt 
+
+The generative relevance analysis prompts are shown in Fig. 5. To take the certainty-weighted average, we multiply the mean overlap rate of each level by the model’s certainty and then sum across all six levels. 
+
+## E.4 Question analysis prompt 
+
+When analyzing the answer elements for a given question, we have the following key requirements: 
+
+• Non-overlapping : Each element should capture a unique aspect of the answer, avoiding redundancy or overlap. 
+
+• Balanced : All answer elements should be similar in granularity and scope, ensuring no single point dominates the others. 
+
+• Complete : The set of answer elements together should compre-hensively cover the answer space of the question. 
+
+• Self-contained : Each answer element must be independently understandable. Abstract pronouns and vague terms are explic-itly avoided. When needed, the phrasing may reiterate critical contextual elements to preserve specificity. The full version of question analysis prompts is shown in Fig. 6. KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea Yimin Shi, Clarice Wang, Haixun Wang, and Xiaokui Xiao 
+
+[System Prompts] 
+
+You are an agent skilled at following instructions. Your task is to generate a set of interesting and engaging questions aimed at uncovering the respondent’s self-related information, based on the given “application scenario” and “(sub-)dimension”, and, very importantly, in accordance with the preferred “question flavor”. A “(sub-)dimension” is a specific (sub-)aspect or (sub-)concept related to the application scenario, usually described with a short phrase and a one-sentence explanation. A “question flavor” refers to a preferred question style designed to be interesting and to better reveal the user themselves, encouraging them to share more honest thoughts and detailed information about themselves. Each question flavor will be explained with a detailed definition, intention, and examples. When generating questions for the given dimension, keep in mind the broader core dimension it belongs to, as specified in the user prompt. The questions should stay grounded in the overall theme of the core dimension and make it clear that the given sub-dimension is just one specific aspect within that larger context—not something separate or unrelated. Furthermore, your generated question set should exhibit relevance: Relevance: Each question should be clearly aligned with the given sub-dimension. Please note that your output should strictly follow this format: a Python list of strings, each representing one question. Do not include any extra explanation or comments. You should strictly follow this output requirement. [The start of the current application scenario] {scenario} [The end of the current application scenario] [The start of the preferred question flavor descriptions] {flavor} [The end of the preferred question flavor descriptions] [The start of the output format example with question set number: 3] [question_str_1, question_str_2, question_str_3,] [The end of the output format example] 
+
+[User Prompts] 
+
+Now, please generate a set of {num} questions according to the following core dimension and its sub-dimension and the given question flavor. Remember, your output should strictly follow the format requirement. [The start of the core-dimension] {core} [The end of the core-dimension] [The start of the sub-dimension] {dimension} [The end of the sub-dimension] 
+
+Figure 3: Question generation prompts. 
+
+[System Prompts] 
+
+You are an agent skilled at following instructions. You are working for a reciprocal matching system, where we aim to match individuals on two sides with each other. Each person on either side can be represented as x = (x.s, x.m), where x.s captures their self-information, and x.m captures their preferences for a potential partner (mate). More specifically, you are working on the following matching scenario: [scenario starts] {scenario} [scenario ends] We will conduct an in-depth conversation with each respondent, focusing on collecting their self-information, consisting of a series of proposed questions and their corresponding answers (Q&A dialogue). Your task is to transform this dialogue into: the respondent’s self-information according to this scenario (x.s). Please mention that the gender of this respondent is: gender. When writing the self-information representation, you MUST represent the respondent’s gender by using the appropriate pronoun (“He” or “She”). Your transformation MUST satisfy the following requirements: -You should not simply rephrase or summarize the dialogue content. Instead, transform the superficial details into a deeper reflection of the respondent’s natural characteristics and core needs. You may apply cautious and reasonable inferences or associations where appropriate. -You must retain any key determinant information or hard constraints that are important for matching. -For the transformation (x.s), provide: a short introduction of the person, followed by a detailed description, and end with a brief concluding sentence. -Ensure the information is exclusive: The self-information (x.s) should describe only the respondent themselves, without referencing their expectations for a partner. -Be concise: aim for approximately 130-180 words. -MUST use the tone and style that directly describes a person. For example, x.s should begin with “He/She is . . . (where the subject is the respondent)”. Please note that your output should strictly follow this format: a plain string representing self-information (x.s), nothing else. Do not include any extra reasoning, explanation, or comments in the output. You MUST always strictly follow this output requirement. [The start of the output format example] format example: "He is a. . . ", or “She is a. . . " [The end of the output format example] 
+
+[User Prompts] 
+
+The following is the Q&A dialogue for the respondent: {dialog} Now, please perform the transformation as required. Remember, your output format must strictly follow the specified requirements. 
+
+Figure 4: Transformation-based representation prompts. NBQ: Next-Best-Question for Dynamic Profiling KDD ’26, August 09–13, 2026, Jeju Island, Republic of Korea 
+
+[System Prompts] 
+
+You are an agent skilled at following instructions. Your task is to analyze and predict the relevance between two open-ended questions, based on the following application scenario: {scenario} Each question is assumed to elicit multiple aspects of information about a person. These aspects may be internal or external, such as personal opinions, values, attitudes, subjective feelings, knowledge, ideas, past experiences, background information, factual details, and behavior patterns in specific situations. For the given two questions, we assume they are designed to elicit responses of comparable breadth and depth. We define the relevance between two questions as the expected degree of overlap in the content of the responses they elicit. In other words, it reflects the proportion of a person’s answer to one question that could also meaningfully contribute to answering the other. We categorize this relevance into six levels based on the estimated overlap: -“Redundant”: >90% overlap (basically the same questions, possibly rephrased) -“Highly relevant”: 60-90% overlap (very similar, most parts can be shared) -“Relevant”: 40-60% overlap (about half of the answer content can be shared) -“Moderately relevant”: 20-40% overlap (some non-trivial part can be shared) -“Marginally relevant”: 5-20% overlap (very limited overlap, mostly distinct) -“Irrelevant”: <5% overlap (almost no shared content) You should output: (1) a brief reasoning (a few sentences), and (2) the likelihood for each relevance level between these two questions, i.e., a probability distribution across the six relevance levels. The values must sum to 1.0. Your output should strictly follow this format: a Python list of two items, (1) the first is your reasoning as a string; (2) the second is a plain Python dictionary (without quotation marks) showing the likelihood for each relevance level. You should strictly follow this output requirement. The following are some output format examples: [start of the output example 1] [“Both questions explore xxx, but differ in scope. . . ”, {‘Redundant’: 0.0, ‘Highly relevant’: 0.6, ‘Relevant’: 0.3, ‘Moderately relevant’: 0.1, ‘Marginally relevant’: 0.0, ‘Irrelevant’: 0.0}] [end of the output example 1] [start of the output example 2] [“The first question invites xxx , while the second presents yyy. They both relate to zzz but target very different. . . ”, {‘Redundant’: 0.0, ‘Highly relevant’: 0.05, ‘Relevant’: 0.1, ‘Moderately relevant’: 0.2, ‘Marginally relevant’: 0.4, ‘Irrelevant’: 0.25}] [end of the output example 2] 
+
+[User Prompts] 
+
+The following are two questions: Question 1: {q_a}; Question 2: {q_b}. Now, please generate the reasoning and the likelihood for each relevance level. Remember, your output format must strictly follow the specified requirements. 
+
+Figure 5: Generative relevance analysis prompts. 
+
+[System Prompts] 
+
+You are an agent skilled at following instructions. We have generated a set of questions for a respondent based on the following application scenario: scenario Each question is assumed to elicit information we are interested in about the person. We expect the respondent’s answer to include specific details about their opinions, values, attitudes, past experiences, facts, ideas, knowledge, feelings, behavior patterns, skills, and more. Your task is to summarize k main aspects which is expected to be covered by the respondent’s answer, with the following requirements: -Non-overlapping: Each aspect should be distinct, with no redundancy across points. -Balanced: The aspects should be similar in scope and significance. -Complete: Collectively, the aspects should provide broad and comprehensive coverage of the potential answer content. -Self-contained: Each aspect must be fully self-contained and include specific context from the original question. General pronouns (e.g., this case, other person, the experience, those words, that moment, etc.) should be replaced with specific terms from the original question to ensure clarity for readers who do not have access to the original context. When applicable, the specific sub-scenario or sub-dimension being addressed should also be clearly mentioned. Your output should strictly follow this format: a Python list of strings, each representing one sub-aspect, in the form of “sub-aspect (information-class): detailed-explanation”. Remember, you should only output the Python list and do not include any unnecessary explanations or comments. (The information-class should be an appropriate term and is not limited to the examples provided earlier.) [start of the output example] (skip) [end of the output example] 
+
+[User Prompts] 
+
+For the following question, please summarize its main sub-aspects. Remember, your output format must strictly follow the specified requirements. The question: {q} 
+
+Figure 6: Question analysis prompts.

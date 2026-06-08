@@ -1,0 +1,633 @@
+Title: Learning to Retrieve: Dual-Level Long-Term Memory for Text-to-SQL Agents
+
+URL Source: https://arxiv.org/pdf/2606.00547v1
+
+Published Time: Tue, 02 Jun 2026 00:45:32 GMT
+
+Number of Pages: 22
+
+Markdown Content:
+# Learning to Retrieve: Dual-Level Long-Term Memory for Text-to-SQL Agents 
+
+Yibo Wang 1 Nikki Lijing Kuang 2 Philip S. Yu 1
+
+Zhewei Yao 2 Yuxiong He 21University of Illinois Chicago 2Snowflake AI Research 
+
+{ywang633, psyu}@uic.edu {nikki.kuang, zhewei.yao, yuxiong.he}@snowflake.com 
+
+Abstract 
+
+Interactive text-to-SQL agents solve database tasks through multi-turn interactions involving schema exploration, query execution, feedback interpretation, and decision revision. Long-term memory helps agents reuse past experi-ences, but existing retrieval methods remain limited. Static methods rely on fixed simi-larity heuristics that do not optimize down-stream utility, while dynamic methods often learn from sparse final outcomes and retrieve memories at a single decision horizon. This is insufficient when memory usefulness changes across interaction stages, since memories use-ful for initial planning may differ from those needed for local, state-conditioned execution. We propose MERIT , a dynamic multi-horizon memory retrieval framework. MERIT main-tains episode-level memory for global strategic guidance and turn-level memory for local deci-sion support. Both levels use learned retrieval policies optimized with reinforcement learn-ing. To train turn-level retrieval despite lim-ited intermediate supervision, MERIT uses a lightweight Process Reward Model to pro-vide dense proxy rewards for local memory selection. Experiments on BIRD-Interact show that MERIT outperforms no-memory, static-retrieval, and dynamic-retrieval baselines in success rate while reducing average interac-tion turns. Transfer results on Spider2-Snow further show positive cross-benchmark trans-fer without benchmark-specific tuning. These results suggest that multi-horizon retrieval im-proves experience reuse in interactive text-to-SQL agents. 
+
+1 Introduction 
+
+Large language models (LLMs) are increasingly deployed as multi-step interactive agents that act, observe, and refine their behavior to solve complex tasks (Li, 2025; Mohammadi et al., 2025; Xu et al., 2025; Yuan et al., 2025). In text-to-SQL, this shift moves the task beyond single-pass semantic pars-ing. Instead of producing SQL in a single step, an agent may need to inspect schemas, execute candi-date SQL queries, ask clarifying questions, observe feedback, and revise its plan over time. Thus, suc-cess depends not only on generating a valid final query but also on making reliable intermediate de-cisions under evolving context (Wang et al., 2025b; Shao et al., 2025). Long-term memory provides a natural mecha-nism for improving such decisions. Interactive text-to-SQL tasks often share recurring structures and solution patterns, including join templates, ag-gregation logics, clarification strategies, and debug-ging routines. Reusing these experiences can help agents avoid redundant exploration and make in-formed decisions in new interactions. However, ex-isting memory-augmented approaches commonly rely on static similarity heuristics (Maharana et al., 2024; Sun et al., 2026; Salama et al., 2025; Yan et al., 2025; Kweon et al., 2025), such as dense embedding similarity, lexical matching, or hand-designed schema heuristics. These heuristics are useful for finding related candidates, yet do not directly optimize whether a retrieved memory will improve the next decision. Recent dynamic frameworks address this limi-tation by learning memory selection from down-stream feedback. For example, Memento (Zhou et al., 2025) and MemRL (Zhang et al., 2026) up-date retrieval policies or memory utilities based on final outcomes. However, these methods mainly retrieve at the episode level, selecting full trajecto-ries based on the initial request and learning from sparse terminal rewards. This mismatches interac-tive text-to-SQL, where the agent’s state evolves through schema exploration, query execution, ob-servations, and plan revision. Thus, retrieval should match the decision horizon. For example, a trajec-tory useful for initial planning may not help after a SQL error, where a local debugging pattern is more relevant. Moreover, a final success or failure signal 
+
+> arXiv:2606.00547v1 [cs.CL] 30 May 2026
+
+(a) Conceptual overview of MERIT .Vanilla Agent                
+
+> w/o Mem.
+> Agent w/
+> Static Retr.
+> Agent w/
+> Dynamic Retr.
+> Ours
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> 40
+> Success Rate (%)
+> 13.3
+> 23.3
+> 28.8 29.2 28.8
+> 27.2
+> 28.7 29.0
+> 33.0
+> 5.7
+> 13.2
+> 16.7
+> 18.2 18.0
+> 16.0
+> 17.8
+> 18.8
+> 22.2
+> Success Rate (%)
+> Phase 1 (solid)
+> Phase 2 (hatched)
+> Vanilla Agent
+> w/o Mem.
+> Agent w/
+> Static Retr.
+> Agent w/
+> Dynamic Retr.
+> Ours
+> 7.0
+> 7.5
+> 8.0
+> 8.5
+> 9.0
+> 9.5
+> 10.0
+> Avg. Number of Turns
+> 8.93
+> 9.50
+> 8.27
+> 8.45
+> 8.30
+> 8.59
+> 8.44
+> 7.84
+> Avg. # Turns ( better)
+> Vanilla GPT-5 No Memory Demo BM25 Cosine Sim. TopicK Memento MemRL MERIT (ours)
+
+(b) Performance comparison with baselines. 
+
+Figure 1: Conceptual Overview and Performance Advantages of MERIT. (a) MERIT performs horizon-aware retrieval by decoupling memory into episode-level (global strategy) and turn-level (local hints), using a PRM to provide the dense rewards required for turn-level policy learning. (b) MERIT outperforms static and single-horizon dynamic baselines in success rates while requiring fewer interaction turns. 
+
+provides weak supervision for determining which memory was useful at a specific intermediate turn. Therefore, we propose a dynamic Multi-horizon mEmory Retrieval framework using Intermediate and Terminal rewards ( MERIT ). MERIT for-mulates memory retrieval as a learning problem across two decision horizons. As illustrated in Figure 1a, the episode-level retriever selects past trajectories before an interaction begins, provid-ing global strategic guidance for planning. The turn-level retriever selects compact state-action-observation memories during the interaction, pro-viding local hints conditioned on the current state. This dual-level design separates long-range task strategy from short-range execution support. 
+
+MERIT uses a two-stage retrieval pipeline at both levels. An embedding retriever first gener-ates a candidate set, and a learned selector then chooses which memories to expose to the agent. Both selectors are optimized with reinforcement learning (RL), shaping retrieval by downstream task utility rather than fixed similarity alone. The episode-level selector is trained with terminal re-wards since its retrieval decision affects the overall trajectory. The turn-level selector requires denser supervision because intermediate turns do not have reliable direct outcome labels (Choudhury, 2025; Xi et al., 2025). To address this credit-assignment challenge, MERIT introduces a lightweight Pro-cess Reward Model (PRM) that evaluates the utility of retrieved turn-level memories with a structured rubric. The resulting dense rewards enable RL for state-conditioned turn-level retrieval. We evaluate MERIT on the interactive text-to-SQL benchmark (Huo et al., 2025) for in-domain interactive performance and on Spider2-Snow (Lei et al., 2025) for cross-benchmark transfer. As sum-marized in Figure 1b, MERIT achieves higher success rates than no-memory, static-retrieval, and dynamic-retrieval baselines, while reducing the av-erage number of interaction turns in the in-domain setting. On Spider2-Snow, MERIT achieves pos-itive transfer gains without benchmark-specific training or tuning, suggesting that the learned re-trieval policies capture reusable memory-selection behavior beyond the source benchmark. Our contributions are summarized as follows: • We propose MERIT , which aligns memory retrieval with decision horizon through episode-level global guidance and turn-level state-conditioned local support. • We formulate memory retrieval as learned poli-cies at both decision horizons, allowing memory selection to be optimized by downstream task utility rather than fixed similarity alone. • We introduce a lightweight PRM that pro-vides dense structured rewards for turn-level retrieval, mitigating the credit-assignment prob-lem caused by sparse terminal outcomes. • We evaluate MERIT in both in-domain and transfer settings, showing improved success rates, interaction efficiency, and positive cross-benchmark transfer. 
+
+2 Related Work 
+
+2.1 Text-to-SQL 
+
+Early neural text-to-SQL research typically formu-lates the task as single-pass semantic parsing from a natural-language question and database schema di-rectly to SQL (Zhong et al., 2017; Xu et al., 2017; Yu et al., 2018; Lin et al., 2020). Recent LLM-based approaches move beyond one-shot genera-2tion by introducing interaction, tool use, and iter-ative refinement (Zhang et al., 2024; Tian et al., 2023; Xiong et al., 2024; Wang et al., 2025a). These studies show that text-to-SQL agents benefit from intermediate feedback and adaptive decision-making. We build on this interactive setting and study experience reuse through learned long-term memory retrieval. 
+
+2.2 Memory Systems in LLM Agents 
+
+Long-term memory enables cross-episode experi-ence reuse (Park et al., 2023; Lu et al., 2023), and prior work has explored long-term memory writ-ing and organization, including operating-system-like memory management (Packer et al., 2023), semantic compression (Liu et al., 2026), graph-based memory representations (Chhikara et al., 2025), trajectory distillation (Fang et al., 2025; Yan et al., 2025), and structural memory repre-sentations (Zeng et al., 2024). These studies im-prove the storage and representation of agent ex-perience. MERIT instead focuses on retrieving stored memories in the interactive setting. Most memory-augmented agents retrieve memories with fixed heuristics, such as dense embedding similar-ity, lexical matching, topic coverage, or predefined structural relations (Arslan et al., 2024; Kweon et al., 2025; Kagaya et al., 2024; Zeng et al., 2024). These methods are effective for finding related can-didates, yet their retrieval criteria are fixed and do not directly optimize downstream utility. Re-cent dynamic methods learn memory utility from feedback. Memory-R1 (Yan et al., 2025) jointly op-timizes memory management and retrieval with the downstream agent. MemRL (Zhang et al., 2026) updates memory Q-values through runtime learn-ing, and Memento (Zhou et al., 2025) learns a memory-selection policy without fine-tuning base LLMs. They move beyond static similarity, but primarily operate at the episode level and rely on sparse terminal feedback. MERIT instead sepa-rates episode-level retrieval for global strategy from turn-level retrieval for local support, and trains the turn-level retriever with dense PRM-based rewards. 
+
+3 Preliminary 
+
+We formulate interactive text-to-SQL as a sequen-tial decision-making process. Given an initial natural-language request x, the agent interacts with a database environment and, when necessary, a user simulator. Unlike single-pass semantic parsing, the agent may take multiple actions before producing the final SQL query, including schema inspection, knowledge retrieval, SQL execution, clarification, and final submission. At turn t, the agent has an interaction history 
+
+ht−1 =  (a1, o 1), (a2, o 2), . . . , (at−1, o t−1),
+
+where at is the agent action, and ot is the corre-sponding observation. The agent observes a state 
+
+st = ( x, h t−1, b t),
+
+where bt is the remaining interaction budget. Con-ditioned on st, the agent selects an action at, re-ceives an observation ot, and appends (at, o t) to the history. An episode yields a trajectory 
+
+τ = ( x, h T ),
+
+where T is the terminal turn. The episode termi-nates when the agent submits a final SQL query, exhausts its interaction budget, or reaches the max-imum allowable number of turns. The final query is evaluated by execution correctness against the target SQL semantics. 
+
+4 Data Augmentation 
+
+Learning retrieval policies requires diverse exe-cutable SQL. Since high-quality interactive text-to-SQL data is limited, we construct additional training data through an execution-grounded aug-mentation pipeline. Rather than perturbing natural-language requests directly, we first synthesize exe-cutable SQL targets from seed examples and then generate user requests grounded in those targets. This SQL-first design reduces semantic drift and encourages executable SQL, faithful SQL-query alignment, and structural diversity. Given a seed query, we apply constrained SQL-level perturbations, including compatible column substitutions, numeric literal perturbations, sorting-direction changes, and limit-value modifications. These operations diversify projections, grouping, thresholds, rankings, and result sizes while preserv-ing executability. For each augmented SQL target, an LLM generates a fully specified request, an in-tentionally underspecified request, and grounding metadata that links underspecified phrases to cor-responding SQL fragments. We discard examples whose generated text or grounding metadata cannot be verified against the SQL logic. Each retained ex-ample therefore provides an executable text-to-SQL 3❄     
+
+> User Query
+> I need to analyze …
+> across… Can you
+> provide a summary of…,
+> including …? Add a
+> grant total row with …
+> Exclude … and order
+> the results by … from
+> highest to lowest.
+> Interact
+> Entire Trajectory
+> …Turn N …Turn t Turn 1
+> Episode -level Memory
+> Read at Episode Start Write at Episode End
+> Key: user query
+> Value:
+> user query
+> full interaction trajectory
+> episode outcome
+> Stage 1
+> Embedding Retrieval for
+> Candidates
+> Stage 2
+> RL -based Episode Selector:
+> Databases
+> User
+> Simulator
+
+❄   
+
+> Environments
+> Retrieve Knowledge
+> Retrieve Column
+> Get All Knowledge
+> Get All Columns
+> Get DB Schema
+> Execute SQL
+> Ask Question
+> Submit SQL READ
+> Turn -level Memory
+> Read before Each Turn Write after Each Turn
+> Key: state signature
+> Value:
+> state signature
+> abstract action
+> observation
+> turn outcome
+> PRM
+> Offline PRM Training
+> state -memory pairs
+> SFT -> GRPO ->PRM
+> Online PRM Dense Reward
+
+🔥 
+
+❄    
+
+> Stage 1
+> Embedding Retrieval for
+> Candidates
+> Stage 2
+> RL -based Turn Selector:
+> ❄Frozen 🔥 Tunable
+> Update
+> Process
+> Selector Learning
+> Final
+> Reward
+> ……
+
+✅❌ ❌ 
+
+> ……
+
+✅❌ ❌  
+
+> READ READ ……
+
+Figure 2: Overview of the proposed dual-level long-term memory framework for interactive Text-to-SQL. Episode-level memory is retrieved at episode start for global strategic guidance and updated at episode end, while turn-level memory is retrieved and updated per turn to provide state-conditioned local hints. Both levels employ a two-stage pipeline: embedding-based candidate generation followed by an RL-trained selector. A Process Reward Model (PRM), trained offline with SFT and GRPO, provides dense online rewards for turn-level retrieval, while episode-level retrieval is optimized with terminal task reward. 
+
+task with aligned SQL, requests, and grounding metadata for retrieval-policy training. Additional details and prompts are provided in Appendix A. 
+
+5 Methodology 
+
+We present MERIT by first introducing the dual-level memory architecture that separates global strategic guidance from local state-conditioned sup-port (§ 5.1). We then formulate memory retrieval at both levels as learned policies optimized by re-inforcement learning (§ 5.2). Finally, we describe the Process Reward Model (PRM), which provides dense supervision for turn-level retrieval (§ 5.3). The complete architecture is shown in Figure 2. 
+
+5.1 Dual-Level Long-Term Memory MERIT maintains two long-term memory banks. Episode-level memory stores complete interactions, and turn-level memory stores compact state-action-observation snippets for local decisions. 
+
+Episode-level memory. After each completed episode i, we write an episode-level memory 
+
+mEi = ( kEi , v Ei ),
+
+where kEi is the embedding of user request xi and 
+
+vEi = ( xi, τ i, ℓ i, z i, g i)
+
+stores the original request xi, the full trajectory τi,the terminal outcome label ℓi, distilled episode in-sights zi, and structured task-specific constraints or facts gi resolved during interaction. The distilled insights summarize reusable strategic knowledge, such as successful plans, common failure modes, task characteristics, and guidance for similar fu-ture tasks. The prompt for insights extraction is in Appendix D.4. For a new request x, we retrieve episode-level candidates by cosine similarity over the stored episode keys {kEi }. Conditioned on x and compact candidate summaries, the episode-level selector chooses a subset of memories to inject into the ini-tial agent prompt. These memories provide global guidance before the interaction begins. 
+
+Turn-level memory. Turn-level memory is in-dexed by a compact state signature rather than the full interaction state. At turn t, we define state signature 
+
+σt = g(st),
+
+4where g(·) maps the full state st into a textual re-trieval key. The signature contains the original request, the current query context, a coarse descrip-tion of the previous action, and the previous ob-servation. We keep the previous action coarse in the retrieval key so that similar decision states can match even when their exact SQL queries differ. After the agent turn j, we write a turn memory 
+
+mTj = ( kTj , v Tj ),
+
+where kTj is the embedding of σj , and 
+
+vTj = ( σj , ˜aj , ˜oj , ℓ Tj )
+
+stores the state signature, an abstracted action repre-sentation ˜aj , a short observation snippet ˜oj , and an execution-status label ℓTj . The label records imme-diate action outcomes, such as invalid tool calls and SQL syntax errors, but does not capture whether it contributes to broader task progress. The abstracted action may include normalized SQL skeletons or other tool-call details, allowing reusable local pat-terns to transfer across queries. Before intermediate turn t, we retrieve turn-level candidates by cosine similarity over {kTj }. Con-ditioned on σt and compact candidate summaries, the turn selector returns a subset of memories to inject as brief hints for the next agent action. 
+
+5.2 Retrieval Policy Learning MERIT learns retrieval policies that decide which candidate memories to expose to the agent. At both levels, similarity-based retrieval first obtains candidates, and then a learned selector chooses a subset for prompt injection. We optimize both selectors with Proximal Policy Optimization (PPO), using reward signals aligned with their respective decision horizons. 
+
+Episode-level retrieval policy learning. Given an initial request x and an episode-level candidate set CE (x), the episode-level selector samples a retrieval decision 
+
+dE ∼ πEθ (· | x, C E (x)) ,
+
+where dE specifies the selected memory subset 
+
+ˆM E ⊆ CE (x). The selected memories are in-jected before the interaction begins. After the agent completes trajectory τ , the selector receives a ter-minal reward RE (τ ), derived from final execution correctness. We optimize πEθ with PPO to learn episode-level retrieval from downstream outcomes. 
+
+Turn-level retrieval policy learning. Given a state signature σt and a turn-level candidate set 
+
+CT (σt), the turn-level selector samples 
+
+dTt ∼ πTϕ (· | σt, C T (σt)) ,
+
+where dTt specifies the selected memory subset 
+
+ˆM Tt ⊆ CT (σt). The selected memories are in-jected as local hints before the next agent action. Turn-level retrieval cannot be trained directly from reliable immediate environment rewards. A mem-ory selected at an intermediate turn may affect later actions, while its contribution may only be reflected in the final episode outcome. To mitigate this credit-assignment challenge, we use the PRM to estimate the utility of selected turn-level memories. The PRM scores each selected state-memory pair, and the turn-level reward is computed as 
+
+rTt = 1
+
+| ˆM Tt |
+
+X  
+
+> m∈ˆMTt
+
+fPRM (σt, m ),
+
+where fPRM maps a state signature and a memory to a scalar utility score. We optimize πTϕ with PPO using these dense rewards. 
+
+5.3 Process Reward Model for Turn-Level Supervision 
+
+While turn-level retrieval requires dense supervi-sion, terminal rewards provide delayed, noisy feed-back on intermediate choices. MERIT therefore uses a Process Reward Model (PRM) to estimate candidate memory utility given the current state. 
+
+Structured Utility Prediction. Given a state-memory pair (σt, m ), the PRM predicts a struc-tured rubric 
+
+yt = fψ(σt, m ).
+
+The rubric evaluates memory usefulness along seven dimensions: state match, actionability value, pattern generalizability, outcome reliability, clarity for agent, confidence in assessment, and overall utility. Each dimension contains a score in [0 , 5] 
+
+and a brief rationale. The rubric also includes bi-nary decisions on whether to inject the memory and whether to use it as a warning, along with concise textual feedback on how to use it. The full rubric schema and prompt are provided in Appendix D.5. For turn-level retrieval policy optimization, we use the trained PRM to score each state-memory pair. We denote the resulting scalar utility score as fPRM (σt, m ), which is extracted from the pre-dicted rubric using the overall utility score and the 5injection decision. This score serves as the dense reward for turn-level PPO, while the structured rubric grounds the reward in interpretable aspects of memory usefulness. 
+
+Two-Stage Training. We train the PRM from teacher-annotated state-memory pairs. For each pair, a stronger teacher model produces the full rubric. We first apply supervised fine-tuning (SFT) to imitate the teacher rubrics, then refine the PRM with GRPO using a structured matching reward. Let ˆy denote the PRM-generated rubric and y∗
+
+denote the teacher rubric. If ˆy is not a valid JSON object with all required fields, we assign 
+
+RPRM (ˆ y, y ∗) = −1.
+
+Otherwise, we first compute a structured matching score SPRM , and then clip it to obtain the PRM training reward: 
+
+SPRM = 0 .7Rdim +0 .2Rbin +0 .1Rtext −0.5Iextra ,RPRM (ˆ y, y ∗) = clip( SPRM , −1, 1) ,
+
+where Iextra = 1 if the output contains text outside the JSON object, and 0 otherwise. The dimension-level reward compares the seven scored rubric dimensions. For each dimension d,let ˆsd, s ∗ 
+
+> d
+
+∈ [0 , 5] be the predicted and teacher nu-meric scores, and let ˆrd, r ∗ 
+
+> d
+
+be the corresponding short reasons. We define 
+
+Rdim = 1
+
+|D| 
+
+X
+
+> d∈D
+
+"
+
+0.7 · max 
+
+
+
+0, 1 − |ˆsd − s∗
+
+> d
+
+|
+
+5
+
+
+
++ 0 .3 · J(ˆ rd, r ∗
+
+> d
+
+)
+
+#
+
+,
+
+where D is the set of the seven rubric dimensions and J(·, ·) denotes Jaccard similarity between to-ken sets. The binary term Rbin is the average exact-match accuracy over the two binary decisions, and 
+
+Rtext is the average similarity over the two free-text feedback fields. This reward encourages the PRM to produce valid structured outputs that match teacher utility scores, decisions, and rationales. 
+
+6 Experiments 
+
+6.1 Experimental Settings Datasets and Metrics. We evaluate MERIT on BIRD-Interact (Huo et al., 2025) for in-domain in-teractive text-to-SQL and on Spider2-Snow (Lei et al., 2025) for cross-benchmark transfer. For BIRD-Interact, we train the retrieval policies and the PRM on BIRD-Interact-Lite and evaluate on the unseen BIRD-Interact-Full dataset. Since BIRD-Interact-Lite contains only 236 base tasks (exclud-ing 64 overlapped examples with BIRD-Interact-Full), we apply the data augmentation pipeline in § 4 and Appendix A to construct approximately 7,000 training examples, with benchmark-specific conversion details in Appendix B. BIRD-Interact reports results in two benchmark-defined phases. Phase 1 evaluates the initial user request, while Phase 2 evaluates state-dependent follow-up requests. We measure success by exe-cution correctness and report the average number of interaction turns as an efficiency metric. We also report READ and WRITE results separately, where READ tasks answer analytical queries with-out modifying the database, while WRITE tasks require state-changing operations. This split tests whether MERIT helps different interaction types that may require different strategies. For Spider2-Snow, all retrieval artifacts and learned policies are trained only on BIRD-Interact and transferred without Spider2-Snow-specific training or tuning. 
+
+Baselines. We compare MERIT with no-memory, static-retrieval, and dynamic-retrieval baselines. The no-memory baselines include Vanilla GPT-5, a non-agentic LLM baseline, No Memory Agent, the base interactive agent with-out historical trajectories, and Demo Agent, which uses the officially released static demonstrations (available only for BIRD-Interact). Static-retrieval baselines include BM25, Cosine Similarity with 
+
+text-embedding-3-small , and TopicK (Kweon et al., 2025). Dynamic-retrieval baselines include Memento (Zhou et al., 2025) and MemRL (Zhang et al., 2026), which learn memory selection or util-ity but operate primarily at the episode level. For applicable memory-based methods, we keep the episode-level memory writing mechanism identical to isolate the effect of retrieval. 
+
+Model Configurations. The base reasoning agent uses GPT-5 (Singh et al., 2025) with low reasoning effort, and the user simulator uses GPT-4o (Hurst et al., 2024). The PRM is initialized from DeepSeek-R1-Distill-Qwen-7B (Guo et al., 2025), and the retrieval selectors use LoRA-tuned 
+
+Qwen3-4B-Instruct-2507 (Yang et al., 2025). We use 5,346 teacher-annotated state-memory pairs for PRM SFT, 42,768 pairs for GRPO, and 5,346 pairs for PRM evaluation. 6Methods Phase 1 Phase 2 Avg. #Turns ↓                                                                                          
+
+> WRITE READ Overall WRITE READ Overall WRITE READ Overall
+> No Memory
+> Vanilla GPT-5 24.71 −18 .97 8.69 −6.33 13.33 −10 .00 12.07 −8.04 3.05 −7.28 5.67 −7.50 ---No Memory 43.68 15.02 23.33 20.11 10.33 13.17 8.24 9.21 8.93 Demo 54.60 +10 .92 18.31 +3 .29 28.83 +5 .50 28.16 +8 .05 11.97 +1 .64 16.67 +3 .50 8.44 +0 .20 9.93 +0 .72 9.50 +0 .57
+> Static Memory
+> BM25 52.87 +9 .19 19.48 +4 .46 29.17 +5 .84 28.74 +8 .63 13.85 +3 .52 18.17 +5 .00 7.65 −0.59 8.53 −0.68 8.27 −0.66
+> Cosine Similarity 51.72 +8 .04 19.48 +4 .46 28.83 +5 .50 28.74 +8 .63 13.62 +3 .29 18.00 +4 .83 7.63 −0.61 8.79 −0.42 8.45 −0.48
+> TopicK 48.85 +5 .17 18.31 +3 .29 27.17 +3 .84 25.86 +5 .75 11.97 +1 .64 16.00 +2 .83 7.46 −0.78 8.64 −0.57 8.30 −0.63
+> Dynamic Memory
+> Memento 50.57 +6 .89 19.72 +4 .70 28.67 +5 .34 28.74 +8 .63 13.38 +3 .05 17.83 +4 .66 7.80 −0.44 8.91 −0.30 8.59 −0.34
+> MemRL 51.15 +7 .47 19.95 +4 .93 29.00 +5 .67 30.46 +10 .35 14.08 +3 .75 18.83 +5 .66 7.58 −0.66 8.79 −0.42 8.44 −0.49
+> MERIT (ours) 53.49 +9 .81 24.64 +9 .62 33.01 +9 .68 34.30 +14 .19 17.22 +6 .89 22.17 +9 .00 7.09 −1.15 8.15 −1.06 7.84 −1.09
+
+Table 1: Performance comparison of MERIT against baselines on Success Rates across two phases and Average Number of Turns. Performance is partitioned into queries with WRITE operations and READ-only operations. The backbone of the main agent is GPT-5 and the user simulator is GPT-4o for all methods. Subscripts denote absolute differences relative to the No Memory baseline. 
+
+Methods Success Rate Avg. #Turns 
+
+No Memory 
+
+Vanilla GPT-5 37.29 −28 .71 -No Memory 66.00 13.29 
+
+Static Memory 
+
+BM25 67.09 +1 .09 14.58 +1 .29 
+
+Cosine Similarity 68.19 +2 .19 13.48 +0 .19 
+
+TopicK 66.73 +0 .73 14.54 +1 .25 
+
+Dynamic Memory 
+
+Memento 68.56 +2 .56 14.33 +1 .04 
+
+MemRL 66.91 +0 .91 14.95 +1 .66 
+
+MERIT (ours) 69.29 +3 .29 13.44 +0 .15 
+
+Table 2: Transferability comparison on Spider2-Snow. The backbone of the main agent is GPT-5. TopicK, Memento, MemRL, and MERIT use the trained check-points/artifacts/. Subscripts denote absolute differences relative to the No Memory baseline. 
+
+More details are provided in Appendix B. 
+
+6.2 Experimental Results Main Results. Table 1 compares MERIT with no-memory, static-retrieval, and dynamic-retrieval baselines on BIRD-Interact. MERIT achieves the best overall success rates in both Phase 1 and Phase 2, reaching 33.01% and 22.17%, respectively. The gains hold across both READ and WRITE tasks, indicating that the learned retrieval policies help both analytical extraction and state-changing operations. Furthermore, MERIT achieves the lowest average number of interaction turns. These results indicate that MERIT improves task success while reducing interaction turns. 
+
+Leaderboard Results. We additionally transfer the retrieval artifacts trained with GPT-5 as the reasoning agent, GPT-4o as the user simulator, and the same Qwen-based retrievers used in the main experiments to two stronger agent configurations. Using GPT-5.4 as the reasoning agent with GPT-4o as the user simulator, and Claude-Opus-4.6 as the reasoning agent with Claude-Haiku-4-5 as the user simulator, MERIT achieves state-of-the-art results on the BIRD-Interact leaderboard as of May 2026. 1
+
+Transferability. Table 2 evaluates whether re-trieval policies trained on BIRD-Interact transfer to Spider2-Snow without Spider2-Snow-specific training or tuning. MERIT achieves the highest success rate among all methods, outperforming the strongest baseline. The gain is smaller than on BIRD-Interact, as expected under cross-benchmark transfer. Nevertheless, the positive improvement suggests that MERIT learns memory-selection be-havior that is not limited to the source benchmark. 
+
+MERIT also keeps average turns close to the No Memory Agent and below all memory-retrieval baselines, indicating improved success without sub-stantial interaction cost. 
+
+Ablation Studies. Table 3 ablates each MERIT 
+
+component. Removing episode-level memory causes the largest drop, reducing overall success to 23.50% in Phase 1 and 12.70% in Phase 2. This 
+
+> 1
+
+https://bird-interact.github.io/ 
+
+71 2 3 4 5      
+
+> k
+> 30.0
+> 32.5
+> 35.0
+> 37.5
+> 40.0
+> 42.5
+> 45.0
+> Pass@ k (%)
+> 33.1
+> 37.3
+> 39.4
+> 40.6
+> 41.5
+> 31.8
+> 36.0
+> 37.9
+> 39.1
+> 40.0
+> Pass@ kPhase 1
+> MERIT
+> MERIT w/o RL
+> 12345
+> k
+> 20
+> 22
+> 24
+> 26
+> 28
+> 30
+> Pass@ k (%)
+> 22.6
+> 26.0
+> 27.4
+> 28.3
+> 28.9
+> 21.5
+> 25.0
+> 26.6
+> 27.6
+> 28.3
+> Pass@ kPhase 2
+> MERIT
+> MERIT w/o RL
+
+(a) Pass@ k analysis. 1 2 3 4 5       
+
+> Number of Retrieved Memories
+> 20
+> 25
+> 30
+> 35
+> Success Rate (%)
+> 33.2 32.2
+> 33.7
+> 26.8 27.7
+> Phase 1
+> 12345
+> Number of Retrieved Memories
+> 16
+> 18
+> 20
+> 22
+> 24
+> 26
+> Success Rate (%)
+> 22.3
+> 21.3
+> 22.0
+> 17.0
+> 18.8
+> Phase 2
+
+(b) Number of retrieved memories. 
+
+Figure 3: Retrieval robustness and retrieval size. MERIT consistently outperforms the non-RL variant across k,while the retrieval-size analysis shows that injecting too many memories can introduce noisy or redundant guidance. 
+
+Methods Phase 1 Phase 2 Avg. #Turns ↓
+
+WRITE READ Overall WRITE READ Overall WRITE READ Overall MERIT (ours) 53.49 24.64 33.01 34.30 17.22 22.17 7.09 8.15 7.84 w/o episode 42.53 15.73 23.50 21.84 8.92 12.70 8.10 8.88 8.65 w/o turn 48.85 20.19 28.50 28.74 12.44 17.20 7.67 8.68 8.39 w/o RL 52.87 24.18 32.50 29.89 15.26 19.50 7.07 8.07 7.78 
+
+Table 3: Ablation studies evaluating the contribution of individual framework components—episode-level strategy, turn-level hints, and RL optimization—on task success rates and interaction efficiency. 
+
+Phase Valid (%) avg. Acc avg. MAE avg. MSE 
+
+Vanilla 95.59 33.67 0.94 1.73 SFT 92.12 36.84 0.85 1.50 SFT + GRPO 100.00 73.59 0.29 0.34 
+
+Table 4: The Performance of PRM. 
+
+shows that episode-level experience is important in interactive text-to-SQL. Removing turn-level mem-ory also degrades performance, reducing overall success to 28.50% and 17.20% in the two phases and increasing the average number of turns to 8.39. This suggests that turn-level hints comple-ment episode-level by supporting decisions as the interaction state evolves. Finally, removing RL op-timization has a modest effect on Phase 1 but low-ers Phase 2 success from 22.17% to 19.50%. This suggests that utility-based selector optimization is most beneficial for state-dependent follow-up inter-actions, where memory usefulness depends more strongly on the evolving context. 
+
+PRM Evaluation. Table 4 evaluates whether the PRM can produce structured utility judg-ments aligned with teacher annotations. Com-pared with the vanilla base model and the SFT-only model, SFT+GRPO achieves 100% valid for-matting, higher annotation agreement, and lower numeric-score errors. Specifically, SFT+GRPO im-proves average accuracy to 73.59% and reduces MAE and MSE to 0.29 and 0.34, respectively. 
+
+Methods Avg. #Turns #Tokens MERIT (ours) 7.84 100.4M w/o episode 8.65 95.4M w/o turn 8.39 108.5M w/o RL 7.78 104.2M 
+
+Table 5: Token and interaction efficiency comparison. 
+
+These results show that GRPO improves agree-ment with teacher utility rubrics; downstream tests whether this reward helps retrieval. Since direct intermediate utility labels are unavailable, we use this teacher-aligned score as a structured proxy re-ward and examine its downstream effects through turn-level and RL ablations. 
+
+Retrieval Behavior Analysis. We further ana-lyze the robustness of learned retrieval and the ef-fect of retrieval size. Figure 3a compares MERIT 
+
+with its non-RL variant under different Pass@ k
+
+budgets. MERIT achieves higher success across all k, indicating that RL-based retrieval remains beneficial across different generation budgets. Fig-ure 3b studies the number of retrieved memories. Retrieving one to three memories yields compara-ble performance, whereas larger retrieval budgets reduce success rates. This suggests that excessive memory context may introduce redundant or dis-tracting information. We provide an additional analysis of memory composition in Appendix C. 8Computational and Token Efficiency. Al-though MERIT introduces learned retrieval mod-ules, the additional cost is limited because the selec-tors are lightweight and operate on compact state signatures and memory summaries. Table 5 com-pares token usage and interaction turns across abla-tions. MERIT uses 100.4M tokens, fewer than the variants without turn-level memory or RL optimiza-tion, which require 108.5M and 104.2M tokens, re-spectively. The variant without episode-level mem-ory uses fewer tokens, yet it substantially reduces success rates and increases interaction turns. Over-all, MERIT offers a favorable success-efficiency trade-off by improving task performance while re-ducing unnecessary interactions and tokens. 
+
+7 Conclusion 
+
+We proposed MERIT , a dual-level long-term memory framework that learns episode-level and turn-level retrieval policies for interactive text-to-SQL agents. By separating global strategic guid-ance from local state-conditioned hints and using a lightweight PRM to provide dense rewards for turn-level retrieval, MERIT enables horizon-aware memory selection. Experiments on BIRD-Interact show improved success rates with fewer interaction turns, while Spider2-Snow results provide evidence of transfer beyond the source benchmark. 
+
+Limitations 
+
+First, the PRM is trained from teacher-generated rubrics rather than ground-truth labels of turn-level memory utility. This is a practical limitation of interactive retrieval settings, where the usefulness of a memory at an intermediate turn is difficult to observe directly because the agent state, future ac-tions, and environment feedback all evolve after the retrieval decision. We therefore use a strong teacher model to provide structured utility anno-tations as a proxy supervision signal. While this does not provide causal ground-truth attribution for each retrieved memory, the downstream results and ablation studies suggest that the PRM-trained turn-level selector improves state-conditioned retrieval and contributes to better follow-up interaction per-formance. Second, our current evaluation uses a strong pro-prietary backbone for the main agent and teacher annotation. This setting allows us to study memory retrieval under a capable interactive agent, but it leaves open whether the same gains hold across open-source agent backbones or weaker reasoning models. Evaluating MERIT with different base agents, teacher models, and simulator configura-tions is an important direction for future work. 
+
+References                         
+
+> Muhammad Arslan, Hussam Ghanem, Saba Munawar, and Christophe Cruz. 2024. A survey on rag with llms. Procedia computer science , 246:3781–3790. Prateek Chhikara, Dev Khant, Saket Aryan, Taranjeet Singh, and Deshraj Yadav. 2025. Mem0: Building production-ready ai agents with scalable long-term memory. arXiv preprint arXiv:2504.19413 .Sanjiban Choudhury. 2025. Process reward models for llm agents: Practical framework and directions.
+> arXiv preprint arXiv:2502.10325 .Runnan Fang, Yuan Liang, Xiaobin Wang, Jialong Wu, Shuofei Qiao, Pengjun Xie, Fei Huang, Hua-jun Chen, and Ningyu Zhang. 2025. Memp: Ex-ploring agent procedural memory. arXiv preprint arXiv:2508.06433 .Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Peiyi Wang, Qihao Zhu, Runxin Xu, Ruoyu Zhang, Shirong Ma, Xiao Bi, and 1 others. 2025. Deepseek-r1: Incentivizing reasoning capability in llms via reinforcement learning. arXiv preprint arXiv:2501.12948 .Nan Huo, Xiaohan Xu, Jinyang Li, Per Jacobsson, Shipei Lin, Bowen Qin, Binyuan Hui, Xiaolong Li, Ge Qu, Shuzheng Si, and 1 others. 2025. Bird-interact: Re-imagining text-to-sql evaluation for large language models via lens of dynamic interactions.
+> arXiv preprint arXiv:2510.05318 .Aaron Hurst, Adam Lerer, Adam P Goucher, Adam Perelman, Aditya Ramesh, Aidan Clark, AJ Ostrow, Akila Welihinda, Alan Hayes, Alec Radford, and 1 others. 2024. Gpt-4o system card. arXiv preprint arXiv:2410.21276 .Tomoyuki Kagaya, Thong Jing Yuan, Yuxuan Lou, Jayashree Karlekar, Sugiri Pranata, Akira Kinose, Koki Oguri, Felix Wick, and Yang You. 2024. Rap: Retrieval-augmented planning with contextual mem-ory for multimodal llm agents. arXiv preprint arXiv:2402.03610 .Wonbin Kweon, SeongKu Kang, Runchu Tian, Pengcheng Jiang, Jiawei Han, and Hwanjo Yu. 2025. Topic coverage-based demonstration retrieval for in-context learning. In Proceedings of the 2025 Con-ference on Empirical Methods in Natural Language Processing , pages 19911–19923. Fangyu Lei, Jixuan Chen, Yuxiao Ye, Ruisheng Cao, Dongchan Shin, Hongjin Su, Zhaoqing Suo, Hongcheng Gao, Wenjing Hu, Pengcheng Yin, and 1
+
+9others. 2025. Spider 2.0: Evaluating language mod-els on real-world enterprise text-to-sql workflows. In 
+
+International Conference on Learning Representa-tions , volume 2025, pages 28691–28735. Xinzhe Li. 2025. A review of prominent paradigms for llm-based agents: Tool use, planning (including rag), and feedback learning. In Proceedings of the 31st in-ternational conference on computational linguistics ,pages 9760–9779. Xi Victoria Lin, Richard Socher, and Caiming Xiong. 2020. Bridging textual and tabular data for cross-domain text-to-SQL semantic parsing. In Findings of the Association for Computational Linguistics: EMNLP 2020 , pages 4870–4888, Online. Association for Computational Linguistics. Jiaqi Liu, Yaofeng Su, Peng Xia, Siwei Han, Zeyu Zheng, Cihang Xie, Mingyu Ding, and Huaxiu Yao. 2026. Simplemem: Efficient lifelong memory for llm agents. arXiv preprint arXiv:2601.02553 .Junru Lu, Siyu An, Mingbao Lin, Gabriele Pergola, Yu-lan He, Di Yin, Xing Sun, and Yunsheng Wu. 2023. Memochat: Tuning llms to use memos for consis-tent long-range open-domain conversation. arXiv preprint arXiv:2308.08239 .Adyasha Maharana, Dong-Ho Lee, Sergey Tulyakov, Mohit Bansal, Francesco Barbieri, and Yuwei Fang. 2024. Evaluating very long-term conversational memory of llm agents. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 13851– 13870. Mahmoud Mohammadi, Yipeng Li, Jane Lo, and Wendy Yip. 2025. Evaluation and benchmarking of llm agents: A survey. In Proceedings of the 31st ACM SIGKDD Conference on Knowledge Discovery and Data Mining V. 2 , pages 6129–6139. Charles Packer, Vivian Fang, Shishir_G Patil, Kevin Lin, Sarah Wooders, and Joseph_E Gonzalez. 2023. Memgpt: towards llms as operating systems. Joon Sung Park, Joseph O’Brien, Carrie Jun Cai, Mered-ith Ringel Morris, Percy Liang, and Michael S Bern-stein. 2023. Generative agents: Interactive simulacra of human behavior. In Proceedings of the 36th an-nual acm symposium on user interface software and technology , pages 1–22. Rana Salama, Jason Cai, Michelle Yuan, Anna Currey, Monica Sunkara, Yi Zhang, and Yassine Benajiba. 2025. Meminsight: Autonomous memory augmen-tation for llm agents. In Proceedings of the 2025 Conference on Empirical Methods in Natural Lan-guage Processing , pages 33124–33140. Zhihui Shao, Shubin Cai, Rongsheng Lin, and Zhong Ming. 2025. Enhancing text-to-sql with question classification and multi-agent collaboration. In Find-ings of the Association for Computational Linguistics: NAACL 2025 , pages 4340–4349. Aaditya Singh, Adam Fry, Adam Perelman, Adam Tart, Adi Ganesh, Ahmed El-Kishky, Aidan McLaughlin, Aiden Low, AJ Ostrow, Akhila Ananthram, and 1 oth-ers. 2025. Openai gpt-5 system card. arXiv preprint arXiv:2601.03267 .Haoran Sun, Shaoning Zeng, and Bob Zhang. 2026. H-mem: Hierarchical memory for high-efficiency long-term reasoning in llm agents. In Proceedings of the 19th Conference of the European Chapter of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 341–350. Yuan Tian, Zheng Zhang, Zheng Ning, Toby Jia-Jun Li, Jonathan K. Kummerfeld, and Tianyi Zhang. 2023. Interactive text-to-SQL generation via editable step-by-step explanations. In Proceedings of the 2023 Conference on Empirical Methods in Natural Lan-guage Processing , pages 16149–16166, Singapore. Association for Computational Linguistics. Bing Wang, Changyu Ren, Jian Yang, Xinnian Liang, Ji-aqi Bai, LinZheng Chai, Zhao Yan, Qian-Wen Zhang, Di Yin, Xing Sun, and Zhoujun Li. 2025a. MAC-SQL: A multi-agent collaborative framework for text-to-SQL. In Proceedings of the 31st International Conference on Computational Linguistics , pages 540– 557, Abu Dhabi, UAE. Association for Computa-tional Linguistics. Bing Wang, Changyu Ren, Jian Yang, Xinnian Liang, Ji-aqi Bai, Linzheng Chai, Zhao Yan, Qian-Wen Zhang, Di Yin, Xing Sun, and 1 others. 2025b. Mac-sql: A multi-agent collaborative framework for text-to-sql. In Proceedings of the 31st International Conference on Computational Linguistics , pages 540–557. Zhiheng Xi, Chenyang Liao, Guanyu Li, Yajie Yang, Wenxiang Chen, Zhihao Zhang, Binghai Wang, Sen-jie Jin, Yuhao Zhou, Jian Guan, and 1 others. 2025. Agentprm: Process reward models for llm agents via step-wise promise and progress. arXiv preprint arXiv:2511.08325 .Guanming Xiong, Junwei Bao, Hongfei Jiang, Yang Song, and Wen Zhao. 2024. Interactive-t2s: Multi-turn interactions for text-to-sql with large language models. arXiv e-prints , pages arXiv–2408. Weikai Xu, Chengrui Huang, Shen Gao, and Shuo Shang. 2025. Llm-based agents for tool learning: A survey: W. xu et al. Data Science and Engineer-ing , pages 1–31. Xiaojun Xu, Chang Liu, and Dawn Song. 2017. Sql-net: Generating structured queries from natural lan-guage without reinforcement learning. arXiv preprint arXiv:1711.04436 .Sikuan Yan, Xiufeng Yang, Zuchao Huang, Ercong Nie, Zifeng Ding, Zonggen Li, Xiaowen Ma, Jinhe Bi, Kristian Kersting, Jeff Z Pan, and 1 others. 2025. Memory-r1: Enhancing large language model agents to manage and utilize memories via reinforcement learning. arXiv preprint arXiv:2508.19828 .
+
+10 An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, and 1 others. 2025. Qwen3 technical report. arXiv preprint arXiv:2505.09388 .Tao Yu, Zifan Li, Zilin Zhang, Rui Zhang, and Dragomir Radev. 2018. TypeSQL: Knowledge-based type-aware neural text-to-SQL generation. In Proceedings of the 2018 Conference of the North American Chap-ter of the Association for Computational Linguistics: Human Language Technologies, Volume 2 (Short Pa-pers) , pages 588–594, New Orleans, Louisiana. As-sociation for Computational Linguistics. Siyu Yuan, Kaitao Song, Jiangjie Chen, Xu Tan, Yongliang Shen, Kan Ren, Dongsheng Li, and De-qing Yang. 2025. Easytool: Enhancing llm-based agents with concise tool instruction. In Proceedings of the 2025 Conference of the Nations of the Amer-icas Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers) , pages 951–972. Ruihong Zeng, Jinyuan Fang, Siwei Liu, and Zaiqiao Meng. 2024. On the structural memory of llm agents. 
+
+arXiv preprint arXiv:2412.15266 .Hanchong Zhang, Ruisheng Cao, Hongshen Xu, Lu Chen, and Kai Yu. 2024. CoE-SQL: In-context learning for multi-turn text-to-SQL with chain-of-editions. In Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Tech-nologies (Volume 1: Long Papers) , pages 6487–6508, Mexico City, Mexico. Association for Computational Linguistics. Shengtao Zhang, Jiaqian Wang, Ruiwen Zhou, Junwei Liao, Yuchen Feng, Zhuo Li, Yujie Zheng, Weinan Zhang, Ying Wen, Zhiyu Li, and 1 others. 2026. Memrl: Self-evolving agents via runtime reinforce-ment learning on episodic memory. arXiv preprint arXiv:2601.03192 .Victor Zhong, Caiming Xiong, and Richard Socher. 2017. Seq2sql: Generating structured queries from natural language using reinforcement learning. arXiv preprint arXiv:1709.00103 .Huichi Zhou, Yihang Chen, Siyuan Guo, Xue Yan, Kin Hei Lee, Zihan Wang, Ka Yiu Lee, Guchun Zhang, Kun Shao, Linyi Yang, and 1 others. 2025. Memento: Fine-tuning llm agents without fine-tuning llms. arXiv preprint arXiv:2508.16153 .
+
+11 A Data Augmentation Details 
+
+Learning robust memory retrieval policies requires diverse executable tasks from which meaningful interaction trajectories can be collected. Since high-quality interactive text-to-SQL data is expensive to collect, we augment the training set with an execution-grounded pipeline. The pipeline first syn-thesizes executable SQL targets from seed exam-ples and then generates natural-language requests grounded in those targets. This SQL-first design reduces semantic drift and encourages three prop-erties: executable SQL, faithful SQL-query align-ment, and structural diversity. 
+
+SQL-level perturbation. Given a seed SQL query, we parse its abstract syntax tree to re-cover alias-to-table mappings and identify qual-ified columns within key clauses such as SELECT 
+
+and GROUP BY . We then apply constrained SQL-level perturbations while retaining executable vari-ants. To preserve structural integrity and executabil-ity, column substitutions are restricted to non-key columns with compatible coarse data types from the same table. We also perturb numeric literals, reverse sorting directions, and modify limit values. These operations diversify projections, grouping choices, thresholds, rankings, and result sizes while maintaining executable SQL targets. 
+
+Natural-language generation. After obtaining an executable SQL target, we generate correspond-ing natural-language requests with an LLM. The generation is conditioned on a lightweight SQL outline with clause-level cues, so that the request describes the intended operation without exposing raw table names, column names, aliases, or SQL identifiers. The model produces a fully specified request and an intentionally underspecified vari-ant. The fully specified request captures the target SQL semantics, while the underspecified request hides selected details that can be resolved through interaction. 
+
+Grounding metadata. For each underspecified request, the generation also produces grounding metadata that links vague phrases to their cor-responding SQL fragments and ambiguity types. This metadata supports interactive environments by specifying which hidden details may be clarified during interaction. The ambiguity types include knowledge-linking, semantic, entity, temporal, ag-gregation, sort, intent, and join-path ambiguity. 
+
+Verification and filtering. We discard examples whose generated text cannot be verified against the SQL logic. Retained examples must preserve SQL-query consistency, avoid raw identifier leakage in user-facing text, and provide grounding metadata that can be linked to the corresponding request phrase and SQL fragment. Each retained exam-ple therefore contains an executable SQL target, aligned natural-language requests, and grounding metadata for interactive trajectory collection. 
+
+Prompt. The full prompt used for natural-language generation and ambiguity annotation is shown in Appendix D.2. 
+
+B More Experimental Settings 
+
+Datasets and evaluation metrics. We evaluate 
+
+MERIT on BIRD-Interact (Huo et al., 2025) and Spider2-Snow (Lei et al., 2025). We use BIRD-Interact-Lite for training and BIRD-Interact-Full for in-domain evaluation. BIRD-Interact agent pro-vides an interactive text-to-SQL environment that couples an executable PostgreSQL sandbox with a dynamic user simulator. To train the retrieval policies and the PRM, we apply the data augmen-tation pipeline described in § 4 and Appendix A, expanding the initial base tasks to approximately 7,000 examples. For compatibility with the BIRD-Interact proto-col, each augmented SQL target is converted into the benchmark-required textual fields, including a fully specified request, an underspecified initial request, and grounding metadata that links under-specified phrases to corresponding SQL fragments. These fields are used by the benchmark user simu-lator to provide consistent clarification responses during interaction. For in-domain evaluation, we test on the unseen BIRD-Interact-Full dataset, which contains 600 complex tasks. BIRD-Interact reports results in two benchmark-defined phases. Phase 1 evaluates the initial user request, while Phase 2 evaluates state-dependent follow-up requests whose seman-tics may depend on the preceding task context, such as artifacts or database states established earlier. These phases are part of the benchmark protocol and are distinct from the episode-level and turn-level retrieval horizons in MERIT . We measure task success by execution correctness against the benchmark ground-truth test cases. Following the benchmark protocol, we also report results sep-arately for READ tasks, which focus on analyti-12 Methods Phase 1 Phase 2 Avg. #Turns ↓                            
+
+> WRITE READ Overall WRITE READ Overall WRITE READ Overall MERIT (POSITIVE ONLY )53.49 24.64 33.01 34.30 17.22 22.17 7.09 8.15 7.84
+> MERIT (ALL )51.15 20.19 29.2 29.31 14.32 18.7 7.01 8.09 7.78
+> Table 6: Performance comparison between using positive-only experiences and using all experiences.
+
+cal extraction, and WRITE tasks, which require database modification or other state-changing oper-ations. We report the average number of interaction turns as an interaction-efficiency metric. To evaluate cross-benchmark transfer, we fur-ther test on Spider2-Snow. In this setting, all re-trieval artifacts and learned policies are trained only on BIRD-Interact and directly transferred to Spider2-Snow without Spider2-Snow-specific train-ing or tuning. This setting evaluates whether the learned retrieval policies capture reusable memory-selection behavior beyond the source benchmark. For Spider2-Snow, we report success rate and aver-age number of interaction turns. 
+
+Baselines. We compare MERIT with three classes of baselines. To ensure a controlled com-parison, all interactive agent baselines use the same base agent prompt, user simulator, interaction bud-gets, evaluation protocol, and budget. For memory-based methods, each method maintains its own on-line memory bank generated from its own rollouts. Candidate retrieval is performed from the method-specific memory bank with the same candidate size and memory budget as MERIT whenever applica-ble; differences therefore come from the retrieval or memory-selection strategy rather than from the agent prompt or evaluation setup. • No Memory. We include three baselines without experience retrieval. Vanilla GPT-5 is a standard non-agentic LLM baseline. 
+
+No Memory Agent is the base interactive agent without access to historical trajectories. 
+
+Demo Agent is the interactive agent using the standard static demonstrations released with BIRD-Interact. • Static Retrieval. We include fixed retrieval methods, including BM25 , Cosine Similarity 
+
+with text-embedding-3-small , and Top-icK (Kweon et al., 2025). These methods retrieve memories using predefined retrieval criteria rather than learned retrieval policies. • Dynamic Retrieval. We compare with dy-namic memory methods that learn mem-ory utility or selection policies, includ-ing Memento (Zhou et al., 2025) and 
+
+MemRL (Zhang et al., 2026). These meth-ods move beyond static similarity, but operate primarily at the episode level. 
+
+Model configurations. The base reasoning agent uses GPT-5 (Singh et al., 2025) with low reason-ing effort, using the base text-to-SQL prompt in Appendix D.1. The user simulator, which provides clarification responses and execution feedback, is powered by GPT-4o (Hurst et al., 2024). Each interaction allows at most 100 turns, with a user patience budget of 6, an environment-interaction budget of 3, and a submission budget of 3. To construct the PRM training data, we use GPT-5 to annotate state-memory pairs with structured utility rubrics. This yields 5,346 pairs for super-vised fine-tuning (SFT), 42,768 pairs for Group Relative Policy Optimization (GRPO), and 5,346 pairs for evaluation. The PRM is initialized from 
+
+DeepSeek-R1-Distill-Qwen-7B (Guo et al., 2025); during retrieval-policy training, turn-level rewards are computed with the trained PRM checkpoint. For the dual-level retrieval selectors, we use LoRA-tuned Qwen3-4B-Instruct-2507 (Yang et al., 2025). At both memory levels, the embedding retriever re-turns 10 candidates, and the learned selector injects at most one memory into the agent context. We use positive-only memories by default and exclude memories from the same instance during evaluation to avoid self-retrieval leakage. Both episode- and turn-level selectors are op-timized with PPO for 4 epochs, using batch size 128, mini-batch size 16, learning rate 1 × 10 −7,PPO epoch count 2, clipping range 0.2, value-function coefficient 0.2, entropy coefficient 0.01, initial KL coefficient 0.02, and one rollout per ex-ample. Training uses 4 processes with Ray rollout parallelism 24, and all experiments are accelerated using 4 NVIDIA B200 GPUs. 
+
+C Effect of Memory Composition 
+
+MERIT uses positive memories by default in the main experiments. Although unsuccessful trajec-13 tories can contain useful warning signals, naively mixing successful and unsuccessful experiences may introduce noisy, contradictory, or overly con-servative guidance into the agent context. We there-fore compare two memory-bank construction strate-gies. The first strategy, MERIT (POSITIVE ONLY ), retrieves only memories from successful trajecto-ries. The second strategy, MERIT (ALL ), retrieves memories from both successful and unsuccessful trajectories. As shown in Table 6, positive-only retrieval achieves higher success rates in both phases. Com-pared with retrieval from all memories, positive-only retrieval improves overall success from 29.20% to 33.01% in Phase 1 and from 18.70% to 22.17% in Phase 2. This result suggests that suc-cessful trajectories provide cleaner reusable guid-ance for the agent. In contrast, directly inject-ing unsuccessful trajectories may introduce noise, even though such trajectories may still contain use-ful warning signals. Retrieval from all memories slightly reduces the average number of turns, but this efficiency gain is accompanied by a clear de-crease in task success. Based on this result, we use positive memories in the main experiments. 14 D Prompts 
+
+D.1 Base Prompts 
+
+For the base agent prompt, we adapt elements from the prompt released in BIRD-INTERACT (Huo et al., 2025), shown below. 
+
+BASE AGENT SYSTEM PROMPT 
+
+You are a helpful PostgreSQL agent that interacts with a user and a database to solve the user '
+
+s question. # Task Description Your goal is to understand the user 's ambiguous question involving the external knowledge retrieval and generate the correct SQL query to solve it. You can: 1. Interact with the user to ask clarifying questions to understand their request better or submit the SQL query to the user. The user will test your SQL correctness and give you feedback. 2. Interact with the {setting} environment (postgresql db, column meaning file, external knowledge, and so on) to explore the database and get db relevant information. - Termination condition: The interaction will end when you submit the correct SQL query or the user patience runs out. - Cost of your action: each your action will cost a certain amount of user patience. # You are a Reasoning-and-Acting agent This means you will first think about what to do next according to current observation, then take ONE action via a function call, and then get an observation from the environment or user. You can repeat this process, like "Observation" -> "Thought" -> "Action" -> " Observation" -> ... IMPORTANT: You MUST call exactly ONE function per turn. Do NOT call multiple functions at once. ## Available functions and their costs ### Database Environment functions: - execute(sql): Cost 1 - get_schema(): Cost 1 - get_all_column_meanings(): Cost 1 - get_column_meaning(table_name, column): Cost 0.5 - get_all_external_knowledge_names(): Cost 0.5 - get_knowledge_definition(knowledge_name): Cost 0.5 - get_all_knowledge_definitions(): Cost 1 ### User Interaction functions: - ask(question): Cost 2 - submit(sql): Cost 3 # Important Strategy Tips - First explore the database schema, column meaning and external knowledge... - FIGURE OUT THE USER 'S REAL INTENT BY ASKING CLARIFYING QUESTIONS!... - Be efficient with your actions to conserve user patience - Make sure your submitted SQL is valid and addresses all aspects of the question - Keep track of your remaining user patience and prioritize your actions accordingly [Retrieved Memory with Memory Formatting Template] # -----TASK START-----Now, let 's start with the user 's question that may exist ambiguities and require external knowledge understanding to solve. (EACH TIME GIVE ONE ROUND RESPONSE WITH ONE FUNCTION CALL, OTHERWISE YOU WILL BE FIRED!!!) User 's Question: {query} [SYSTEM NOTE: You have a total action budget of {total_budget} units. Each action consumes budget. Once depleted, you must submit your final SQL solution.] 
+
+15 D.2 Data Augmentation Prompt 
+
+DATA AUGMENTATION PROMPT 
+
+[SYSTEM] You convert SQL into two natural-language user queries in the style of the original BIRD-Interact dataset. Output a single JSON object with keys: - "clear_query": string (precise, captures key constraints/grouping/metrics/sorting/limit) - "amb_query": string (plausible but intentionally ambiguous; hide 2-6 important details) - "ambiguity_map": { "critical_ambiguity": [...], "non_critical_ambiguity": [...] } Each ambiguity item must be an object with: - "term": the vague phrase used verbatim in amb_query - "sql_snippet": a short exact SQL fragment copied from the input SQL (verbatim or near-verbatim) - "is_mask": boolean - "type": one of: knowledge_linking_ambiguity, semantic_ambiguity, entity_ambiguity, temporal_ambiguity, aggregation_ambiguity, sort_ambiguity, intent_ambiguity, join_path_ambiguity Hard style rules (VERY IMPORTANT): - clear_query and amb_query must sound like a real end-user request, not a schema explanation. - DO NOT mention raw table names, raw column names, aliases, or dotted identifiers (e.g., hubregistry, distributionhubs, h.hubregistry, s.zoneref). - DO NOT write parenthetical mappings like "hub (hubregistry)" or "site_code (s.zoneref)". - Parentheses are allowed ONLY for human-friendly acronyms/units (e.g., "Resource Utilization Ratio (RUR)", "percentage (\%)"). - You MAY use humanized entity names inferred from table names (e.g., distributionhubs -> " distribution hubs"), but never include the raw identifier token. - DO NOT include SQL keywords (SELECT/FROM/WHERE), raw SQL fragments, or full mathematical formulas in clear_query/amb_query. - DO NOT explicitly say "no filters" / "no limits" when none exist; just omit that. - Prefer 1-2 sentences; avoid overly technical wording. Faithfulness rules: - Do NOT invent conditions/metrics not supported by the SQL. - clear_query must faithfully describe: what to return, any filters, grouping, aggregation, sorting direction, and LIMIT (if present) - all in plain English. - If the SQL computes a derived metric, describe it conceptually in words (and you may name it), but do not show the full expression. - amb_query must hide 2-6 important details (e.g., exact thresholds, time window, sort direction, grouping key, join path), while remaining plausible. Alignment rules for ambiguity_map: - Every ambiguity item term must appear exactly in amb_query. - Every sql_snippet must be a real fragment present in the input SQL. - Ensure ambiguity items correspond to the vagueness introduced in amb_query. Few-shot examples below are FORMAT-ONLY: - They demonstrate structure and tone only. - DO NOT reuse any specific nouns/entities/phrases/numbers from the examples. - Always derive entities, constants, and constraints from the *current input SQL*. Return ONLY the JSON object. [USER] SQL: <the input SQL, whitespace-stripped> SQL outline (hint; may be incomplete): <JSON output of _quick_sql_outline() with keys: has_group_by, has_order_by, has_limit, tables, select_clause, where_clause, group_by_clause, having_clause, order_by_clause, limit_value, aggregations> Reminder: In clear_query and amb_query, do NOT mention raw identifiers or parenthetical mappings like "X (col)". Use plain English labels only. 
+
+16 D.3 Memory Selector Prompts 
+
+The episode-level and turn-level memory selector prompts are shown below. 
+
+EPISODE -LEVEL MEMORY SELECTOR PROMPT 
+
+You are selecting the top {top_k} most relevant memory ids for a Text-to-SQL task. [CURRENT QUERY] {query} [CANDIDATE MEMORIES] {candidates_text} [SELECTION CRITERIA] Choose memories with: - Similar task/intent (same type of question or answer: counting, ranking, trend-over-time, comparison, etc.). - Similar schema/data surface (same or closely related databases, tables, and key columns). - Similar SQL structure (comparable joins, aggregations, filters, subqueries, window functions, etc.). - Similar constraints or edge cases (time windows, permissions/tenants, soft deletes, null handling, duplicates, outliers). Among those, prefer memories that led to a correct final query or clearly improved/fixed a previous failure. If selecting multiple ids, prefer a diverse set that covers different helpful aspects rather than near-duplicates. [CRITICAL INSTRUCTION] Reply with EXACTLY {top_k} id(s) from the brackets above, comma-separated. Use ONLY the sequential ids in brackets (e.g. 1, 2, 3). Do NOT use the "Original ID". No explanations. No extra text. Do not invent ids. Valid examples (using the ids above): {ex1} {ex2} Your selection (ids only): 
+
+TURN -LEVEL MEMORY SELECTOR PROMPT 
+
+You are selecting the top {top_k} most relevant memory ids for a Text-to-SQL task. Your job is to decide which past step memories, if any, should be shown to the agent in the CURRENT STATE as guidance or warning. [CURRENT STATE] {state_str} [CANDIDATE STEP MEMORIES] {candidates_text} [SELECTION CRITERIA] Treat each step memory as a snapshot: - INIT: the initial query. - Q: the current query after de-ambiguity. - PREV_ACT: the last action taken. - PREV_OBS: what was observed or learned from that action. Choose memories with: - Strong LOCAL-STATE MATCH: Similar local task/intent in INIT and Q (e.g. choosing tables/ columns, designing a join path, shaping an aggregation, fixing a specific error, or refining filters). 
+
+17 - Strong LOCAL-STATE MATCH: Similar tool call in PREV_ACT. - DATA & OPERATION MATCH: Similar schema context (same or closely related tables, columns, or domain concepts mentioned in the step). - DATA & OPERATION MATCH: Similar SQL operation being decided or adjusted (comparable joins, grouping keys, aggregations, filters, subqueries, or window functions). - FEEDBACK / ISSUE PATTERN: Similar type of tool feedback or clarification in PREV_OBS. - FEEDBACK / ISSUE PATTERN: Similar type of error or problem(e.g. missing column, type mismatch, wrong join logic, wrong aggregation level, unexpected results). Among those, prefer memories with HIGH GUIDANCE UTILITY. If selecting multiple ids, prefer steps that cover complementary aspects. [CRITICAL INSTRUCTION] Reply with EXACTLY {top_k} id(s) from the brackets above, comma-separated. Use ONLY the sequential ids in brackets (e.g. 1, 2, 3). Do NOT use the "Original ID". No explanations. No extra text. Do not invent ids. Valid examples (using the ids above): {ex1} {ex2} Your selection (ids only): 
+
+D.4 Episode Insight Extraction Prompt 
+
+EPISODE INSIGHT EXTRACTION PROMPT 
+
+You are an expert LLM coach analyzing the behavior of an autonomous SQL reasoning agent. The agent can operate in two contexts: - **Environment tools**: execute, get_schema, get_all_column_meanings, get_column_meaning, get_all_external_knowledge_names, get_knowledge_definition, get_all_knowledge_definitions. - **User tools**: ask (ask clarification), submit (final submission). Your goal is to extract reasoning insights that help the agent learn *how to plan tool usage* based on the query type and difficulty. You will analyze one complete episode that includes: - The query and reward results. - A chronological record of the agent 's tool calls and observations. Your analysis must address: 1. **Success Strategies** - short bullet points (2-4) summarizing what the agent did right. 2. **Failure Reasons** - short bullet points (2-4) describing what went wrong. 3. **Key Insights** - a concise paragraph that integrates: - Whether the query was **read-only** or **CRUD**. - Whether it was **easy** or **difficult**. - The agent 's **behavioral mode**: conservative (asks user clarifications) or aggressive ( experiments and self-corrects). - Guidance for future similar queries: when to clarify vs. when to explore. Additionally, extract **info_gaps** resolved in this episode. Only include a gap if: - The agent explicitly used `ask(...) ` to request clarification, AND - The user answered clearly with information that changed SQL semantics or plan. For each gap, emit a compact object: {"gap_key": "<normalized label like bin_boundaries|metric_definition|time_window|join_key| null_handling|stdev_variant|timezone>", "agent_question": "<short paraphrase of ask()>", "user_answer": "<short distilled answer>", "why_important": "<one sentence on how it affects SQL>", 
+
+18 "resolution_signature": "<normalized key:value pairs, e.g., bins=low<50,mid50-80,high>80>", "confidence": "low|medium|high", "scope": "query_specific|reusable" }Respond in **JSON only**: {"success_strategies": ["..."], "failure_reasons": ["..."], "key_insights": "...", "info_gaps_resolved": [ {"key": "snake_case label describing the gap. Prefer one of: classification_scheme, metric_definition, grouping_rules, bin_boundaries, time_window, join_keys, null_handling, deduplication_rule, filter_scope, timezone_granularity. If none fit, use a precise, custom snake_case label (e.g., stdev_variant, sampling_ratio, outlier_policy). Do NOT use generic values like \"other\".", "question": "short agent question", "user_answer": "short canonical answer", "why_useful": "how it changed SQL/logic", "used_in": "brief evidence (e.g., final SQL CASE bins)", "scope": "generalizable | this_query_only", "confidence": "high | medium | low" }]}
+
+D.5 PRM Judging Prompt 
+
+PRM J UDGING PROMPT 
+
+You are an expert coach for a Text-to-SQL agent. In each evaluation, you see: 1) A CURRENT agent state (called CURRENT_STATE), with fields like: - initial_query: the original user question. - current_query_context: the query plus any clarifications so far. - prev_action: the last tool the agent used. - prev_observation: the last observation from the environment or user. 2) ONE step-wise memory from a past episode (called CANDIDATE_MEMORY_STEP), with: - trigger_state_raw: a compact signature of the state in which that past step occurred. - action_skeleton: a normalized description of the tool call taken in that step (e.g., "TOOL:EXECUTE SQL:[...]", "TOOL:ASK [CLARIFICATION]", "TOOL:GET_SCHEMA"). - action_result_raw: a short snippet of what happened after that action (e.g., success, SQL error, clarified user answer, etc.). - outcome_type: a coarse label "POSITIVE" or "NEGATIVE" for that past step. - note: optional comments. Your job: - Judge how useful this step-wise memory would be if retrieved *now* in the CURRENT_STATE as a small hint for the agent. - This hint can be: - Positive guidance: "This kind of action worked well before in a similar state." - Negative warning: "Avoid this kind of action; it produced a failure before." IMPORTANT: - You are NOT ranking among multiple memories here. You only see ONE candidate and judge it in isolation. - Both POSITIVE and NEGATIVE past steps can be valuable: - A POSITIVE step is good as a pattern to imitate. - A NEGATIVE step is good as a warning to avoid repeating the mistake. - For EACH rubric principle, you MUST: 
+
+19 - provide a numerical score between 0 and 5 (inclusive), - AND a one-sentence explanation (reason) for that score. SCORING SCALE (for all rubric scores): - 0 = not applicable / useless / completely wrong - 1 = very weak - 2 = weak to moderate - 3 = moderate / acceptable - 4 = strong - 5 = extremely strong / ideal RUBRIC PRINCIPLES (each must have { "score": 0-5, "reason": "..." }): 1) state_match - How similar is the CURRENT_STATE to the trigger_state_raw of this memory? - Consider query intent, ambiguity, and the previous action/observation. - 0 = completely different situation; the memory comes from an unrelated context. - 5 = almost the same state; the memory was recorded in a very similar situation. 2) actionability_value - If we SHOW this memory to the agent, how strongly does it provide useful behavioral guidance (either as something to imitate, or as something to avoid)? - High when the memory clearly suggests a good next action OR a clear mistake to avoid in states like the CURRENT_STATE. - 0 = the memory provides essentially no actionable guidance here. - 5 = extremely strong, concrete guidance for what to do or not do next. 3) pattern_generalizability - How general is the pattern implied by this memory (either positive or negative)? - 0 = extremely specific to a single query/dataset/id; unlikely to transfer. - 5 = broadly applicable pattern for many similar Text-to-SQL situations. 4) outcome_reliability - How reliable is this memory as evidence for what to do or avoid? - Consider: - Does action_result_raw clearly support the outcome (positive or negative)? - Does outcome_type match what actually happened? - 0 = noisy, ambiguous, or unreliable. - 5 = clear and trustworthy signal. 5) clarity_for_agent - If we compress this step into 1-3 lines of "tip text" for the agent, how easy is it for the agent to understand what behavior is being recommended or avoided? - 0 = very hard to explain; cryptic or confusing. - 5 = crystal clear guidance or warning. 6) confidence_in_assessment - How confident are you in your own judgments for this memory, especially for state_match, actionability_value, and overall_utility, given the available information? - Consider ambiguity or missing information in CURRENT_STATE and CANDIDATE_MEMORY_STEP. - 0 = extremely uncertain; the scores above are mostly guesses. - 5 = very confident; the situation and memory are clear and well supported. 7) overall_utility - Your overall judgment (0-5) of how valuable it is to retrieve THIS memory for THIS CURRENT_STATE. - It should go up when: - state_match is high, AND - actionability_value is high, AND - pattern_generalizability and outcome_reliability are reasonably high. - 0 = do not retrieve; essentially useless or risky. - 5 = very strong candidate to retrieve as guidance or warning. BINARY FLAGS: - recommend_injection: 
+
+20 - true if you think this memory should be retrieved and shown to the agent in this CURRENT_STATE. - false if it should generally be skipped. - use_as_warning_only: - true if its main value is as a "do NOT repeat this mistake" warning (typically when outcome_type is NEGATIVE). - false if it is mainly a positive pattern to imitate, or a balanced mix. TEXT FEEDBACK: - one_sentence_summary: - One sentence summarizing why this memory is or isn 't useful here. - how_to_use: - A short note describing how the selector should use this memory, e.g.: - "Use as a positive template for executing a grouped aggregation after schema inspection." - "Use only as a warning about executing complex SQL before clarifying the time window." - "Skip in most cases; too specific to a different schema." OUTPUT FORMAT (STRICT): You must respond with a SINGLE JSON object and nothing else. Do NOT wrap it in Markdown code fences. The JSON must match this schema (scores 0-5, reasons are one sentence): {"rubric": { "state_match": { "score": number, "reason": string }, "actionability_value": { "score": number, "reason": string }, "pattern_generalizability": { "score": number, "reason": string }, "outcome_reliability": { "score": number, "reason": string }, "clarity_for_agent": { "score": number, "reason": string }, "confidence_in_assessment": { "score": number, "reason": string }, "overall_utility": { "score": number, "reason": string }}, "binary_flags": { "recommend_injection": boolean, "use_as_warning_only": boolean }, "text_feedback": { "one_sentence_summary": string, "how_to_use": string }}
+
+21 All scores must be in [0, 5]. Each reason must be a single concise sentence. Return ONLY this JSON object as plain text. CURRENT_STATE: {state_text} CANDIDATE_MEMORY_STEP: {memory_text} You must now respond with a SINGLE JSON object and nothing else. 
+
+22
