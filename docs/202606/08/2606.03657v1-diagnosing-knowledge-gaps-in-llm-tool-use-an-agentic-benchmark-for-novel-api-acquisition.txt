@@ -1,0 +1,1385 @@
+Title: Diagnosing Knowledge Gaps in LLM Tool Use: An Agentic Benchmark for Novel API Acquisition
+
+URL Source: https://arxiv.org/pdf/2606.03657v1
+
+Published Time: Wed, 03 Jun 2026 01:13:32 GMT
+
+Number of Pages: 37
+
+Markdown Content:
+# Diagnosing Knowledge Gaps in LLM Tool Use: An Agentic Benchmark for Novel API Acquisition 
+
+Jinnuo Liu Yue Peng ∗ Jinhan Niu ∗ Hongyi Wen †
+
+NYU Shanghai 
+
+{jl14087, yp2841, jn3063, hw3242}@nyu.edu 
+
+## Abstract 
+
+Large Language Models for code generation frequently navigate novel APIs absent from their pretraining data. Using such APIs is not simply a matter of recalling a function name: it requires coordinating heterogeneous knowledge about signatures, module paths, input-output contracts, semantic behavior, and executable usage patterns. Existing benchmarks for novel API acquisition are limited: they are often static and cannot adapt to the knowledge gaps of different base models, rely on coarse pass/fail metrics, or synthesize artificial APIs that may not reflect genuinely novel usage. We present N OVEL APIB ENCH , a fully automated dynamic bench-mark that, given any base model and target library, discovers novel APIs, extracts decomposed knowledge bundles, generates coding tasks with executable test har-nesses, and classifies each failed sample into six diagnostic categories. Using this instrument, we create ∼1.9k novel-API tasks and study multiple knowledge com-ponents injected externally via retrieval or internalized via parametric adaptation, across four base models and five domains. We find that different knowledge com-ponents play distinct roles rather than being interchangeable. Usage examples are the strongest standalone component, while the best two-component configuration pairs API signatures with either explanatory mechanism text or usage examples, depending on the domain and backbone. In contrast, larger combinations that additionally include source code tend to fail because they increase import-path er-rors. Moreover, parametric adaptation methods cannot fully replace retrieval-based systems once external knowledge is removed. Instead of memorizing API knowl-edge directly, fine-tuning mainly teaches models how to effectively use provided bundles, and this capability transfers to held-out libraries. These findings suggest that retrieval and parametric tuning serve complementary functions in adapting coding LLMs to novel APIs: retrieval supplies volatile API content, while tuning improves procedural integration. 
+
+## 1 Introduction 
+
+Code LLMs are increasingly deployed as coding agents that must invoke software libraries and APIs to accomplish complex tasks. A central challenge emerges when these agents encounter novel APIs absent from their pretraining data: new library versions introduce new functions, evolving frameworks ship breaking changes, and emerging packages expose entirely new programming interfaces. Successfully using a novel API is not simply a matter of recalling a function name. Instead,  
+
+> ∗Equal contribution.
+> †Corresponding author. Preprint. Code is available at https://github.com/JimmmmmL/NovelAPIBench .Preprint.
+> arXiv:2606.03657v1 [cs.AI] 2 Jun 2026
+
+it requires acquiring and coordinating multiple forms of knowledge, including API signatures, module paths, input/output interfaces, semantic behavior, and usage patterns within executable programs. This challenge is particularly difficult because novel API knowledge is inherently heterogeneous. Some knowledge is declarative, such as function signatures or parameter types; other knowledge is procedural, such as composing APIs correctly inside larger workflows; still other knowledge is grounded in concrete execution examples or implementation details. Existing adaptation paradigms attempt to inject this knowledge through different mechanisms. External approaches augment inference-time context with retrieved documentation or examples [Lewis et al., 2021, Gao et al., 2024]. Internal approaches modify model parameters through supervised fine-tuning [Hu et al., 2021], retrieval-augmented fine-tuning, or targeted knowledge editing methods [Meng et al., 2022, 2023, Hartvigsen et al., 2023, Fang et al., 2025]. However, despite rapid progress, it remains poorly understood which types of API knowledge are actually learned by which adaptation paradigms , and 
+
+which missing knowledge components lead to which downstream failure modes .A major reason is that existing evaluation infrastructure is fundamentally limited. Current API-evolution benchmarks [Liu et al., 2025, Wu et al., 2025b, Kuhar et al., 2025, Misra et al., 2025, Liang et al., 2025] suffer from four key issues. First, they are largely static : as base models continue absorbing newer code during pretraining, benchmark novelty rapidly degrades. Second, they rely primarily on coarse aggregate metrics such as pass @k, which cannot distinguish whether failures arise from incorrect imports, malformed parameters, wrong API selection, or reasoning errors. Third, many benchmarks construct tasks through template synthesis , producing unrealistic usage scenarios that fail to reflect real-world library evolution. Finally, existing evaluations do not expose the root causes of adaptation failure. For example, when supervised fine-tuning fails on a novel API task, current benchmarks cannot determine whether the failure stems from missing signature knowledge, insufficient procedural understanding, lack of usage examples, or weak module-path generalization. To address these limitations, we introduce N OVEL APIB ENCH , a dynamic and fully automated benchmark for studying novel API acquisition in code LLMs. Given a target library and base model, NOVEL APIB ENCH automatically discovers genuinely novel APIs, decomposes API knowledge into distinct components (surface signatures, mechanism descriptions, source code, and usage examples), and generates executable tasks with difficulty-controlled test harnesses. To enable mechanistic diagnosis, we further introduce an automated failure taxonomy that classifies failures into six cat-egories: WrongAPISelection , WrongImport , WrongSyntax , WrongParam , WrongShapeDtype ,and WrongLogic . This allows us to systematically connect missing knowledge components with concrete execution failures across retrieval, fine-tuning, and knowledge-editing paradigms. Using this framework, we conduct a large-scale study spanning approximately 800 novel APIs across 5 library domains, 4 backbone models, and multiple adaptation paradigms including RAG, SFT, RAFT, GRACE, MEMIT, and AlphaEdit. Our experiments reveal three main findings. First, a substantial gap to retrieval-based methods consistently remains once external knowledge is removed at inference time: no parametric adaptation paradigm fully internalizes novel API knowledge. Second, among all knowledge components, usage examples are the single strongest standalone source of improvement. When combined with API signatures, the best secondary component is either mechanism prose or additional examples depending on the domain and backbone model, while adding source code often hurts performance by increasing import-path and module-resolution errors. Third, supervised fine-tuning primarily learns a transferable procedural meta-skill for using supplied API knowledge, rather than memorizing library-specific API details themselves. This meta-skill generalizes across libraries in our leave-one-out experiments even when the underlying API knowledge does not. Beyond these findings, N OVEL APIB ENCH is designed as a regenerable community benchmark: tasks can be continuously refreshed for future base models and evolving libraries, while the fine-grained failure labels provide process-level supervision signals for future work on reasoning-aware adaptation and reinforcement learning for code agents. Our contributions are summarized as follows: • We introduce a dynamic, execution-based benchmark for evaluating novel API acquisition in code LLMs under evolving libraries and base models. • We propose an automated failure taxonomy that links detailed execution failures to missing API knowledge components across adaptation paradigms. 2• We provide a systematic empirical study revealing how different knowledge sources and adaptation methods affect distinct API failure modes and transfer behaviors. 
+
+## 2 Related Work 
+
+Benchmarks for Evolving APIs. Several benchmarks evaluate LLMs on evolving or version-specific APIs, including synthetic API update tasks [Liu et al., 2025], large-scale version-controllable datasets [Wu et al., 2025b, Li et al., 2024a], version-specific code completion with documentation retrieval [Kuhar et al., 2025], manually curated version-conditioned problems [Misra et al., 2025], and automated benchmark generation for Rust [Liang et al., 2025]. These benchmarks are either 
+
+static , requiring manual curation and unable to adapt to different base models, or are limited to aggregate pass/fail metrics without diagnosing why a model fails. Separately, error taxonomies for LLM-generated code have been developed for general code generation [Wang et al., 2025b], web API integration [Maninger et al., 2025], and infrastructure-as-code [Nekrasov et al., 2025]. However, they are either manually constructed, domain-specific, or not coupled with a knowledge-injection study. Our benchmark is model-conditional (regenerable per base model), decomposes knowledge into isolated components, and pairs every evaluation with an automated failure taxonomy that is applied uniformly across delivery paradigms. 
+
+Knowledge Decomposition for Code Generation. Prior work has studied how documentation components affect code generation. Chen et al. [2025] ablate description, parameter list, and example code under RAG, finding that examples dominate. Hsieh et al. [2023] show that documentation alone enables zero-shot tool use matching few-shot demonstrations. CodeNav [Gupta et al., 2024] compares signature-based tool use with source code access, and Jain et al. [2024] find that documentation helps low-frequency APIs but can hurt high-frequency ones. However, none of these studies further isolates mechanism knowledge (algorithmic explanation or source code) as a component distinct from surface documentation and usage examples, and none provides failure-level diagnostics. Our fine-grained knowledge decomposition extends these factorial designs along the mechanism axis, paired with a diagnostic taxonomy that reveals which components close which error types. 
+
+Knowledge Editing for LLMs. Knowledge editing has been applied to code LLMs, with studies showing that non-parametric methods (GRACE [Hartvigsen et al., 2023]) outperform parametric ones (ROME [Meng et al., 2022], MEMIT [Meng et al., 2023], AlphaEdit [Fang et al., 2025]) in effectiveness and specificity [Li et al., 2024b], and that editing degrades procedural code gener-ation even for single edits [Chhetri et al., 2025]. Broader injection comparisons [Bohnet et al., 2026, Kujanpää et al., 2025] find that LoRA balances skill acquisition with knowledge retention. CodeSync [Wang et al., 2025a] tests SFT-based updating on real API changes but without knowledge decomposition or cross-paradigm comparison. Our work unifies these threads by comparing RAG, SFT, and locate-then-edit methods under a single diagnostic framework with decomposed knowledge, enabling controlled comparison of which failure modes each paradigm resolves. 
+
+## 3 NOVEL APIB ENCH 
+
+3.1 Problem Formulation 
+
+Given a target Python library L and a base model M, we define a novel API as a callable a exposed by L on which M cannot reliably solve coding tasks without external knowledge. For each novel API we extract a knowledge bundle decomposed into three components that serve as the ablation units throughout our experiments: • S (surface) — the fully-qualified name ( Sname ) and the parameter signature ( Sparam ) with types, defaults, and per-parameter descriptions. • E (exemplars) — canonical usage examples drawn from official documentation and real-world GitHub repositories. • M (mechanism) — a natural-language description of the underlying algorithm or design (Mprose ), and the API’s implementation source code ( Mcode ). 3Figure 1: Overview of the N OVEL APIB ENCH pipeline. A coding task targeting a is a tuple (description , context , mask , ref , harness ): a natural-language description that omits the name of a, surrounding context code, the masked span the solver must complete, a self-contained reference solution, and an executable test harness. Each API is associated with three difficulty-graded tasks. A benchmark instance is parameterised by the pair (L, M): the same library yields different benchmarks for different base models, isolating M’s genuine knowledge gap rather than its overlap with a fixed task pool. Detailed examples of our knowledge bundle is documented at B.2. 
+
+3.2 Benchmark Pipeline 
+
+NOVEL APIB ENCH is a four-stage pipeline. Stages 1 and 4 are model-conditional and together provide a two-sided guarantee that what remains in the benchmark is genuinely novel to M: Stage 1 picks library versions relative to M’s knowledge cutoff so that any new API could not have appeared in pretraining, and Stage 4 verifies empirically that M cannot solve the resulting tasks unaided. Stages 2–3 are model-agnostic and per-library cached. 
+
+Stage 1: Novel API Discovery. We take M’s training-data cutoff as a temporal boundary, resolve the latest library version vold released on or before it and the latest vnew released after it, install both in isolated environments, and diff their public API surfaces via inspect and AST parsing. APIs present in vnew but not in vold are by construction outside M’s pretraining horizon; reconciliation across versions is performed on object identity to handle canonical-path drift. The candidate pool is then pruned by a cascade of filters (e.g., private/deprecated entries, APIs without retrievable Python source, thin or stdlib-inherited docstrings, etc); see Appendix B.3 for filter definitions. 
+
+Stage 2: Knowledge Extraction. For each API a, S is obtained from introspection (with a web-search-grounded LLM call backfilling parameter descriptions when the docstring is incomplete); E
+
+is mined from official documentation and validated in the sandbox; Mprose uses a three-tier strategy (paper-grounded for citation-bearing APIs, source-grounded for complex implementations, docstring-gloss for simple utilities); Mcode is AST-extracted with docstrings stripped and same-module helpers inlined. We do not enforce strict orthogonality between components: pilot studies showed that forbidding Mprose from referencing parameter names produced unnaturally hedged explanations. APIs lacking Mcode or any valid E example are discarded. 4Stage 3: Task Generation. A single LLM call generates three difficulty-graded tasks per bun-dle, controlled by the amount of surrounding scaffolding (easy: near-direct invocation; medium: integration with small data/control-flow context; hard: composition with auxiliary calls). Bundles whose examples cannot be exercised standalone fall back to three easy variants. The harness uses an execute-then-assert strategy: the LLM emits assertion-free scenario scripts; the sandbox runs them against the reference and captures outputs; assertions are built programmatically across three layers (structural, comparative, mock-based). Because programmatic assertions can in principle be satisfied without invoking a, every harness layer is wrapped in an auto-injected target-API spy 
+
+(a counter-incrementing wrapper that patches every alias of a across the import graph), making a genuine call to a a hard precondition for passing. 
+
+Stage 4: Quality and Novelty Filtering. Stage 4 applies model-conditional filters to the Stage-3 task pool, parameterised by the base model M and a sampling temperature T . C1 (reference validity) 
+
+requires the reference solution to pass its own harness in a sandboxed subprocess, removing tasks with malformed harnesses or broken references; it is shared across all base models since it does not depend on M. C2 (empirical novelty) requires that M, given the task prompt with no knowledge of the target API a, fails the harness on at least 2 of 3 samples drawn at T =0 .8. C2 complements the Stage-1 cutoff: while the cutoff rules out verbatim memorisation, C2 verifies that M cannot solve the task by generalising from related APIs. C3 (informativeness) requires a strong external LLM to solve the task given the full bundle, guarding against tasks that are unsolvable even with complete knowledge. In summary, the temporal cutoff and the C2 gate make the benchmark dynamic :replacing M shifts the cutoff, regenerates Stage-1 candidates, and re-filters at Stage 4. 
+
+3.3 Failure Taxonomy 
+
+A pass/fail score answers whether a model failed, not why . Each pass@1 failure is labelled with one of six mutually exclusive classes capturing six distinct points along the API-invocation pipeline: 
+
+WrongSyntax (invalid Python), WrongAPISelection (target API never invoked, a sibling or hal-lucinated symbol called instead), WrongImport (correct symbol but wrong / missing import path), 
+
+WrongParam (right call, wrong argument), WrongShapeDtype (right call, contract violation inside the API’s body), and WrongLogic (right call, surrounding program structure is wrong). Classifi-cation uses a deterministic fast path (passing samples, syntax errors, and unresolved-target names) with a strong-LLM judge (we use GPT-5-mini) for the remaining cases, prompted with the task, predicted code, AST-extracted call structure, and truncated traceback; a deterministic fallback handles malformed judge outputs. We validate the classifier against independent human annotations on a stratified sample (Appendix D.3). 
+
+## 4 Experiments 
+
+We organize our study around three research questions. 1. RQ1: Which API knowledge components are most effective for novel API acquisition, and which failure modes do they resolve? 2. RQ2: How do task characteristics and backbone architectures affect optimal knowledge composition? 3. RQ3: What do parametric adaptation methods actually learn about novel APIs? RQ1 and RQ2 are studied under external knowledge injection (frozen parameters, oracle knowledge prepended). RQ3 studies parametric adaptation , evaluating whether API knowledge is internalised or merely better utilised when retrieved. 
+
+4.1 External Knowledge Injection Setup 
+
+A cell is a subset of {Sname , S param , E, M prose , M code }. For each cell we prepend the corresponding components from the target API’s own bundle, bypassing retrieval to isolate knowledge content 
+
+from retriever quality (real-retriever results in Appendix E.4). We report 9 of 12 swept cells: a no-knowledge baseline ; singletons E, Mprose , Mcode ; the surface cell S = Sname + Sparam ; two-50 20 40 60 80 100 
+
+> Share of test samples (%)
+> No knowledge prepended
+> E
+> Mprose
+> Mcode
+> S
+> S+Mprose
+> S+E
+> S+Mcode
+> Full
+> 3.1
+> 18.2
+> 4.5
+> 10.8
+> 21.7
+> 23.5
+> 19.0
+> 17.5
+> 20.5
+> Failure composition under each RAG knowledge cell
+> OK (pass@1)
+> WrongAPISelection
+> WrongImport
+> WrongSyntax
+> WrongParam
+> WrongShapeDtype
+> WrongLogic
+
+Figure 2: Failure-class composition for the nine cells of Table 5, normalised to 100% of all test samples ( n=1 ,386 ); pass@1 annotated inside the green segment. component stacks S+Mprose , S+E, S+Mcode ; and FULL = S+E+Mprose +Mcode . Omitted stacks are in Appendix C.1. Primary backbone: Qwen2.5-Coder-7B-Instruct ; replicated on Seed-Coder-8B [Seed et al., 2025], OpenCoder-8B [Huang et al., 2025], and R1-Distill-Qwen-7B [Guo et al., 2025] for Section 4.3.2. After Stage-4 filtering the test split contains 1,386 tasks over ∼800 novel APIs across 
+
+5 domains and 19 libraries. Greedy decoding ( T =0 , n=1 ) for pass@1; T =0 .8, n=20 for pass@5. Main text reports pass@1 and six-class failure breakdowns; auxiliary metrics in Appendix E.2. 
+
+4.2 RQ1: Which API knowledge components are most effective? Finding 1: Examples are the strongest standalone component; signatures provide the most reliable API-selection anchor. According to the results in Figure 2, E reaches 18 .2% pass@1 (+15 .1 pp over the 3.1% baseline); Mcode reaches 10 .8% ; Mprose barely moves the model ( 4.5% ). E
+
+and Mcode collapse the baseline’s dominant WrongAPISelection band ( 62% → 31% , 21% ), while 
+
+Mprose leaves it at 56% . This shows that prose without surface tokens cannot disambiguate the target function. The surface cell S reaches 21 .7% , outperforming all singletons, with its gain coming primarily from reducing WrongAPISelection to 30% .
+
+Finding 2: Once API selection is resolved, prose and examples target different residual bottle-necks. After S reduces WrongAPISelection , residual failures redistribute across WrongImport ,
+
+WrongLogic , and WrongParam . S+Mprose (23 .5% , +1 .8 pp) trims WrongLogic via semantic dis-ambiguation. S+E (19 .0% , −2.7 pp) adds call structure but inflates WrongImport from 23% to 
+
+37% in absolute counts as well as share. Prose helps semantic reasoning over API behavior; examples instantiate call patterns but may introduce non-canonical import paths. 
+
+Finding 3: Implementation source is the main source of negative knowledge interference. 
+
+FULL reaches 20 .5% , 3.0 pp below S+Mprose . The common factor among cells that lose ground is 
+
+Mcode , which inflates WrongImport on every S-rooted stack. The interpretation is not that more knowledge is uniformly harmful, but that implementation source introduces module-path noise rather than resolving residual errors. 
+
+4.3 RQ2: How do task characteristics and backbone architectures affect optimal knowledge composition? 4.3.1 Task regularity: domain and difficulty Finding 4: Examples help templatable tasks; prose helps heterogeneous tasks. According to Figure 3, S+E swings from +6 .2 pp on data_science (regular fixtures well summarised by one example) to −12 .1 pp on ai4science (heterogeneous fixtures that diverge from any single example). 
+
+S+Mprose is more stable ( +6 .5 to −1.5 pp). Along the difficulty axis, S+Mprose ’s advantage over 6agent tool                                  
+
+> data science
+> ai4science
+> dl
+> swe
+> E
+> Mprose
+> Mcode
+> S
+> S+Mprose
+> S+E
+> S+Mcode
+> Full
+> +16.3 +26.9 +9.7 +9.0 +16.0
+> +0.8 +3.5 +1.5 -0.3 +4.3
+> +7.4 +17.3 +5.6 +3.3 +4.3
+> +16.8 +25.8 +22.4 +13.3 +9.6
+> +19.1 +32.3 +20.9 +15.0 +8.5
+> +15.8 +31.9 +10.3 +9.0 +13.8
+> +11.2 +30.8 +13.5 +7.7 +7.4
+> +17.3 +32.7 +14.1 +10.3 +9.6 30
+> 20
+> 10
+> 0
+> 10
+> 20
+> 30
+> pass@1 vs baseline (pp)
+
+Figure 3: Per-domain ∆pass@1 over baseline (pp). E
+
+> Mprose
+> Mcode
+> S
+> S+Mprose
+> S+E
+> S+Mcode
+> Full
+
+0
+
+10 
+
+20 
+
+30 
+
+40 
+
+50 
+
+> Pass@1 (%)
+
+Cross-model consistency 
+
+> Qwen2.5-Coder-7B
+> Seed-Coder-8B
+> OpenCoder-8B
+> DeepSeek-R1-Distill-Qwen-7B
+
+Figure 4: Pooled pass@1 across knowledge cells for four ∼8 B backbones. Base    
+
+> Base + bundle
+> GRACE
+> MEMIT
+> AlphaEdit
+> SFT
+> RAFT
+> 0
+> 25
+> 50
+> 75
+> 100
+> Share of test samples (%)
+> 22
+> 38
+> 29
+> 73
+> 85 83
+> 68 21
+> 12
+> 15
+> 16
+> 39
+> 39
+> 41
+> 11 14
+> 12
+
+Failure composition with bundle prepended 
+
+> OK (pass@1)
+> WrongAPISelection
+> WrongImport
+> WrongSyntax
+> WrongParam
+> WrongShapeDtype
+> WrongLogic
+
+(a) Bundle prepended at inference ( n=399 ). 0 20 40 60 80 100              
+
+> pass@1 (%)
+> RAFT
+> SFT
+> AlphaEdit
+> GRACE
+> MEMIT
+> 87 78
+> 86 78
+> 76 54
+> 34 33
+> 22 21
+> (a) Skill transfers: pass@1
+> 010 20 30 40 50 60 70
+> WrongImport rate (% of all samples)
+> RAFT
+> SFT
+> AlphaEdit
+> GRACE
+> MEMIT
+> 914
+> 615
+> 927
+> 49 52
+> 55 51
+> (b) Module-path knowledge does not: WrongImport
+> in-distribution held-out (diffusers OOD)
+
+(b) In-distribution vs. diffusers OOD (n=109 ). 
+
+Figure 5: Failure-class diagnostics for parametric paradigms. (a) SFT/RAFT/AlphaEdit collapse both 
+
+WrongAPISelection and WrongImport ; GRACE/MEMIT leave WrongImport intact. (b) Leave-
+
+diffusers -out: pass@1 drops while WrongImport climbs for SFT/RAFT/AlphaEdit, confirming that bundle utilisation transfers but module-path knowledge does not. 
+
+S+E grows monotonically: +3 .0/ + 4 .3/ + 8 .2 pp on easy/medium/hard (see Appendix E.3). Both axes reflect one mechanism: examples help when the task follows a reusable template; prose helps when it does not. 
+
+4.3.2 Backbone-specific knowledge preferences 
+
+We replicate on Seed-Coder-8B [Seed et al., 2025], OpenCoder-8B [Huang et al., 2025], and 
+
+R1-Distill-Qwen-7B [Guo et al., 2025]. 
+
+Finding 5: The best second component mirrors the backbone’s strongest singleton. According to the results shown in Figure 4, the singleton hierarchy E > M code > M prose holds universally, but S
+
+vs. E flips: S > E on Qwen2.5-Coder and Seed-Coder ; E > S on OpenCoder and R1-Distill .Where S > E , the best stack is S+Mprose (+1 .8, +3 .4 pp); where E > S , it shifts to S+E (+15 .8,
+
++13 .0 pp). Optimal composition is foreshadowed by singleton behavior: backbones whose signatures already resolve the API benefit more from semantic disambiguation; those relying on examples benefit from explicit call structure. 7pass@1 API selection acc. Method in OOD ∆ in OOD ∆                              
+
+> SFT 0.862 0.780 −0.083 1.000 0.991 −0.009
+> RAFT 0.872 0.780 −0.092 0.982 0.982 +0 .000
+> AlphaEdit 0.761 0.541 −0.220 0.945 0.927 −0.018
+> MEMIT 0.220 0.211 −0.009 0.908 0.917 +0 .009
+> GRACE 0.339 0.330 −0.009 0.927 0.927 +0 .000
+
+Table 2: In-distribution vs. leave-diffusers -out. In : trained with diffusers (n=162 ). OOD :
+
+diffusers held out ( n=138 ). 
+
+Finding 6: Reasoning-oriented backbones resist source-induced import noise. Adding Mcode 
+
+inflates WrongImport by 13 –21 pp on three backbones but stays flat on R1-Distill . The thinking trace appears to re-resolve identifiers rather than copy module paths, making R1-Distill the sole backbone where F ULL edges out S+E (+0 .6 pp). 
+
+4.4 RQ3: What do parametric adaptation methods actually learn about novel APIs 
+
+RQ1–RQ2 show that external injection closes much of the gap but requires a bundle at inference. RQ3 asks whether parametric updates store novel API knowledge or merely improve utilisation of a supplied bundle. 
+
+4.4.1 Setup 
+
+We compare five paradigms: SFT , RAFT [Zhang et al., 2024] (LoRA-tuned), GRACE [Hartvigsen et al., 2023], MEMIT [Meng et al., 2023], and AlphaEdit [Fang et al., 2025]. All train on the same 80 /20 split ( 1,525 /399 tasks), with training instances matching the test format. Training prompts prepend S+Mprose +Mcode . Each paradigm is evaluated with-bundle and without-bundle .Hyperparameters in Appendix C.2. 3                      
+
+> Paradigm w/o bundle w/ bundle ∆
+> BASE (no update) 1.522 .1†+20 .6
+> GRACE 0.838 .3+37 .5
+> MEMIT 8.929 .1+20 .2
+> AlphaEdit 5.772 .7+67 .0
+> SFT 3.385 .5+82 .2
+> RAFT 5.782 .7+77 .0
+
+Table 1: Pass@1 (%) with/without the bundle at infer-ence. †Base w/ uses S+Mprose +Mcode .
+
+Finding 7: No parametric paradigm in-ternalises novel APIs without retrieval-time evidence. From Table 1, we see that without the bundle, SFT reaches 3.3% ;RAFT and AlphaEdit 5.7% ; GRACE 0.8% ;MEMIT 8.9% —all far below the 22 .1% 
+
+the untuned base achieves with the bundle. With the bundle, SFT/RAFT/AlphaEdit reach 73 –86% , a gap of ≥70 pp. None closes the gap to retrieval, even when trained on the exact evaluation distribution. 
+
+Finding 8: Fine-tuning learns bundle utilisation, not API knowledge. According to Fig-ure 5a, SFT/RAFT add +63 /+61 pp over the untuned base with the same bundle; AlphaEdit adds +51 pp. The failure taxonomy reveals the mechanism: prepending the bundle reduces 
+
+WrongAPISelection but introduces WrongImport (16% → 50% ). SFT/RAFT/AlphaEdit collapse 
+
+both bands ( WrongAPISelection ≤15% , WrongImport ≤22% ), shifting residuals to WrongLogic .GRACE/MEMIT leave WrongImport intact ( 63% , 58% ). The learned skill is concrete: mapping a retrieved API symbol to the correct module path. 
+
+Finding 9: Bundle utilisation transfers across libraries; module-path knowledge does not. We retrain each paradigm with diffusers removed and show our results in Table 2 and Figure 5b. OOD pass@1 falls by 8–22 pp for SFT/RAFT/AlphaEdit, yet API-selection accuracy barely moves (≤1.8 pp): the model identifies the correct API ≥93% of the time without seeing diffusers during training. What fails to transfer is realisation, not identification. SFT’s in-distribution failures     
+
+> 3The parametric study uses the full 1,924 -task pool (no dl subsample); absolute pass@1 differs from Section 4.2, but all rows of Table 1 share the same 399 -task test split.
+
+8split evenly between WrongImport and WrongLogic (47% /47% ); under OOD the share shifts to 
+
+67% /25% , with WrongImport nearly doubling in absolute count. The non-transferable component is a narrow procedural memory of which module exposes which symbol: 90% of OOD WrongImport 
+
+cases are sibling-library substitutions rather than omitted imports. 4
+
+## 5 Discussions 
+
+Content acquisition and procedural realisation are distinct sub-skills. Our results suggest that novel API acquisition decomposes into two complementary capabilities. The first is content acquisition : identifying the relevant API, its signature, and its semantic contract. The second is 
+
+procedural realization : integrating that API into executable code through correct imports, parameters, and surrounding logic. The knowledge component study shows that retrieved evidence is most effective at supplying API content, while the adaptation study shows that parametric tuning mainly improves the model’s ability to operationalize such evidence. This distinction reframes the design question: rather than choosing between RAG and fine-tuning, the goal should be to pair compact, high-value retrieval units such as S+Mprose with adapters trained across heterogeneous API-use tasks. Locate-and-edit methods, in their current form, do not yet reach this combined frontier. 
+
+The retrieval gap reflects the structure of novel API knowledge. The persistent failure of parametric updates to internalize novel APIs may reflect the nature of the knowledge being learned. API names, import paths, and module boundaries are often arbitrary symbolic facts with limited compositional structure. They are therefore difficult to infer from surrounding context and easy to confuse with sibling libraries or adjacent namespaces. The observed WrongImport substitutions are consistent with this view: the model often identifies the intended symbol but fails to realize its canonical library path. From this perspective, full parametric internalization may be the wrong design target for rapidly evolving APIs. A more robust architecture should leave volatile, low-structure facts to retrieval while using model parameters to encode reusable procedures for applying them. 
+
+Future progress likely requires scale or process-level objectives. Our findings do not rule out API internalization, but suggest that the evaluated outcome-matching paradigms are insufficient at the studied scale. One route is substantially larger continual pretraining over API-using corpora, where API facts may enter the model through ordinary memorization. A more targeted route is to change the training objective. SFT, RAFT, and locate-then-edit methods optimize gold completions or localized losses, but novel API use requires a sequence of intermediate decisions: selecting the right API, re-solving imports, satisfying contracts, and composing executable logic. Future methods may therefore benefit from process-level supervision, including execution-grounded reinforcement learning [Le et al., 2022, Wu et al., 2025a, Liu et al., 2023], distillation from retrieval-augmented teachers, or iterative RL →SFT →RL pipelines [Wang et al., 2026]. The failure taxonomy in N OVEL APIB ENCH 
+
+provides a natural interface for such objectives, turning benchmark failures into diagnostic training signals rather than only aggregate pass/fail outcomes. 
+
+## 6 Conclusion 
+
+We introduced N OVEL APIB ENCH , a dynamic, model-conditional benchmark for novel API acquisi-tion in code LLMs, together with an automated failure taxonomy for diagnosing errors across retrieval, fine-tuning, and knowledge-editing paradigms. Our results show that API knowledge components are not interchangeable: signatures resolve API selection, mechanism prose supports semantic disam-biguation, examples provide strong standalone guidance, and implementation source can introduce import-path noise. Across settings, compact bundles such as S+Mprose often outperform richer stacks. We further show that current parametric adaptation methods do not fully internalize novel APIs. Once the bundle is removed at inference, none of the tested paradigms closes the gap to retrieval-supported inference. Instead, fine-tuning mainly learns a procedural skill for using supplied API evidence, while library-specific module-path knowledge remains brittle. Together, these findings recast novel API adaptation as a complementarity: retrieval supplies volatile API facts, while parametric tuning improves procedural integration.         
+
+> 473 of 81 WrongImport cases on the diffusers OOD slice raise ModuleNotFoundError of this kind.
+
+9References 
+
+Bernd Bohnet, Rumen Dangovski, Kevin Swersky, Sherry Moore, Kathleen Kenealy, and Noah Fiedel. A comparative analysis of LLM adaptation: SFT, loRA, and ICL in data-scarce scenarios, 2026. URL https://openreview.net/forum?id=mTlSTgONvX .Jingyi Chen, Songqiang Chen, Jialun Cao, Jiasi Shen, and Shing-Chi Cheung. When llms meet api documentation: Can retrieval augmentation aid code generation just as it helps developers?, 2025. URL https://arxiv.org/abs/2503.15231 .Mark Chen, Jerry Tworek, Heewoo Jun, Qiming Yuan, Henrique Ponde de Oliveira Pinto, Jared Kaplan, Harri Edwards, Yuri Burda, Nicholas Joseph, Greg Brockman, Alex Ray, Raul Puri, Gretchen Krueger, Michael Petrov, Heidy Khlaaf, Girish Sastry, Pamela Mishkin, Brooke Chan, Scott Gray, Nick Ryder, Mikhail Pavlov, Alethea Power, Lukasz Kaiser, Mohammad Bavarian, Clemens Winter, Philippe Tillet, Felipe Petroski Such, Dave Cummings, Matthias Plappert, Fotios Chantzis, Elizabeth Barnes, Ariel Herbert-Voss, William Hebgen Guss, Alex Nichol, Alex Paino, Nikolas Tezak, Jie Tang, Igor Babuschkin, Suchir Balaji, Shantanu Jain, William Saunders, Christopher Hesse, Andrew N. Carr, Jan Leike, Josh Achiam, Vedant Misra, Evan Morikawa, Alec Radford, Matthew Knight, Miles Brundage, Mira Murati, Katie Mayer, Peter Welinder, Bob McGrew, Dario Amodei, Sam McCandlish, Ilya Sutskever, and Wojciech Zaremba. Evaluating large language models trained on code, 2021. URL https://arxiv.org/abs/2107.03374 .Vinaik Chhetri, A. B Siddique, and Umar Farooq. Understanding robustness of model editing in code llms: An empirical study, 2025. URL https://arxiv.org/abs/2511.03182 .Junfeng Fang, Houcheng Jiang, Kun Wang, Yunshan Ma, Jie Shi, Xiang Wang, Xiangnan He, and Tat-Seng Chua. Alphaedit: Null-space constrained model editing for language models. In The Thirteenth International Conference on Learning Representations , 2025. URL https: //openreview.net/forum?id=HvSytvg3Jh .Yunfan Gao, Yun Xiong, Xinyu Gao, Kangxiang Jia, Jinliu Pan, Yuxi Bi, Yi Dai, Jiawei Sun, Meng Wang, and Haofen Wang. Retrieval-augmented generation for large language models: A survey, 2024. URL https://arxiv.org/abs/2312.10997 .Timnit Gebru, Jamie Morgenstern, Briana Vecchione, Jennifer Wortman Vaughan, Hanna Wallach, Hal Daumé III, and Kate Crawford. Datasheets for datasets, 2021. URL https://arxiv.org/ abs/1803.09010 .Daya Guo, Dejian Yang, Haowei Zhang, Junxiao Song, Peiyi Wang, Qihao Zhu, Runxin Xu, Ruoyu Zhang, Shirong Ma, Xiao Bi, Xiaokang Zhang, Xingkai Yu, Yu Wu, Z. F. Wu, Zhibin Gou, Zhihong Shao, Zhuoshu Li, Ziyi Gao, Aixin Liu, Bing Xue, Bingxuan Wang, Bochao Wu, Bei Feng, Chengda Lu, Chenggang Zhao, Chengqi Deng, Chong Ruan, Damai Dai, Deli Chen, Dongjie Ji, Erhang Li, Fangyun Lin, Fucong Dai, Fuli Luo, Guangbo Hao, Guanting Chen, Guowei Li, H. Zhang, Hanwei Xu, Honghui Ding, Huazuo Gao, Hui Qu, Hui Li, Jianzhong Guo, Jiashi Li, Jingchang Chen, Jingyang Yuan, Jinhao Tu, Junjie Qiu, Junlong Li, J. L. Cai, Jiaqi Ni, Jian Liang, Jin Chen, Kai Dong, Kai Hu, Kaichao You, Kaige Gao, Kang Guan, Kexin Huang, Kuai Yu, Lean Wang, Lecong Zhang, Liang Zhao, Litong Wang, Liyue Zhang, Lei Xu, Leyi Xia, Mingchuan Zhang, Minghua Zhang, Minghui Tang, Mingxu Zhou, Meng Li, Miaojun Wang, Mingming Li, Ning Tian, Panpan Huang, Peng Zhang, Qiancheng Wang, Qinyu Chen, Qiushi Du, Ruiqi Ge, Ruisong Zhang, Ruizhe Pan, Runji Wang, R. J. Chen, R. L. Jin, Ruyi Chen, Shanghao Lu, Shangyan Zhou, Shanhuang Chen, Shengfeng Ye, Shiyu Wang, Shuiping Yu, Shunfeng Zhou, Shuting Pan, S. S. Li, Shuang Zhou, Shaoqing Wu, Tao Yun, Tian Pei, Tianyu Sun, T. Wang, Wangding Zeng, Wen Liu, Wenfeng Liang, Wenjun Gao, Wenqin Yu, Wentao Zhang, W. L. Xiao, Wei An, Xiaodong Liu, Xiaohan Wang, Xiaokang Chen, Xiaotao Nie, Xin Cheng, Xin Liu, Xin Xie, Xingchao Liu, Xinyu Yang, Xinyuan Li, Xuecheng Su, Xuheng Lin, X. Q. Li, Xiangyue Jin, Xiaojin Shen, Xiaosha Chen, Xiaowen Sun, Xiaoxiang Wang, Xinnan Song, Xinyi Zhou, Xianzu Wang, Xinxia Shan, Y. K. Li, Y. Q. Wang, Y. X. Wei, Yang Zhang, Yanhong Xu, Yao Li, Yao Zhao, Yaofeng Sun, Yaohui Wang, Yi Yu, Yichao Zhang, Yifan Shi, Yiliang Xiong, Ying He, Yishi Piao, Yisong Wang, Yixuan Tan, Yiyang Ma, Yiyuan Liu, Yongqiang Guo, Yuan Ou, Yuduan Wang, Yue Gong, Yuheng Zou, Yujia He, Yunfan Xiong, Yuxiang Luo, Yuxiang You, Yuxuan Liu, Yuyang Zhou, Y. X. Zhu, Yanping Huang, Yaohui Li, Yi Zheng, Yuchen Zhu, Yunxian Ma, Ying Tang, Yukun Zha, Yuting Yan, Z. Z. Ren, Zehui Ren, Zhangli Sha, Zhe Fu, Zhean Xu, Zhenda Xie, 10 Zhengyan Zhang, Zhewen Hao, Zhicheng Ma, Zhigang Yan, Zhiyu Wu, Zihui Gu, Zijia Zhu, Zijun Liu, Zilin Li, Ziwei Xie, Ziyang Song, Zizheng Pan, Zhen Huang, Zhipeng Xu, Zhongyu Zhang, and Zhen Zhang. Deepseek-r1 incentivizes reasoning in llms through reinforcement learning. 
+
+Nature , 645(8081):633–638, 2025. ISSN 1476-4687. doi: 10.1038/s41586-025-09422-z. URL 
+
+http://dx.doi.org/10.1038/s41586-025-09422-z .Tanmay Gupta, Luca Weihs, and Aniruddha Kembhavi. Codenav: Beyond tool-use to using real-world codebases with llm agents, 2024. URL https://arxiv.org/abs/2406.12276 .Thomas Hartvigsen, Swami Sankaranarayanan, Hamid Palangi, Yoon Kim, and Marzyeh Ghassemi. Aging with GRACE: Lifelong model editing with discrete key-value adaptors. In Thirty-seventh Conference on Neural Information Processing Systems , 2023. URL https://openreview.net/ forum?id=Oc1SIKxwdV .Cheng-Yu Hsieh, Si-An Chen, Chun-Liang Li, Yasuhisa Fujii, Alexander Ratner, Chen-Yu Lee, Ranjay Krishna, and Tomas Pfister. Tool documentation enables zero-shot tool-usage with large language models, 2023. URL https://arxiv.org/abs/2308.00675 .Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen. Lora: Low-rank adaptation of large language models, 2021. URL https: //arxiv.org/abs/2106.09685 .Siming Huang, Tianhao Cheng, J. K. Liu, Jiaran Hao, Liuyihan Song, Yang Xu, J. Yang, Jiaheng Liu, Chenchen Zhang, Linzheng Chai, Ruifeng Yuan, Zhaoxiang Zhang, Jie Fu, Qian Liu, Ge Zhang, Zili Wang, Yuan Qi, Yinghui Xu, and Wei Chu. Opencoder: The open cookbook for top-tier code large language models, 2025. URL https://arxiv.org/abs/2411.04905 .Nihal Jain, Robert Kwiatkowski, Baishakhi Ray, Murali Krishna Ramanathan, and Varun Kumar. On mitigating code llm hallucinations with api documentation, 2024. URL https://arxiv.org/ abs/2407.09726 .Sachit Kuhar, Wasi Uddin Ahmad, Zijian Wang, Nihal Jain, Haifeng Qian, Baishakhi Ray, Mu-rali Krishna Ramanathan, Xiaofei Ma, and Anoop Deoras. LibEvolutionEval: A benchmark and study for version-specific code generation. In Luis Chiruzzo, Alan Ritter, and Lu Wang, editors, Proceedings of the 2025 Conference of the Nations of the Americas Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers) , pages 6826–6840, Albuquerque, New Mexico, April 2025. Association for Computa-tional Linguistics. ISBN 979-8-89176-189-6. doi: 10.18653/v1/2025.naacl-long.348. URL 
+
+https://aclanthology.org/2025.naacl-long.348/ .Kalle Kujanpää, Pekka Marttinen, Harri Valpola, and Alexander Ilin. Efficient knowledge injection in LLMs via self-distillation. Transactions on Machine Learning Research , 2025. ISSN 2835-8856. URL https://openreview.net/forum?id=drYpdSnRJk .Hung Le, Yue Wang, Akhilesh Deepak Gotmare, Silvio Savarese, and Steven C. H. Hoi. Coderl: Mastering code generation through pretrained models and deep reinforcement learning, 2022. URL 
+
+https://arxiv.org/abs/2207.01780 .Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio Petroni, Vladimir Karpukhin, Naman Goyal, Heinrich Küttler, Mike Lewis, Wen tau Yih, Tim Rocktäschel, Sebastian Riedel, and Douwe Kiela. Retrieval-augmented generation for knowledge-intensive nlp tasks, 2021. URL https: //arxiv.org/abs/2005.11401 .Jia Li, Ge Li, Xuanming Zhang, Yunfei Zhao, Yihong Dong, Zhi Jin, Binhua Li, Fei Huang, and Yongbin Li. Evocodebench: An evolving code generation benchmark with domain-specific evaluations. In The Thirty-eight Conference on Neural Information Processing Systems Datasets and Benchmarks Track , 2024a. URL https://openreview.net/forum?id=kvjbFVHpny .Xiaopeng Li, Shangwen Wang, Shasha Li, Jun Ma, Jie Yu, Xiaodong Liu, Jing Wang, Bin Ji, and Weimin Zhang. Model editing for llms4code: How far are we?, 2024b. URL https: //arxiv.org/abs/2411.06638 .11 Linxi Liang, Jing Gong, Mingwei Liu, Chong Wang, Guangsheng Ou, Yanlin Wang, Xin Peng, and Zibin Zheng. Rustevo 2: An evolving benchmark for api evolution in llm-based rust code generation, 2025. URL https://arxiv.org/abs/2503.16922 .Jiate Liu, Yiqin Zhu, Kaiwen Xiao, Qiang Fu, Xiao Han, Wei Yang, and Deheng Ye. Rltf: Reinforce-ment learning from unit test feedback, 2023. URL https://arxiv.org/abs/2307.04349 .Zeyu Leo Liu, Shrey Pandit, Xi Ye, Eunsol Choi, and Greg Durrett. Codeupdatearena: Benchmark-ing knowledge editing on API updates, 2025. URL https://openreview.net/forum?id= ecRyUAPshY .Daniel Maninger, Leon Chemnitz, Amir Molzam Sharifloo, Tushar Lamba, Jannis Brugger, and Mira Mezini. Evaluating and mitigating errors in llm-generated web api integrations, 2025. URL 
+
+https://arxiv.org/abs/2509.20172 .Kevin Meng, David Bau, Alex J Andonian, and Yonatan Belinkov. Locating and editing factual associations in GPT. In Alice H. Oh, Alekh Agarwal, Danielle Belgrave, and Kyunghyun Cho, editors, Advances in Neural Information Processing Systems , 2022. URL https://openreview. net/forum?id=-h6WAS6eE4 .Kevin Meng, Arnab Sen Sharma, Alex J Andonian, Yonatan Belinkov, and David Bau. Mass-editing memory in a transformer. In The Eleventh International Conference on Learning Representations ,2023. URL https://openreview.net/forum?id=MkbcAHIYgyS .Diganta Misra, Nizar Islah, Victor May, Brice Rauby, Zihan Wang, Justine Gehring, Antonio Orvieto, Muawiz Chaudhary, Eilif B. Muller, Irina Rish, Samira Ebrahimi Kahou, and Massimo Caccia. Gitchameleon 2.0: Evaluating ai code generation against python library version incompatibilities. 2025. URL https://arxiv.org/abs/2507.12367 .Roman Nekrasov, Stefano Fossati, Indika Kumara, Damian Andrew Tamburri, and Willem-Jan van den Heuvel. Iac generation with llms: An error taxonomy and a study on configuration knowledge injection, 2025. URL https://arxiv.org/abs/2512.14792 .ByteDance Seed, Yuyu Zhang, Jing Su, Yifan Sun, Chenguang Xi, Xia Xiao, Shen Zheng, Anxiang Zhang, Kaibo Liu, Daoguang Zan, Tao Sun, Jinhua Zhu, Shulin Xin, Dong Huang, Yetao Bai, Lixin Dong, Chao Li, Jianchong Chen, Hanzhi Zhou, Yifan Huang, Guanghan Ning, Xierui Song, Jiaze Chen, Siyao Liu, Kai Shen, Liang Xiang, and Yonghui Wu. Seed-coder: Let the code model curate data for itself, 2025. URL https://arxiv.org/abs/2506.03524 .Chenlong Wang, Zhaoyang Chu, Zhengxiang Cheng, Xuyi Yang, Kaiyue Qiu, Yao Wan, Zhou Zhao, Xuanhua Shi, Hai Jin, and Dongping Chen. Codesync: Synchronizing large language models with dynamic code evolution at scale. In Forty-second International Conference on Machine Learning ,2025a. URL https://openreview.net/forum?id=8NN0ZEBuQk .Hongru Wang, Cheng Qian, Manling Li, Jiahao Qiu, Boyang Xue, Mengdi Wang, Heng Ji, Amos Storkey, and Kam-Fai Wong. Position: Agent should invoke external tools only when epistemically necessary, 2026. URL https://arxiv.org/abs/2506.00886 .Zhijie Wang, Zijie Zhou, Da Song, Yuheng Huang, Shengmai Chen, Lei Ma, and Tianyi Zhang. Towards understanding the characteristics of code generation errors made by large language models, 2025b. URL https://arxiv.org/abs/2406.08731 .Haoze Wu, Yunzhi Yao, Wenhao Yu, and Ningyu Zhang. Recode: Updating code api knowledge with reinforcement learning, 2025a. URL https://arxiv.org/abs/2506.20495 .Tongtong Wu, Weigang Wu, Xingyu Wang, Kang Xu, Suyu Ma, Bo Jiang, ping yang, Zhenchang Xing, Yuan-Fang Li, and Gholamreza Haffari. Versicode: Towards version-controllable code generation, 2025b. URL https://openreview.net/forum?id=l3YIMopcR9 .Tianjun Zhang, Shishir G. Patil, Naman Jain, Sheng Shen, Matei Zaharia, Ion Stoica, and Joseph E. Gonzalez. Raft: Adapting language model to domain specific rag, 2024. URL https://arxiv. org/abs/2403.10131 .12 A Limitations 
+
+Python libraries only. NOVEL APIB ENCH is currently instantiated on 19 Python libraries spanning five domains. The Stage 1 introspection pipeline ( inspect + AST diff, source-availability filter, module-path filter) is Python-specific. Whether the same component-level findings transfer to languages with different documentation cultures (e.g. Rust, Go, TypeScript, Julia) is open; we expect the standalone hierarchy ( E > M code > M prose ) and the S+Mprose -vs-S+E contention to hold for any language whose API surface is similarly introspectable, but per-domain and per-backbone preferences (Section 4.3) may differ. 
+
+Single-API tasks. Each benchmark task targets exactly one novel API. Real agentic workflows often chain several novel APIs in a single trajectory, where compositional use of decomposed knowledge — and the question of whether the bundle-utilisation skill of Finding 2 still applies when bundles for several APIs must be combined — is the next bottleneck. We do not test this regime. 
+
+Negative no-internalisation result is compute-bounded. Our claim that no parametric paradigm internalises novel API knowledge in a form that survives bundle removal (Appendix E.5) is re-stricted to the post-hoc adaptation regime: ∼ 1,500 training tasks, LoRA rank 64 , 3 epochs, no execution-grounded reward. The negative result is compute-constrained, not capability-constrained: 
+
+full-parameter fine-tuning, much longer training runs, RL with execution-grounded rewards, on-policy distillation against a retrieval-using teacher, or continual pretraining at the corpus scale that would plausibly drive memorisation all remain computationally expensive across the five parametric paradigms tested here. The experimental results and discussion in Section 4.4 frame these as the natural follow-ups once resources permit. 
+
+## B Benchmark Details 
+
+This appendix expands on the description of N OVEL APIB ENCH given in Section 3. We report per-library coverage (§B.1), the formal definition of each knowledge component together with a worked example (§B.2), pseudocode for the four pipeline stages (§B.3), the task schema and test-harness validation logic (§B.4), the failure taxonomy with representative failure examples (§B.5), and two sample tasks drawn from the released benchmark (§B.6). 
+
+B.1 Library and Domain Coverage 
+
+Table 3 reports the per-library version pair (vold , v new ) resolved automatically by Stage 1 against 
+
+Qwen2.5-Coder-7B-Instruct ’s 2024-09 knowledge cutoff (latest release on or before the cutoff vs. latest release as of the benchmark build date), and the post–Stage-4 task pool size at the C1 ∩ C2 gate (see Algorithm 4). Versions are read from each library’s data/raw/{lib}/runtime_env.json 
+
+(recorded at install time) rather than from the library YAML, which only specifies the cutoff date and lets Stage 1 walk PyPI for the matching releases. After dropping httpx (zero tasks survive Stage 4), the raw C1 ∩ C2 pool covers 19 libraries / 1,921 tasks . The dl domain pool (835 tasks) was subsampled to 300 tasks under a compute budget — the heaviest condition on the heaviest domain (e.g. a stacked S+Mprose inference run on diffusers ) is the rate-limiting cell of the entire RQ1 sweep, and the 4 × token budget the dl pool would otherwise impose did not fit the resources allocated for the headline table; sampling is uniform-random within 
+
+dl with a fixed seed so subsampled task IDs are reproducible from the group manifest. The final pooled benchmark used for RQ1 (Table 5) therefore contains 1,386 tasks across the same 19 libraries, matching the test split reported in Section 4.2. The parametric study (Section 4.4) is run on a separate group built from the post-Stage-4 pool (no dl subsample, since fine-tuning compute is dominated by the one-off training pass rather than the per-condition inference sweep that bottlenecks RQ1), under an 80 /20 task-level split that yields 1,525 train and 399 test tasks ( 1,924 in total). The 3-task gap from the 1,921 figure in Table 3 is scanpy (3 tasks): it ran through Stage 1–4 alongside the other libraries but was excluded from the 19 -library headline table because its ai4science sister libraries already cover the domain at much higher coverage; the 3 tasks are retained in the parametric study’s pooled split and reported under ai4science where domain-level results are aggregated. Dataset instances for Qwen2.5-7B-Instruct-Coder and a knowledge cut-off date of Sep, 2024 are released as part of the artifact. 13 Domain Library vold vnew Stage-4 tasks                                                                 
+
+> agent_tool langgraph 0.2.15 1.1.10 66
+> fastmcp 0.4.1 3.2.4 326
+> domain total 392
+> data_science
+> numpy 2.1.0 2.4.4 44
+> pandas 2.2.2 3.0.2 47
+> scipy 1.14.1 1.17.1 169
+> domain total 260
+> ai4science
+> rdkit 2024.3.5 2026.3.1 28
+> MDAnalysis 2.7.0 2.10.0 23
+> deepchem 2.7.1 2.8.0 27
+> pymatgen 2024.8.9 2026.3.23 4
+> astropy 6.1.3 7.2.0 191
+> ase 3.23.0 3.28.0 67
+> domain total 340
+> dl
+> diffusers 0.30.2 0.38.0 563
+> transformers 4.44.2 5.7.0 188
+> torch 2.4.0 2.11.0 84
+> domain total / RQ1 sample 835 / 300 †
+> swe
+> fastapi 0.112.2 0.136.1 15
+> flask 3.0.3 3.1.3 1
+> django 5.1 5.2.13 38
+> sqlalchemy 2.0.32 2.0.49 29
+> pydantic 2.8.2 2.13.3 11
+> domain total 94 Benchmark total / RQ1 sample 1,921 / 1,386 †
+
+Table 3: Per-library version pairs (from runtime_env.json ) and Stage-4 task pool sizes ( C1 ∩ C2)for the default backbone. Stage 1 auto-discovers vold as the latest PyPI release on or before the model’s 2024-09 cutoff and vnew as the latest release as of build time. Libraries with small minor-version increments ( flask , pydantic ) yield few novel-API tasks under the gate; httpx (0.27.0 → 0.28.1 
+
+yielded zero C1 ∩ C3 ∩ C2 survivors) is omitted. †The RQ1 sweep uses 300 uniform-random tasks from the dl pool of 835 (compute-bounded, see prose); the parametric study (Section 4.4) uses the full pool of 1,921 .
+
+B.2 Knowledge Components: Definitions and Example 
+
+We restate the formal definition of each component (Section 3), then give a worked example. 
+
+Sname (name) the fully-qualified import path of the target callable, e.g. 
+
+diffusers.callbacks.SDXLControlnetCFGCutoffCallback .
+
+Sparam (parameter signature) a list of (name , type , default , description ) tuples obtained determin-istically from inspect.signature and the parsed docstring, with a strong-LLM call backfilling per-parameter descriptions and the return type when the source docstring is incomplete. 
+
+E (exemplars) up to three canonical usage examples mined from official documentation via grounded web search, each validated in the sandbox and tagged with mode ∈ { executed , static , failed }.
+
+Mprose (mechanism prose) a 200–400-word natural-language explanation produced by a tiered pipeline: paper-grounded for citation-bearing APIs, source-grounded for complex imple-mentations, and docstring-grounded for thin utilities (§B.3). 
+
+Mcode (implementation source code) the AST-extracted body of a with all docstrings stripped and same-module helpers inlined one level deep; None for C-implemented APIs and for factory-generated closures. 14 Worked example. For diffusers.callbacks.SDXLControlnetCFGCutoffCallback 
+
+(SDXL-ControlNet pipeline callback that disables classifier-free guidance after a step threshold), the bundle is given in Listing 1. Listing 1: Knowledge bundle for a single API ( SDXLControlnetCFGCutoffCallback ); long fields truncated for space. 
+
+S_name: "diffusers.callbacks.SDXLControlnetCFGCutoffCallback" S_param: [{name: "cutoff_step_ratio", type: "float", default: 1.0, description: "Fraction of total inference steps after which CFG is disabled. Mutually exclusive with cutoff_step_index."}, {name: "cutoff_step_index", type: "int|None", default: None, description: "Absolute step index at which CFG is disabled."} ]return_type: None # constructor E: - mode: executed code: "cb = SDXLControlnetCFGCutoffCallback(); ... assert cb.tensor_inputs" - mode: executed code: "cb = SDXLControlnetCFGCutoffCallback(cutoff_step_ratio=0.5); ..." M_prose (~280 words): "A stateful pipeline callback that coordinates two simultaneous mutations at a deterministic step: it disables classifier-free guidance (sets guidance_scale to 1.0) and trims the conditioning tensor batch to its unconditional half. The cutoff source must be exactly one of cutoff_step_ratio (fraction of total steps) or cutoff_step_index (absolute step). Invariants: ratio in [0,1], index in [0, num_inference_steps). Use case: inject into StableDiffusionXLControlNetPipeline.__call__ via the callback_on_step_end parameter to apply CFG-cutoff schedules during inference. ..." M_code (~50 lines): "class SDXLControlnetCFGCutoffCallback(PipelineCallback): tensor_inputs = [’prompt_embeds’, ’add_text_embeds’, ’add_time_ids’, ’image’] def callback_fn(self, pipeline, step_index, timestep, callback_kwargs): cutoff_step_ratio = self.config.cutoff_step_ratio ..." 
+
+15 B.3 Pipeline Implementation 
+
+The four pipeline stages are summarised in Algorithms 1–4. For brevity we elide stage-1 introspection / installation plumbing and the stage-2 K1 introspection step. 
+
+Algorithm 1 Stage 1 — Novel API discovery for library L relative to model M.
+
+Require: library spec L, model cutoff tM
+
+1: vold ← LATEST RELEASE (L, ≤ tM)
+
+2: vnew ← LATEST RELEASE (L, > t M)
+
+3: install vold , v new in isolated envs 
+
+4: for v ∈ { vold , v new } do 
+
+5: Av ← INTROSPECT APIS URFACE (v) ▷ pkgutil.walk_packages or explicit module list; 
+
+__module__ -based canonical dedup 
+
+6: end for 
+
+7: ∆ ← IDENTITY DIFF (Aold , Anew ) ▷ key on ( short_name , src_basename , kind )
+
+8: N ← { a ∈ ∆ : a is added or signature-changed }
+
+9: for filter f ∈ [PRIVATE , DEPRECATED , NOSOURCE , FOREIGN SOURCE , THIN DOCSTRING ,
+
+INTERNAL MODULE PATH , TYPE ALIAS , SUFFIX CAP ] do 
+
+10: N ← { a ∈ N : ¬f (a)}
+
+11: end for 
+
+12: N ← MMRD IVERSITY SELECT (N , k max )
+
+13: return N
+
+Algorithm 2 Stage 2 — Knowledge bundle extraction for API a.
+
+Require: API entry a from Stage 1, doc URL uL
+
+1: S ← INTROSPECT SURFACE (a) ▷ name, params, types, defaults 
+
+2: S ← LLMB ACKFILL PARAM DOCS (S, docstring (a)) 
+
+3: E ← WEB SEARCH EXAMPLES (a, u L)
+
+4: for e ∈ E do 
+
+5: e. mode ← SANDBOX VALIDATE (e) ▷ ∈ { executed , static , failed }
+
+6: end for 
+
+7: if ∄ e ∈ E : e. mode ̸ = failed then 
+
+8: return ⊥ ▷ drop bundle (require_any_valid) 
+
+9: end if 
+
+10: τ ← TIER CLASSIFY (a) ▷ 1: paper-grounded, 2: source-grounded, 3: docstring-gloss 
+
+11: if τ = 1 then 
+
+12: papers ← WEB SEARCH PAPER JSON (a) ▷ strict JSON: {component_kind, papers }
+
+13: if papers = ∅ or kind ∈ { abstract_base, unknown } then 
+
+14: τ ← 2
+
+15: else 
+
+16: Mprose ← LLME XPLAIN (a, papers )
+
+17: end if 
+
+18: end if 
+
+19: if τ = 2 then Mprose ← LLME XPLAIN (a, M code )
+
+20: else if τ = 3 then Mprose ← DOCSTRING GLOSS (a)
+
+21: end if 
+
+22: Mcode ← ASTE XTRACT (a) ▷ strip docstrings, inline same-module helpers; factory-closure guard 
+
+23: if Mcode = ⊥ then return ⊥ ▷ m_code.require 
+
+24: end if 
+
+25: return ⟨S, E, M prose , M code , τ ⟩
+
+16 Algorithm 3 Stage 3 — Task and test-harness generation. The harness follows an execute-then-assert 
+
+protocol: an LLM emits scenario scripts that exercise the reference solution but contain no assertions; the sandbox executes them; assertions are then built programmatically from the captured outputs. Every layer is wrapped in the auto-injected target-API spy , making a real call to a a hard precondition for passing. 
+
+Require: bundle ⟨S, E, M prose , M code ⟩ for API a 
+
+> 1:
+
+cohort ← if ∃ e ∈ E : e. mode = executed then {easy, medium, hard} else {easy 1, easy 2, easy 3} 
+
+> 2:
+
+for difficulty d ∈ cohort do  
+
+> 3:
+
+(desc , ctx , mask , ref ) ← LLMT ASK (a, d, bundle ) ▷ single LLM call generates description + reference  
+
+> 4:
+
+S ← LLMS CENARIOS (a, ref , n =6) ▷ print-protocol scripts, no assertions  
+
+> 5:
+
+O ← { SANDBOX (s, ref ) : s ∈ S}  
+
+> 6:
+
+H ← BUILD ASSERTIONS (O) ▷ exec + shape/type + mock layers  
+
+> 7:
+
+for layer ℓ ∈ H do  
+
+> 8:
+
+ℓ ← INJECT SPY (ℓ, a ) ▷ patch all aliases of a in sys.modules ; prepend assert _target_api_call_count > 0  
+
+> 9:
+
+end for  
+
+> 10:
+
+if NULL STUB (H) passes then H ← LLMO NLY FALLBACK (a) 
+
+> 11:
+
+end if  
+
+> 12:
+
+end for  
+
+> 13:
+
+return generated tasks 
+
+Algorithm 4 Stage 4 — Quality and novelty filtering ( C1 ∩ C2 ∩ C3). 
+
+Require: Stage-3 task pool T , base model M
+
+C1 (reference passes harness) — model-agnostic, cached.  
+
+> 1:
+
+for t ∈ T do  
+
+> 2:
+
+harness_ok ← SANDBOX (ref t, Ht, timeout =30s) ▷ spy active  
+
+> 3:
+
+harness_nonempty ← at least one of exec , shape_type , mock layers populated  
+
+> 4:
+
+if ¬(harness_ok ∧ harness_nonempty ) then drop t 
+
+> 5:
+
+end for  
+
+> 6:
+
+persist as C1_intermediate.json ▷ shared across M
+
+C2 (base model fails ≥ 2/3) — model-conditional.  
+
+> 7:
+
+R ← M .BATCH GENERATE (prompt t, n =3 , T =0 .8) ∀t ▷ stochastic sampling so the 2/3 probe is not trivially deterministic  
+
+> 8:
+
+for t ∈ T do  
+
+> 9:
+
+fails ← |{ r ∈ R t : ¬SANDBOX (r, Ht)}|  
+
+> 10:
+
+if fails < 2 then drop t 
+
+> 11:
+
+end for  
+
+> 12:
+
+return T ▷ stage4_filtered.{model}.jsonl 
+
+17 B.4 Task Structure and Test Harness 
+
+A N OVEL APIB ENCH task is the tuple (api_name , description , context , mask , ref , H) serialised as JSONL with the schema in Listing 2. Listing 2: JSONL schema for a single benchmark task.            
+
+> {"task_id": <library>::<api_name>::<difficulty>, "api_name": fully-qualified target callable, "library": ..., "difficulty": "easy" | "medium" | "hard" | "easy_1" | "easy_2" | "easy_3", "description": natural-language task spec; *omits* api_name and parameter names of the target API, "context_code": imports + helper definitions surrounding the masked region, "masked_span": the contiguous code region the solver must produce; replaces "<MASK>" in context_code, "reference_solution": full self-contained code (context_code with masked_span filled in by the bundle author), "test_harness": { "setup_code": spy-installation code (patches every alias of api_name in sys.modules; resets counter), "execution_test": layer 1 -- runs reference end-to-end and asserts spy counter > 0 plus output-shape equalities derived from execute-then-assert, "shape_type_test": layer 2 -- runs reference on K alternative fixture variants; asserts output dtype and shape diverge as expected, "mock_test": layer 3 -- re-runs with a mocked dependency fixture (e.g. zero-element edge case); spy check repeated. }}
+
+Spy invariant. Every harness layer is wrapped by _with_check(...) (Algorithm 3 line 8) so that the first executable statement in each layer asserts _target_api_call_count > 0 . The spy is installed by walking sys.modules and replacing every alias of a (including re-exports under shorter parent paths) with a wrapper that increments a module-level counter; classes are spied by subclassing the original to preserve isinstance . Soft-fail behaviour: if the target cannot be imported in the sandbox (missing extras, GPU dependency), the spy sets _target_api_spy_installed = False 
+
+and the harness defers to its assertions; Stage 4 C1/C2 then filters those tasks at the next gate. 
+
+B.5 Failure Taxonomy: Examples 
+
+The six failure classes (defined inline in Section 3.3) are applied in the order shown by the classifier. We give the diagnostic rule and a representative failure for each class in Table 4. 18 Class Triggering pattern (representative example) 
+
+WrongAPISelection Target: diffusers.AutoPipelineForImage2Image . Predicted: 
+
+StableDiffusionImg2ImgPipeline.from_pretrained(...) . Spy counter remains 0; NameError on the target symbol or no call to the target leaf detected by the AST scanner. 
+
+WrongSyntax SyntaxError or IndentationError during sandbox parse; e.g. unbalanced parenthe-ses in a long argument list, mis-indented def after a generated comment block. 
+
+WrongImport Target: diffusers.models.transformers.SD3Transformer2DModel . Predicted: 
+
+from transformers import SD3Transformer2DModel . AST sees the correct leaf name but the ModuleNotFoundError / ImportError traceback shows resolution against the wrong package; or the symbol is referenced with no import at all. 
+
+WrongParam Target: scipy.signal.iirnotch . Predicted: iirnotch(w0, Q, sample_-rate=fs) on the new positional-only signature; TypeError: unexpected keyword argument ’sample_rate’ . AST extracts the call kwargs; the LLM judge confirms the right API was selected and the failure is in argument naming/typing. 
+
+WrongShapeDtype Target: torch.linalg.lu_factor . Predicted code runs the right call but sup-plies a non-square matrix; RuntimeError: input must be batches of square matrices . The exception is raised inside the target’s body. 
+
+WrongLogic Target: langgraph.graph.StateGraph.add_conditional_edges . Target is in-voked with valid kwargs, but the routing function returns a node name that is never registered; downstream ValueError: edge target ... not in graph . The failure is in the surrounding program structure. 
+
+Table 4: Triggering patterns and representative failures for each class. The classifier applies a deterministic fast path ( SyntaxError /IndentationError → WrongSyntax ; NameError on the target leaf → WrongAPISelection ; harness pass → OK) and routes the remaining cases — including timeouts — to the strong-LLM judge prompted with the task, predicted code, AST-extracted call structure, exception type, and truncated traceback. 19 B.6 Sample Tasks 
+
+Listings 3–4 show two complete tasks drawn from the released benchmark, illustrating respectively the single-call-with-state-check and integration-with-control-flow task patterns the Stage-3 generator produces. Listing 3: Sample task — sqlalchemy.ext.orderinglist.OrderingList (swe , medium diffi-culty). Test harness fields abbreviated. 
+
+api_name: "sqlalchemy.ext.orderinglist.OrderingList" difficulty: "medium" description: "A background ranking job ingests a list of Product records, sorts them by score, and writes their relative position into a ‘display_rank‘ integer attribute. Build the data structure that holds the ranked products such that subsequent in-place reordering of the list keeps ‘display_rank‘ consistent on every Product. Do not re-implement the rank-tracking logic by hand." context_code: | from sqlalchemy.ext.orderinglist import OrderingList class Product: def __init__(self, name, score, display_rank=None): self.name, self.score, self.display_rank = name, score, display_rank products = [Product("A", 0.9), Product("B", 0.4), Product("C", 0.7)] # <MASK> ranked.sort(key=lambda p: -p.score) ranked._reorder() masked_span: ’ranked = OrderingList("display_rank", reorder_on_append=True)’ ’; ranked.extend(products)’ test_harness.execution_test: | assert _target_api_call_count > 0 ... # asserts ranked[0].display_rank == 0 and ranked[0].name == "A" 
+
+Listing 4: Sample task — diffusers.callbacks.SDXLControlnetCFGCutoffCallback (dl ,hard difficulty). Test harness fields abbreviated. 
+
+api_name: "diffusers.callbacks.SDXLControlnetCFGCutoffCallback" difficulty: "hard" description: "Schedule classifier-free-guidance to be disabled at exactly 60% of total inference steps in an SDXL ControlNet pipeline, and verify after a dry-run on a dummy callback_kwargs that the guidance scale is set to 1.0 and the embedding tensors have been trimmed to their unconditional half. Do not modify the pipeline callbacks list directly." context_code: | from diffusers.callbacks import SDXLControlnetCFGCutoffCallback num_inference_steps = 50 callback_kwargs = {"prompt_embeds": torch.randn(2, 77, 2048), "add_text_embeds": torch.randn(2, 1280), "add_time_ids": torch.randn(2, 6), "image": torch.randn(2, 3, 64, 64)} pipeline = _DummyPipeline(num_inference_steps=num_inference_steps, guidance_scale=7.5) # <MASK> callback(pipeline, step_index=30, timestep=400, callback_kwargs=callback_kwargs) masked_span: "callback = SDXLControlnetCFGCutoffCallback(cutoff_step_ratio=0.6)" test_harness.execution_test: | assert _target_api_call_count > 0 assert pipeline.guidance_scale == 1.0 assert callback_kwargs["prompt_embeds"].shape[0] == 1 
+
+20 C Detailed Experimental Setup 
+
+This appendix specifies the hyperparameters used for each paradigm in Sections 4.2 and 4.4 (§C.2), the compute budget consumed by the headline experiments (§C.4), and the seeds, software versions, and deterministic-execution settings under which the results were produced (§C.5). 
+
+C.1 Knowledge Conditions Decomposition 
+
+The table below shows the detailed role and decomposition of the nine knowledge conditions used in the external-knowledge injection experiments of Section 4.1. 
+
+Cell Sname Sparam E Mprose Mcode Role 
+
+baseline no knowledge 
+
+E only ✓ worked examples standalone 
+
+Mprose only ✓ mechanism prose standalone 
+
+Mcode only ✓ implementation source standalone 
+
+S ✓ ✓ surface signature 
+
+S+Mprose ✓ ✓ ✓ signature + mechanism 
+
+S+E ✓ ✓ ✓ signature + examples 
+
+S+Mcode ✓ ✓ ✓ signature + source FULL ✓ ✓ ✓ ✓ ✓ all components 
+
+Table 5: The nine knowledge cells reported in the main text. Three remaining intermediate Mcode 
+
+stacks are in Appendix E.1. 
+
+C.2 Hyperparameters per Paradigm 
+
+Table 6 reports the training hyperparameters of the five parametric paradigms; Table 7 reports inference settings shared across all paradigms (and across the external-injection sweep). Values not stated in either table use the upstream library default. Table 6 gives the shared shape of each paradigm at a glance; method-specific knobs and rationales for the non-default values follow as a list of short paragraphs.                            
+
+> Paradigm Update target Step rule
+> SFT LoRA, all attn +MLP ∗AdamW, lr 2×10 −5,3ep RAFT LoRA, same as SFT same as SFT AlphaEdit LoRA on down_proj , layers {5−9}AdamW + nullspace, lr 1×10 −4,3ep MEMIT ∆Won down_proj , layers {5−9}closed-form [Meng et al., 2023], one pass GRACE codebook at L 24 up_proj inner SGD, ≤100 iters/edit
+
+Table 6: Training-time configuration of the five paradigms. ∗LoRA target modules { q,k,v,o_-proj , gate,up,down_proj }; layer indexing assumes Qwen2.5-Coder-7B-Instruct’s 28 decoder blocks. Method-specific knobs itemised below. 
+
+SFT. LoRA rank r=64 , α=128 , dropout 0.05 ; per-device batch 4 with 4-step gradient accumulation (effective batch 16 ); BF16; gradient checkpointing on; max_seq_len 4,096 at training, raised to 
+
+16 ,384 at inference to accommodate full bundles. 
+
+RAFT. Inherits every SFT hyperparameter unchanged. The only methodological difference is the training-time prompt template: the gold bundle for the target API is interleaved with 4 retrieved distractor bundles drawn from the same training pool, matching the inference-time prompt shape used by the S+Mprose +RAG cell of Section 4.2. 
+
+MEMIT. Editing layers {5, 6, 7, 8, 9} (early-MLP band identified by the upstream MEMIT analysis as the locus of factual recall on decoder-only LMs); subject-token rule subject_last ; clamp norm factor 0.75 ; KL anchor weight λKL =0 .0625 ; v-side gradient 25 steps at lr=0.5 on layer 27 ; second-moment regulariser Σ estimated on Wikitext-103 ( N =20 ,000 samples, fp32), reused across all 21 editing runs on this backbone with Σ-update weight 15 ,000 . The covariance precompute is one-off and shared with AlphaEdit (§C.4). 
+
+GRACE. Single-layer codebook adapter on model.layers.24.mlp.up_proj (layer 24 of 28 ,
+
+≈ 85% depth, transposed from the GRACE paper’s GPT-2 deep-MLP convention); inner-loop edit learning rate 1.0, capped at 100 SGD iterations per edit with early stop at training loss 0.01 ; ϵ=1 .0
+
+for the codebook key matching radius; replacement mode = prompt ; eps-expansion mode = coverage 
+
+(grow the matching ball when a new edit collides with an existing key); cold-init for codebook values. 
+
+AlphaEdit. Same editing layers and target module as MEMIT for nullspace-comparability. LoRA 
+
+r=64 , α=32 , dropout 0.1; AdamW lr 1×10 −4; per-device batch 1 with 16 -step grad-accum (effective batch 16 ); 3 epochs; max_seq_len 2,048 . After every optimiser step, each trainable Aℓ matrix is replaced with AℓPℓ, where Pℓ is the orthogonal projector onto the small-singular-value subspace (σ2 
+
+> i
+
+< τ , τ =2 ×10 −2) of the layer’s input covariance Σℓ. The covariance is reused from the MEMIT precompute.                                 
+
+> Setting Value
+> Backend (default) vLLM 0.19 .0, BF16, single-GPU per process Backend (GRACE only) HuggingFace transformers , single-GPU
+> max_model_len 16 ,384
+> max_new_tokens 2,048
+> repetition_penalty 1.1
+> Pass@1 sampling T=0 .0,n=1 (greedy) Pass@5 sampling T=0 .8,n=20 , unbiased estimator RAG retriever BAAI/bge-small-en-v1.5 (FAISS, IP) RAG chunk / overlap 512 /64 tokens, top-k=5
+> Sandbox (per-sample) 30 s wall-clock, 16 GB RAM, no network Strong-LLM judge / extractor gpt-5-mini (reasoning =low), T=0 .0, max_tokens 4,096
+
+Table 7: Inference and judging settings shared across all paradigms. The pass@5 estimator follows Chen et al. [2021]. vLLM cannot install the runtime layer hooks GRACE requires for codebook lookup at inference; GRACE therefore falls back to the HuggingFace backend (about 10 × slower per token, but the 399 -task test split still completes within an hour on a single modern GPU). 
+
+C.3 Training-Data Construction for the Parametric Paradigms 
+
+The five parametric paradigms (SFT, RAFT, MEMIT, GRACE, AlphaEdit) all train on the same pool of train-split tasks under a shared format. We arrived at that format only after a first attempt failed; the story below is short but load-bearing for reading the negative internalisation result of Appendix E.5. 
+
+First attempt: per-component QA-style data. Our initial design treated each knowledge com-ponent as a teaching target in its own right: for every train-split API we synthesised 4–8 short QA pairs of the form “What does X do? – Mprose (X)”, “Show a usage example for X. – Ei(X)”, “What is the parameter list of X? – Sparam (X)”, and fine-tuned a LoRA adapter to fit them. Pass@1 on the harness test split was barely above baseline ( ≈ 2 pp lift on Qwen2.5-Coder-7B ), well below the with-bundle RAG numbers, and the failure-class breakdown was unchanged from the no-knowledge baseline. Inspecting the predictions made the diagnosis obvious: at inference the model received a code-completion-style task prompt ( “Implement the function ...” ) but the adapter had been trained to emit prose answers to natural-language prompts, so the adapter steered every completion toward textbook-style explanations even when the task explicitly asked for runnable code. The trained representations carried API knowledge in a form the harness could not read out. 
+
+Second attempt: harness-aligned data, 80 /20 task-level split. The fix is the format every paradigm now trains on: the input is the bare task prompt produced by the same build_pooled_-user_prompt helper used at evaluation time (no bundle, no QA framing), and the target is the task’s full reference_solution . The training distribution is therefore byte-matched to the inference distribution; everything trained on this format is directly comparable to RAG-at-inference numbers, and any difference between paradigms is attributable to the algorithm rather than to the format. A 22 frozen 80 /20 task-level split of the 1,921 -task pool yields 1,525 training tasks and 399 test tasks (cf. Appendix B.1). The split is task-level, not API-level, so two tasks targeting the same API can land on opposite sides of the split; the bundle-stripped held-out evaluation of Appendix E.5 uses a separate 
+
+123 -API set whose APIs appear in neither the train nor the test pool, and is the only setting where API-level held-outness is enforced. 
+
+Editor-specific subject wrapping. MEMIT additionally needs a subject token to anchor the rewrite, so its data builder wraps the bare prompt in a thin Implement {api_name} as follows:\n 
+
+template ( {} is upstream MEMIT’s literal subject placeholder). The same wrapper is applied at MEMIT inference time so the train and eval distributions remain byte-matched. GRACE and AlphaEdit train and evaluate on the bare prompt without a wrapper. RAFT inherits the SFT format unchanged but interleaves 4 retrieved distractor bundles with the gold bundle in the training prompt, matching the inference-time prompt shape of the S+Mprose +RAG cell of Section 4.2. 
+
+Token-budget normalisation across paradigms. LoRA fine-tuning, RAFT, and AlphaEdit are all token-budget controlled to within ∼ 5% of one another by src/experiments/sft/token_-controller.py (default budget 50 ,000 training tokens after tokenisation), so a paradigm that emits longer reference solutions does not get more gradient signal than one that emits shorter completions. MEMIT and GRACE are edit-count controlled instead (one edit per train task, capped at 100 inner SGD iterations per edit for GRACE), since neither paradigm runs in the same gradient-descent regime as the LoRA-based methods. 
+
+C.4 Compute Budget 
+
+All experiments were orchestrated through SLURM on a heterogeneous cluster. GPU jobs (Stage-4 C2 batched inference, RQ1 sweeps, parametric training, and parametric inference) ran on whichever of L40 S, A100, H100, or H200 the scheduler allocated; CPU jobs (Stage-1/2 introspection, Stage-4 C1 reference execution, sandbox-grounded evaluation, failure-class LLM-as-judge re-labelling) requested 16 cores per job and were fanned out widely (often 20 + jobs in flight at once) so per-job wall-clock is uninformative about end-to-end cost. Aggregated GPU hours and paid-API expenditure across the entire project (including exploratory runs and pilots that did not make the final paper) are not separately metered, so we report the configuration but do not quote a single GPU-hour figure. 
+
+C.5 Reproducibility 
+
+Listing 5 reports the software stack used for the experiments in Sections 4.2–4.4. Every random source — LoRA initialisation, FAISS index construction, dl -domain task subsampling for RQ1, the 
+
+80 /20 task-level split for the parametric study, and the C2 sampling for Stage 4 — draws from a single project-level seed ( 42 ) propagated via torch.manual_seed , numpy.random.default_rng ,and the transformers set_seed hook at trainer initialisation; vLLM’s batched decoder is run at 
+
+T =0 for pass@1 so per-token sampling does not consume from the seeded RNG. 
+
+Determinism caveats. Three deviations from strict bit-determinism remain. (i) vLLM reorders requests within a batch by sequence length for throughput, which means that identical-content prompts in different batch positions can produce <eos> -aligned but byte-different tokens under FP16/BF16 attention; we run pass@1 at T =0 to remove sampling variance, but batched-attention numerics still vary by < 1% pass@1 across reseeds. (ii) GRACE’s per-edit inner loop is data-order-dependent; re-running with a shuffled training order changes the codebook contents (though pass@1 is unchanged within ±1.5 pp on the 399 -task test split). (iii) Strong-LLM calls ( gpt-5-mini ) are non-deterministic across API versions; the pipeline maintains a SQLite cache ( data/cache/llm_-cache.sqlite , key = prompt hash) at run time to avoid re-billing identical prompts during the project, but this cache is not redistributed (it contains paid-API outputs governed by the OpenAI Terms of Service). Reproductions therefore re-issue paid calls for Mprose extraction, task generation, and failure-class judging, and may see small drift on these fields; downstream pass@1 effects are bounded by the human-eval audit (Appendix D.3). 
+
+Hardware and OS. GPU jobs ran on whichever of NVIDIA L40 S (48 GB), A100 ( 80 GB), H100 (80 GB), or H200 ( 141 GB) the SLURM scheduler allocated; all backbones used here fit comfortably in BF16 on any single node of these. CUDA 12 .1 runtime, Linux kernel 6.12 . Per-library Stage-1/2 23 envs live on a shared lustre filesystem under fcntl locks (§B.3) so concurrent jobs do not race on environment installation. 
+
+Released artifacts. The released artifact comprises (i) the pipeline source code ( src/ , scripts/ ,
+
+configs/ ) and the software lock files needed to reproduce the runtime environment; (ii) two frozen task pools with their group_manifest.json (per-library SHA-256 checksums of the post-Stage-4 task pool) — the 5-domain 1,386 -task RQ1 pool used in Section 4.2 and the 1,921 -task pool used for the parametric study (Section 4.4); and (iii) the knowledge bundles ( S, E, Mprose , Mcode per API) embedded in those pools. We do not redistribute the trained LoRA adapters, edited checkpoints, GRACE codebooks, the SQLite LLM cache, or full per-task evaluation logs; pass@1 numbers in Sections 4.2–4.4 are reproducible by re-running the pipeline against the released task pools, with the small reseeding-level variance documented above. Listing 5: Software stack used for all reported experiments. Full environment.yml and lock files are included with the artifact; this listing covers the load-bearing versions.              
+
+> Python 3.11 PyTorch 2.10.0 (CUDA 12.1) transformers 4.57.6 tokenizers 0.22.2 peft 0.18.1 trl 1.1.0 accelerate 1.13.0 datasets 4.8.4 vllm 0.19.0 sentence-transformers 5.4.0 faiss-cpu 1.13.2 OpenAI SDK gpt-5-mini @ "2025-Q1" snapshot
+
+## D Human Evaluation 
+
+The pipeline depends on three artefacts whose quality is hard to verify mechanically: (i) the LLM-extracted prose mechanism component Mprose , (ii) the auto-generated tasks and their assertion harnesses, and (iii) the strong-LLM-as-judge labels assigned to pass@1 failures by the failure taxonomy (Section 3.3). This appendix reports a human audit of all three. Sessions were collected through a lightweight web tool that streamed pre-rendered cards (API + bundle, task + harness, or failure + traceback) to reviewers and recorded ordinal Likert responses or categorical relabels. 
+
+D.1 Mprose Quality Sample. A stratified sample of 75 bundles was drawn from the post-Stage-4 task pool ( 15 bundles per domain, sampled uniformly across the libraries within each domain). 
+
+Reviewers and rubric. Three internal reviewers (denoted R A, R B, R C; all co-authors with research experience using at least three of the audited libraries) independently scored every bundle on three 
+
+5-point Likert dimensions: • accuracy — does the prose state correct facts about the API’s mechanism; • specificity — does it talk about this API rather than the surrounding library or a generic algorithm family; • groundedness — are claims tied to identifiable artefacts (the docstring, the cited paper, the source body) rather than free-form generation. 
+
+Results. Table 8 summarises the ratings. Means sit between 4.1 and 4.5 on every dimension and in every domain; the lowest-scoring domain is dl (mean 4.10 on accuracy), consistent with our intuition that recent transformer / diffusion APIs carry the most paper-derived mechanism content and are correspondingly the easiest place for the extractor to drift toward generic prose. Within-
+
+±1 pairwise agreement across reviewers is 80 –91 %; the chance-corrected Krippendorff α is low (Table 8, last column) because the rating distribution is concentrated on {4, 5}, which inflates expected disagreement. 24 Dimension Mean SD Per-domain range Within ±1 α               
+
+> accuracy 4.33 0.65 4.11 –4.49 90 .7% −0.07
+> specificity 4.46 0.73 4.20 –4.58 90 .7% 0.22
+> groundedness 4.28 0.81 4.00 –4.44 80 .0% 0.01
+
+Table 8: Three-reviewer audit of Mprose on a stratified sample of 75 bundles ( 15 per domain). Mean and SD are pooled across 3 reviewers ×75 items. Per-domain range reports the spread of per-domain means. Within ±1 averages the three pairwise agreement rates. The low α reflects the small variance of the rating distribution rather than poor agreement: when nearly every rating is 4 or 5, expected-disagreement-by-chance is large. 
+
+Takeaway. On average Mprose is rated as accurate and specific by all three reviewers. The domain ordering of the mean ratings is consistent with the experimental result of Section 4.3: the domains where the prose is rated lowest ( dl , ai4science ) are the same domains where S+Mprose ’s improve-ment over S is smallest, and mechanism-grounding components carry residual import-noise risk (Section 4.3, ai4science ). 
+
+D.2 Task Quality Sample. A separate stratified sample of 50 tasks (10 per domain) drawn from the post-Stage-4 task pool. 
+
+Reviewers and rubric. The same three reviewers scored each task on three 5-point Likert dimen-sions: • description clarity — can a competent Python developer unambiguously infer what the function-under-test must do; • ecological validity — does the scenario / fixture look like a plausible piece of real software-engineering work, or is it a 1–2-element toy fixture stitched around the API; • harness alignment — if the candidate satisfies the description and uses the target API correctly, does the assertion harness in fact pass. 
+
+Results. Means are 4.66 –4.75 on every dimension (Table 9); within-±1 pairwise agreement reaches 
+
+97 % on ecological validity . As with Mprose , the chance-corrected α is depressed by the ceiling-heavy distribution. The lowest-scoring dimension is harness alignment (4.66 , within-±1 83 %): a small minority of harnesses ( ∼ 10% ) was flagged as either over-strict (asserting a specific implementation choice the description didn’t constrain) or under-strict (a no-op solution would pass), most often when the auto spy-check was the only enforced assertion. Stage-4’s empty-harness guard catches the under-strict failure mode but not the over-strict one; this residual rate is the load-bearing source of false negatives in pass@1 .                 
+
+> Dimension Mean SD Within ±1α
+> description clarity 4.75 0.69 89 .3% −0.12
+> ecological validity 4.56 0.60 97 .3% 0.19
+> harness alignment 4.66 0.78 83 .3% −0.14
+
+Table 9: Three-reviewer audit of 50 tasks ( 10 per domain), pooled across 3 × 50 ratings. 
+
+D.3 Failure Taxonomy Human-LLM Alignment Test Sample. A new stratified sample of failed pass@1 predictions was drawn for an audit of the 6-class taxonomy {WrongAPISelection , WrongSyntax , WrongImport ,
+
+WrongParam , WrongShapeDtype , WrongLogic } used throughout the main text (rule in 
+
+src/evaluation/failure_classifier.py ; see also Section 3.3). The first three classes form the API-level family — a 4-class rollup {API-level, WrongParam , WrongShapeDtype ,
+
+WrongLogic } that we report alongside the 6-class agreement to separate within-family disagreement from coarse-grained errors. Two reviewers (R B, R C) re-labelled samples drawn across all five 25 domains and across the eleven knowledge cells of Sections 4.2. R B contributed 120 labels, R C
+
+contributed 160 , with 61 items shared between the two for the inter-rater test. Each card showed the task description, candidate code, truncated traceback, and the rubric; labels were collected independently and without sight of the LLM judge’s output. 
+
+Inter-human agreement. On the 61 shared items (Table 10), the two reviewers chose the same fine-grained ( 6-class) label on 90 .2% of items (Cohen’s κ = 0 .876 ) and the same 4-class API-level rollup on 96 .7% (κ = 0 .928 ). The four off-diagonal cells (top-left of Table 10) are all neighbour-class confusions within the API-level family ( WrongAPISelection ↔ WrongSyntax ) or one of 
+
+WrongParam /WrongShapeDtype /WrongLogic mistaken for an adjacent class — there are no cross-family disagreements.                                                   
+
+> RB\ R CW.APISel W.Import W.Syntax W.Param W.S/D W.Logic Total
+> WrongAPISelection 15 0000015
+> WrongImport 010 100011
+> WrongSyntax 3015 00018
+> WrongParam 0005005
+> WrongShapeDtype 0001506
+> WrongLogic 0001056
+
+Table 10: Inter-human confusion on the 61 shared failure cards (rows sum to 61 ). The top-left 3×3
+
+block is the API-level family ( WrongAPISelection , WrongImport , WrongSyntax ); the bottom-right 3×3 block is the non-API classes. All four off-diagonal entries are adjacent-class confusions; collapsing the API-level block to a single rollup removes three of them, giving 96 .7% top-level agreement. 
+
+Human-vs-LLM agreement. For each reviewer’s full session we compare against the LLM judge’s recorded label in per_task.jsonl (Table 11). Top-level ( 4-class API-rollup) agreement is 90 –93% 
+
+(κ = 0 .82 –0.89 ); fine-grained ( 6-class) agreement is 84% (κ ≈ 0.80 ) for both reviewers. The fine-grained scores are computed only on items where the human chose one of the six leaf classes (an “unsure within API-level” rollup option was offered as a fallback and used on items the human did not feel confident sub-classifying); we exclude those from the fine-grained denominator so the comparison is between equally specific labels.                     
+
+> Reviewer Granularity nAgreement κ
+> RBtop-level (4-class) 88 93 .2% 0.885
+> RBfine-grained (6-class) 81 84 .0% 0.808
+> RCtop-level (4-class) 143 90 .2% 0.819
+> RCfine-grained (6-class) 92 83 .7% 0.804
+
+Table 11: LLM judge vs. each human reviewer at both granularities. n differs across rows because the fine-grained denominator drops items the human marked with the API-level rollup option. 
+
+Per-class precision and recall. Table 12 reports per-class P/R using R C (the larger session) as the reference label. WrongAPISelection is essentially solved ( P =0 .95 , R=1 .00 ); WrongParam 
+
+and WrongSyntax are perfect-precision but slightly under-recalled, meaning the LLM judge is conservative and routes ambiguous cases to a sibling class. The two classes with both P and R below 
+
+0.9 are WrongImport (P =0 .69 ) and WrongShapeDtype (P =0 .65 ): the import case confuses with 
+
+WrongSyntax when a missing-symbol error and a syntax-shaped error appear in the same traceback, and WrongShapeDtype confuses with WrongLogic on tensor-shape mismatches that are only visible post-execution. 
+
+Reading the numbers. The 6-class taxonomy is reliable enough at the API-level rollup ( κ=0 .93 
+
+human-human, κ=0 .82 –0.89 human-LLM) for the band-movement claims of Sections 4.2–4.3 to be read directly off the LLM judge’s labels. Fine-grained sub-classes are also reliable, with 
+
+WrongAPISelection essentially solved; the two confusable pairs ( WrongImport /WrongSyntax 
+
+and WrongShapeDtype /WrongLogic ) carry enough residual noise that fine-grained deltas of ≲ 5 pp on those classes should be read at the rollup-band granularity instead. 26 Class Precision Recall Support (human) Support (LLM) 
+
+WrongAPISelection 0.95 1.00 18 19 
+
+WrongImport 0.69 0.90 10 13 
+
+WrongSyntax 1.00 0.69 16 11 
+
+WrongParam 1.00 0.73 22 16 
+
+WrongShapeDtype 0.65 0.79 14 17 
+
+WrongLogic 0.75 1.00 12 16 
+
+Table 12: LLM-judge per-class P/R against R C on the 92 items where both labels are at fine granularity. 
+
+## E Additional Results 
+
+This appendix reports drill-downs deferred from the main text: the full 12 -cell knowledge sweep that the main-text 9 cells are a selection of (§E.1); the pass@5 , API-selection accuracy, parameter correctness, and semantic-equivalence numbers that accompany every pass@1 we report (§E.2); a difficulty-stratified view of the headline RQ1 result (§E.3); a head-to-head between oracle bundle prepending and a real BGE / FAISS retriever (§E.4); the bundle-stripped held-out evaluation that underpins the negative no-internalisation finding of Appendix E.5; a data-scaling probe on the SWE leave-one-library-out split (§E.7); and the per-cell numbers and failure-class stacks for the four cross-backbone runs of Section 4.3.2 (§E.8, §E.9). 
+
+E.1 Full Knowledge-Cell Sweep 
+
+Section 4.2’s 9 cells are a selection from the full grid of 12 knowledge cells our codebase implements (Table 5). Figure 6 shows pooled pass@1 for all twelve. The three cells not included in the main text are Sname (k1a_only ; signature name only, no parameter list), S+Mprose +Mcode (k1a_k1b_-k2_mcode ), and S+E+Mcode (k1_full_mcode ). 0 20 40 60 80 100    
+
+> Share of test samples (%) pooled across 5 domains, n= 1,386
+> baseline
+> Sname *
+> E
+> Mprose
+> Mcode
+> S
+> S+Mprose
+> S+E
+> S+Mcode
+> S+Mprose +Mcode *
+> S+E+Mcode *
+> Full
+> 3.1
+> 11.8
+> 18.2
+> 4.5
+> 10.8
+> 21.7
+> 23.5
+> 19.0
+> 17.5
+> 17.7
+> 19.4
+> 20.5
+> Failure composition under each RAG knowledge cell (full 12-cell grid)
+> OK (pass@1)
+> WrongAPISelection
+> WrongImport
+> WrongSyntax
+> WrongParam
+> WrongShapeDtype
+> WrongLogic
+
+Figure 6: Failure-class composition for all 12 RAG knowledge cells, pooled across the 5 domains (n=1 ,386 ); same axis convention as Figure 2 (green = OK / pass@1; right-hand bands are the six failure classes). Pass@1 is annotated inside the OK segment. Cells marked ∗ are the three intermediate stacks not reported in the main text. The Sname cell ( S minus parameter list, 11 .8% ) is bracketed by E alone ( 18 .2% ) and S (21 .7% ) — the parameter list contributes about 10 pp on top of the bare API name. The two Mcode super-stacks ( S+Mprose +Mcode and S+E+Mcode ) sit at 17 .7% 
+
+and 19 .4% , both below S+Mprose (23 .5% ); the WrongImport band visibly inflates wherever Mcode 
+
+is added on top of S, the same import-noise mechanism Section 4.2 attributes to S+Mcode .
+
+Two extra observations. (i) Removing the parameter list from S (S → Sname ) drops pass@1 from 21 .7% to 11 .8% , a 9.9 pp loss — larger than E’s standalone gain over baseline ( +15 .1 pp), 27 confirming that the parameter list, not the bare name, is what makes S load-bearing. (ii) Adding 
+
+Mcode on top of any S-rooted stack consistently lowers pass@1: S+Mprose → S+Mprose +Mcode 
+
+falls 5.8 pp, and S+E → S+E+Mcode rises only 0.4 pp; once the surface is anchored by S and the high-level mechanism by E or Mprose , the source body adds no further usable signal. 
+
+E.2 Pass@5 and Auxiliary Metrics 
+
+Section 4.2 reports pass@1 throughout. The companion metrics named in the experiment setup (pass@5 , API-selection accuracy, parameter correctness, and the semantic-correctness LLM score) are computed in every cell. Table 13 gives the pooled values for the 9 main-text cells on the primary backbone.                                                   
+
+> Cell pass@1 pass@5 API_acc Param_corr Sem.
+> baseline 3.14.810 .16.21.9
+> E18 .231 .245 .541 .312 .8
+> Mprose 4.56.716 .711 .72.7
+> Mcode 10 .814 .359 .544 .67.1
+> S21 .732 .158 .447 .114 .9
+> S+Mprose 23 .534 .262 .050 .116 .0
+> S+E19 .031 .555 .551 .013 .3
+> S+Mcode 17 .526 .262 .147 .011 .8
+> FULL 20 .534 .459 .052 .614 .8
+
+Table 13: All five evaluation metrics (%) for the 9 main-text cells on Qwen2.5-Coder-7B , pooled across the 5 domains ( n=1 ,386 ). Pass@5 samples at T =0 .8, n=20 with the unbiased estimator of Chen et al. [2021]. API_acc is the fraction of samples where the predicted code calls the target API (spy-counter > 0). Param_corr is the AST-extracted keyword-argument match rate against the reference. Sem. is the strong-LLM semantic-equivalence score ( gpt-5-mini judge). Bold = column max. 
+
+Three observations. (i) The pass@5 ordering tracks pass@1 but with compressed margins: 
+
+S+Mprose remains near the top at 34 .2% and F ULL ties it at 34 .4% ; the S+Mprose vs. S+E gap shrinks from +4 .5 pp at pass@1 to +2 .6 pp at pass@5 — under sampling, E’s diversity of call patterns recovers some of the deterministic-decoding loss the import-noise mechanism imposes at pass@1. (ii) API_acc and Param_corr decompose the “got it right” signal: S+Mcode has the highest 
+
+API_acc (62 .1% ) but middling pass@1 ( 17 .5% ) — the model knows which API to call thanks to the source body but writes wrong surrounding code (the WrongImport band of Section 4.2); F ULL has the highest Param_corr (52 .6% ) but does not beat S+Mprose on pass@1, so additional content helps argument selection without turning into end-to-end correctness. (iii) The semantic-equivalence judge is consistent with the executable harness: the per-cell rank correlation between pass@1 and Sem. is 
+
+ρ = 0 .97 , so the LLM judge does not introduce a separate ranking. 
+
+E.3 Difficulty Stratification 
+
+Stage 3 emits each task at one of three difficulty levels ( easy , medium , hard ; cohort definitions in Appendix B.3); 681 /389 /316 test-split tasks fall in each level after Stage 4. Figure 7 reports pooled 
+
+pass@1 per cell per level. The qualitative picture from Section 4.2 survives the breakdown: S+Mprose wins at every level. The two quantitative observations new to this view are (i) baseline pass@1 is essentially flat across difficulty ( 3.8/2.1/2.8% ) — our difficulty levels reflect the harness’s strictness, not whether the base model can guess the API; and (ii) prose’s edge over examples scales with difficulty, consistent with the intuition that examples help most when the API can be used in a stylised way and least when the task fixture diverges from any single example. 
+
+E.4 Real-Retriever RAG vs. Oracle Prepend 
+
+The oracle prepend used throughout Section 4.2 feeds each task the bundle of its own target API, isolating knowledge content from retriever quality. Figure 8 repeats the cell sweep with a realistic 28 baseline 
+
+> E
+> Mprose
+> Mcode
+> S
+> S+Mprose
+> S+E
+> S+Mcode
+> Full
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> Pass@1 (%)
+
+Difficulty-stratified pass@1 (9 main cells, pooled)   
+
+> easy medium hard
+
+Figure 7: Pooled pass@1 broken down by Stage-3 difficulty level for the 9 main-text cells. The 
+
+S+Mprose margin over S grows on harder tasks: +1 .2 pp on easy, +1 .0 pp on medium, but +4 .1 pp on hard. The two mechanism-grounding stacks ( S+E, S+Mcode ) underperform S+Mprose at every difficulty level, with the gap widening as difficulty rises. retriever in place: BAAI/bge-small-en-v1.5 embeddings over a FAISS index of the full Stage-2 bundle pool, top-5 retrieval, 512 /64 token chunks (Appendix C.2), with the top-5 chunks concatenated and prepended in place of the oracle bundle. The sweep was repeated on 4 of the 5 domains ( 1,086 
+
+tasks; dl excluded for compute — it remains the most expensive sweep). Sname              
+
+> E
+> Mprose
+> Mcode
+> S
+> S+Mprose
+> S+E
+> S+Mcode
+> S+Mprose +Mcode
+> S+E+Mcode
+> Full
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> Pass@1 (%)  pooled across 4 domains (dl excluded)
+> 13.1
+> 5.4
+> =7.6
+> 20.3
+> 17.2
+> =3.0
+> 5.4 5.4
+> = + 0.0
+> 12.4
+> 7.2
+> =5.2
+> 23.6
+> 13.1
+> =10.5 25.4
+> 18.8
+> =6.6
+> 21.3 20.6
+> =0.6
+> 19.8
+> 13.6
+> =6.2
+> 20.1
+> 15.8
+> =4.2 21.6
+> 19.0
+> =2.7
+> 22.8
+> 20.3
+> =2.5
+
+Real-retriever RAG vs oracle bundle prepend  
+
+> oracle prepend real RAG (BGE / FAISS, top-5)
+
+Figure 8: Oracle prepend vs. real BGE / FAISS retrieval at top-5 on 4 domains ( n=1 ,086 ). Inline numbers show ∆ = real − oracle in pp. The real retriever costs 0–10 pp on most cells; the cost is largest for cells that depend on S alone ( −10 .5 pp on S, −6.6 pp on S+Mprose ) and smallest for 
+
+S+E-rooted cells ( −0.6 pp on S+E). 
+
+Robustness ranking under real retrieval. The single most important consequence is a re-ordering at the top of the table: under oracle prepend S+Mprose wins by +1 .8 pp over S and +4 .5 pp over 
+
+S+E; under real retrieval S+E pulls ahead ( 20 .6% ) of both S+Mprose (18 .8% ) and Full ( 20 .3% ). The mechanism is consistent with Section 4.2’s import-noise account: E-bearing chunks carry the surface tokens the retriever scores on, so retrieved-E stays well-aligned with the target API even when only 5 chunks of ∼ 500 tokens each are returned, whereas Mprose ’s prose surface drifts further from the target’s lexical signature and the retriever returns prose-shaped chunks belonging to neighbouring APIs more often. Real-RAG deployment therefore favours S+E, even though oracle ablations favour 29 S+Mprose ; we treat this as a deployability finding, not a contradiction of Finding 2 — which is about 
+
+content , not retrieval-aligned surface form. 
+
+E.5 Bundle-Stripped Held-Out Evaluation 
+
+Figure 9 reports a single line for each parametric paradigm: pass@1 on a 123 -task uniform-random subset of the 399 -task test split ( test_sample30 in the released manifest) with the knowledge bundle 
+
+stripped from the prompt, so the only signal the model can use is whatever its parameters absorbed at training time. The subset matches the test distribution; it is not an additional held-out pool of unseen APIs (the parametric study uses a single 80 /20 task-level split with no third disjoint slice). Figure 9 pairs that number with the same paradigm’s pass@1 on the full test split ( n=399 ), where the bundle 
+
+is prepended at evaluation time. SFT RAFT AlphaEdit GRACE MEMIT     
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> Pass@1 (%)
+> 83.0
+> 3.3
+> 82.7
+> 5.7
+> 72.7
+> 5.7
+> 38.3
+> 0.8
+> 29.1
+> 8.9
+> Bundle-stripped held-out test: no parametric paradigm internalises
+> base model, no knowledge (1.5%)
+> with knowledge bundle (test, n= 399)
+> bundle stripped (held-out APIs, n= 123)
+
+Figure 9: With-knowledge vs. bundle-stripped pass@1 for the five parametric paradigms. Dashed line: base model pass@1 with no knowledge ( 1.5% ). All five paradigms collapse to within ∼ 9 pp of the no-knowledge base when bundles are removed: the apparent “learning” on the with-knowledge column is almost entirely bundle-mediated , not internalised. 
+
+Per-paradigm reading. SFT, RAFT, and AlphaEdit retain 3–6 pp over the no-knowledge base after stripping, comparable to the noise floor of the harness. GRACE retains 0.8% — codebook-cached values are keyed on the bundle, so a stripped prompt rarely retrieves a match. MEMIT is the one outlier ( 8.9% , vs. 1.5% base): consistent with the human-evaluation finding that MEMIT is the only editor that surfaces the target API name on bare-prompt inputs (Section 4.4; cf. MEMIT-specific results in Meng et al. [2023] and follow-ups). Even MEMIT’s lift, however, is an order of magnitude smaller than its with-knowledge pass@1 ( 29 .1% ); the practical message of Appendix E.5 survives. 
+
+E.6 Parameter Correctness on the Diffusers-OOD Probe 
+
+Table 14 reports the parameter-correctness column omitted from Table 2 for space. Parameter correctness moves only marginally between the in- and out-of-distribution conditions for every paradigm ( ∆ ∈ [−0.038 , −0.005] ), confirming that the OOD drop is not driven by argument-naming or argument-type errors. Together with the pass@1 / API-selection numbers in Table 2, the picture is consistent: when diffusers is held out, the model still identifies the right API and supplies the right arguments, but WrongImport grows and pass@1 falls. 
+
+E.7 SWE Data-Scaling Probe 
+
+The leave-one-library-out study in Section 4.4.1 trains a single SFT adapter on diffusers/transform-ers/torch and tests on 94 held-out SWE APIs ( fastapi , flask , django , sqlalchemy , pydantic ). To check whether the gap to in-distribution performance is plausibly closable by more data, we ran the same adapter at four train-data fractions ( 12 %, 25 %, 50 %, 100 %) and evaluated on two splits: the held-out SWE set ( n=94 ) and an in-distribution sample of size n=150 drawn from the training pool (train_sample150 ). 30 Method in OOD ∆
+
+SFT (full bundle) 0.972 0.962 −0.010 
+
+RAFT 0.955 0.943 −0.012 
+
+AlphaEdit 0.898 0.879 −0.019 
+
+MEMIT 0.852 0.814 −0.038 
+
+GRACE 0.857 0.852 −0.005 
+
+Table 14: Parameter correctness on the diffusers-OOD probe (full-cell level; per-domain breakdown not available). In columns: trained with diffusers included , evaluated on the diffusers test slice (n = 162 ). OOD : trained with diffusers held out , evaluated on the diffusers test slice ( n = 138 ). 12% 25% 50% 100%     
+
+> Train-data fraction (%)
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Pass@1 (%)
+> 24.5
+> 50.0
+> 69.1 73.4
+> 24.7
+> 58.0
+> 80.0 80.0
+> SWE data-scaling: in-distribution saturates;
+> held-out continues to lift
+> SWE held-out ( n= 94)
+> in-distribution sample ( n= 150)
+> base+RAG (held-out): 12.8%
+> base+RAG (train sample): 15.3%
+
+Figure 10: SFT pass@1 vs. train-data fraction. The in-distribution sample saturates at 50 % of training data ( 80% pass@1) — a plateau is visible. The SWE held-out set has not yet saturated: 
+
+24 .5 → 50 .0 → 69 .1 → 73 .4% as fraction grows, with an 11 pp jump still visible between 50 and 
+
+100 %. Dashed lines mark each split’s base-model + RAG pass@1 ( 12 .8% held-out, 15 .3% train sample). 
+
+Reading the curves. Two observations matter for the internalisation discussion. (i) The in-distribution curve saturates; the held-out curve does not. The 25 pp gap that remains at 100% -fraction (73 .4% held-out vs. 80 .0% in-distribution) is the magnitude attributable to inability to transfer, not to under-fitting. (ii) That gap shrinks with data: at 12 %-fraction the two curves sit almost on top of each other ( 24 .5% held-out vs. 24 .7% in-distribution), with the held-out curve growing steeper than the in-distribution one as more training data is added. Extrapolation is unsafe with 4 points, but the trajectory is at least consistent with the framing in Appendix A: the no-internalisation result of Appendix E.5 is compute-bounded; the held-out gap to in-distribution performance shrinks with data within the budget we tested, even if it does not reach in-distribution parity, and a larger training pool than the ∼ 1,500 -task / 3-epoch budget used here is the natural follow-up. 
+
+E.8 Per-Cell Cross-Model Numbers 
+
+Section 4.3.2 summarises the cross-backbone replication graphically; Table 15 provides the underlying pooled pass@1 (%) for every cell and every backbone, plus each model’s per-cell rank for easy reading of the consistency analysis. 
+
+E.9 Cross-Model Failure Composition 
+
+Figure 11 reproduces the failure-class stack of Figure 2 for each of the four backbones in Sec-tion 4.3.2. The qualitative reading of component contributions in Sections 4.2–4.3 holds across backbones: S collapses WrongAPISelection , Mprose nudges WrongLogic downward, and Mcode 
+
+inflates WrongImport on three of four backbones — the exception is R1-Distill , whose long 31 Cell Qwen2.5-Coder Seed-Coder OpenCoder R1-Distill-Qwen                                                
+
+> 7B 8B 8B 7B
+> Sname 11 .822 .215 .52.1
+> E18 .235 .232 .018 .0
+> Mprose 4.55.34.41.7
+> Mcode 10 .811 .310 .62.9
+> S21 .736 .224 .74.3
+> S+Mprose 23 .539 .629 .07.3
+> S+E19 .037 .240 .517 .3
+> S+Mcode 17 .527 .921 .96.9
+> S+Mprose +Mcode 17 .727 .224 .28.7
+> S+E+Mcode 19 .433 .736 .817 .6
+> FULL 20 .534 .239 .217 .9
+
+Table 15: Pooled pass@1 (%) per cell per backbone. Bold entries are each backbone’s best cell. Values are weighted means across all domains for which a given ⟨model, cell ⟩ ran; the domain mix is identical for all entries within each model column except where exotic-cell sweeps were truncated for compute (the resulting within-model differences are below 1 pp on the cells affected). The same-shape curves of Figure 4 are evident in the rows: E ≫ Mprose on every model, S adds ≥ 10 pp over its closest singleton on every model, and the winner is always one of {S+Mprose , S +E}.thinking trace appears to absorb import noise instead of transcribing it (its S+Mcode panel does not show the WrongImport blow-up visible on the other three). 
+
+Why the top cell shifts. On Qwen2.5-Coder and Seed-Coder , comparing the S+Mprose and 
+
+S+E rows, E does collapse WrongAPISelection further than Mprose does, but the WrongImport 
+
+band simultaneously inflates — the net OK segment shrinks. On OpenCoder and R1-Distill , E
+
+collapses WrongAPISelection by a larger margin while the WrongImport inflation is mild, so the 
+
+S+E OK segment ends up wider than S+Mprose ’s. The top-cell shift is therefore not a different finding about which component is useful; it is a different equilibrium between two universal effects (the same one that sets S+E behind S+Mprose in Section 4.2). 
+
+## F Broader Impacts 
+
+Intended use and likely benefits. NOVEL APIB ENCH targets two communities: researchers study-ing how LMs acquire knowledge of post-cutoff APIs, and practitioners building retrieval-augmented or fine-tuned coding agents. The expected positive effect is a reduction in API hallucination on novel libraries: Section 4.2 gives library authors a concrete content guideline (“a paragraph of mechanism prose closes WrongAPISelection much more cheaply than working examples”) and Appendix E.5 gives the editing / continual-learning literature a public bundle-stripped split against which “internalisation” claims can be checked. 
+
+Risks and mitigations. Score gaming. The harness and retriever are mutable artefacts. We mitigate via Stage-3’s target-API spy (no-op solutions fail), the bundle-stripped split (§E.5; retriever-independent reading), and per-class failure reporting (single-class gains are visible). Adversarial reuse. Stage-3 could in principle be re-targeted to mass-produce assertion-checked tasks for malicious fine-tuning; the harness is not a security boundary and should not be used as one. 
+
+Data, licensing, reproducibility. The benchmark is built from public package source, docstrings, and documentation-linked papers; no private repos, no scraped user data. 17 /19 libraries (Ap-pendix B.1) are permissively licensed (MIT / BSD-3 / Apache-2.0); the two exceptions ( MDAnalysis ,GPL-3.0+; ase , LGPL-2.1+) carry copyleft obligations that propagate to the corresponding bundles (Appendix H). Bundles quote at most one function’s source plus its docstring. The artefact (pipeline code, manifests, and the two released task pools with their knowledge bundles) is released under Apache-2.0; trained adapters / edited checkpoints / GRACE codebooks and the SQLite LLM cache are not redistributed and must be regenerated through the pipeline. 32 0 20 40 60 80 100                      
+
+> No knowledge
+> E
+> Mprose
+> Mcode
+> S
+> S+Mprose
+> S+E
+> S+Mcode
+> Full
+> 3.1
+> 18.2
+> 4.5
+> 10.8
+> 21.7
+> 23.5
+> 19.0
+> 17.5
+> 20.5
+> Qwen2.5-Coder-7B (primary)
+> 020 40 60 80 100
+> E
+> Mprose
+> Mcode
+> S
+> S+Mprose
+> S+E
+> S+Mcode
+> Full
+> 35.2
+> 5.3
+> 11.3
+> 36.2
+> 39.6
+> 37.2
+> 27.9
+> 34.2
+> Seed-Coder-8B-Instruct
+> 020 40 60 80 100
+> Share of test samples (%)
+> No knowledge
+> E
+> Mprose
+> Mcode
+> S
+> S+Mprose
+> S+E
+> S+Mcode
+> Full
+> 3.6
+> 32.1
+> 4.4
+> 10.6
+> 24.7
+> 29.0
+> 40.5
+> 21.9
+> 39.2
+> OpenCoder-8B-Instruct
+> 020 40 60 80 100
+> Share of test samples (%)
+> E
+> Mprose
+> Mcode
+> S
+> S+Mprose
+> S+E
+> S+Mcode
+> Full
+> 18.0
+> 1.3
+> 2.7
+> 4.3
+> 7.3
+> 17.3
+> 6.9
+> 17.9
+> DeepSeek-R1-Distill-Qwen-7B
+> Failure-class composition per knowledge cell, by backbone
+> OK (pass@1) WrongAPISelection WrongImport WrongSyntax WrongParam WrongShapeDtype WrongLogic
+
+Figure 11: Per-backbone failure-class composition across knowledge cells (same axis convention as Figure 2; pass@1 annotated inside the OK segment). Cells without a baseline panel (Seed-Coder, R1-Distill) had their no-knowledge condition omitted from the cross-backbone sweep. The relative ordering of the band widths within each panel is what carries the cross-model claim of Section 4.3.2: even where the top cell shifts from S+Mprose to S+E, the mechanism of each component’s contribution is preserved. 
+
+Compute footprint. The full sweep ran on a heterogeneous SLURM cluster ( L40 S / A100 / H100 / 
+
+H200; Appendix C.4); we do not report a single GPU-hour figure. The downstream cost is much smaller: adding a library is one Stage-1/2 invocation ( ∼ 1 h CPU + a few dollars of paid-API); benchmarking a new model is Stage-4 c2 plus inference, ∼ 12 h on a single H100 for one domain. 
+
+## G Data Card 
+
+This appendix provides a structured summary of the released dataset following the Gebru et al. [2021] datasheet template, abridged to the headings that carry information not already in Appendices B.1– C.5. 
+
+Motivation Purpose. NOVEL APIB ENCH was created to study how large language models acquire knowledge of post-pretraining-cutoff Python APIs, with knowledge content decomposed into surface signature (S), worked examples ( E), prose mechanism ( Mprose ), and implementation source ( Mcode ). It supports controlled ablations over knowledge content and delivery mechanism (RAG, SFT, RAFT, MEMIT, GRACE, AlphaEdit) on the same task pool, and a model-conditional difficulty filter (Stage-4 C2) that re-binds the test pool whenever the target model changes. 
+
+Funding and authorship. Construction was funded entirely under the authors’ institutional research budgets; no external sponsor or commercial entity influenced the choice of libraries, target APIs, or evaluation rubric. 
+
+Composition Instance schema. Each instance is a ⟨task, knowledge bundle ⟩ pair: 33 • task (Task in src/stage3_generation/schemas.py ): task_id , target API api_-name , natural-language description , an executable reference_solution (Python), a 
+
+TestHarness (setup_code , execution_test , shape_type_test , mock_test ), diffi-culty level ∈ { easy, medium, hard }, and the source library .• knowledge bundle (KnowledgeBundle in src/stage2_extraction/schemas.py ): 
+
+k1a (FQN, kind, short name), k1b (parameter list + return_type ), k1c as a list of 
+
+K1cExample(code, mode, reason) where mode ∈ { executed, static, failed }, k2 (prose mechanism with citation slots), and m_code (AST-extracted source body, ≤ 1 helper layer). 
+
+Counts and splits. The released artefact comprises 1,924 Stage-4-C1 ∩C2-validated tasks across 
+
+19 libraries and 5 domains (per-library counts in Appendix B.1). For the RQ1 / RQ2 sweep we draw a 1,386 -task sample ( dl sub-sampled to 300 for compute); for the parametric study we use the full pool with an 80 /20 task-level split ( 1,525 train / 399 test) frozen by the all_pooled_paper 
+
+group manifest. A 123 -task uniform-random subset of the 399 -task test split ( test_sample30 ) is also released as the evaluation slice for the bundle-stripped probe in §E.5; it is a sample of the test distribution, not an additional held-out pool. 
+
+Personal and sensitive content. None. The benchmark contains only Python source code, doc-strings, public documentation text, and links to externally hosted papers. No usernames, authentication tokens, real credentials, personal identifiers, or private-repo content are present. Stage-1’s no-source / foreign-source / thin-docstring / internal-module-path filters discard re-exports that could otherwise leak third-party stdlib content. 
+
+Known errors and biases. 
+
+• LLM-judge boundary. The two confusable pairs in the 6-class taxonomy (WrongImport /WrongSyntax and WrongShapeDtype /WrongLogic ) carry residual fine-grained noise; fine-grained deltas of ≲ 5 pp on those classes should be read at the API-level rollup (Appendix D.3). • Harness over-strictness. ∼10% of harnesses were flagged as either over- or under-strict in the human task audit (Appendix D.2). • Domain imbalance. Coverage is heavier on ai4science and swe than on agent_tool (only 2
+
+libraries). • Language scope. Python only. 
+
+Collection Process Source materials. (i) Two pinned versions of each library (automatically resolved: latest stable + most recent release before the target backbone’s pretraining cutoff). (ii) Public docstrings extracted via inspect . (iii) Documentation pages reachable from each library’s official doc_url (web-search via gpt-5-mini for paper-citation extraction). No human annotators wrote tasks, descriptions, or knowledge bundles; human involvement is limited to the post-hoc audits of Appendix D.3. 
+
+Pipeline. The four-stage pipeline (Discovery → Extraction → Generation → Filtering; algorithms in Appendix B.3) is reproducible from a single run_pipeline.py invocation. LLM calls are cached at run time in data/cache/llm_cache.sqlite (key = prompt hash) to avoid re-billing during the project; this cache is not redistributed (§C.5), so reproductions re-issue paid calls and may see small drift bounded by the human-eval audit. 
+
+Quality gates. Each task must satisfy C1 (the reference_solution passes the harness in a clean 
+
+30 s / 16 GB sandbox), C2 (the target backbone fails the harness on ≥ 2/3 samples at T =0 .8) and C3 (a strong-LLM passes). The auto-spy in setup_code is a hard invariant: solutions that bypass the target API can never satisfy the harness. 
+
+Distribution and Maintenance Format and access. JSONL throughout, with Pydantic-validated schemas at every stage boundary. The artefact ships: pipeline source code; group_manifest.json (libraries, seed, per-library SHA-256); and two task pools with their knowledge bundles — the 5-domain 1,386 -task pool used in 34 Section 4.2 and the 1,924 -task pool used in Section 4.4, with the 80 /20 task-level train/test split for the latter included as a manifest field. We do not redistribute the SQLite LLM cache, the trained LoRA adapters, the edited checkpoints, the GRACE codebooks, or per-task evaluation logs; the pipeline regenerates them from the released task pools (regeneration cost in Appendix C.4). 
+
+Licence. Apache-2.0 for the pipeline code and the curated benchmark. Bundle m_code excerpts inherit their library of origin’s licence: 17 /19 libraries are permissive (MIT / BSD-3 / Apache-2.0); 
+
+MDAnalysis (GPL-3.0+) and ase (LGPL-2.1+) carry copyleft and are flagged per-bundle in the manifest. Full per-library mapping in Appendix H and the artefact’s LICENSES.md .
+
+Versioning and updates. Releases are tagged by ⟨benchmark commit SHA, group manifest SHA-256 ⟩. Adding a new library or extending the version pair produces a new group_id ; existing groups are immutable, so prior runs remain reproducible. The benchmark is intended to be regenerated against new backbones as their pretraining cutoffs advance — the C2 phase re-runs in ∼ 12 GPU-hours per domain. 
+
+Hosting and contact. Code, manifests, and artefacts are released at the URL given in the pa-per’s footer. Issues and update requests are tracked at the project repository; the maintainer is the corresponding author of this paper. 
+
+Recommended uses In scope. Studying knowledge-content effects on novel API acquisition; ablating delivery mecha-nisms (RAG, SFT, model-editing); auditing the internalisation behaviour of parametric paradigms; evaluating new backbones via Stage-4 C2 + the inference sweep. 
+
+Out of scope. Multi-API agentic trajectories (each task targets a single API), security or safety evaluation (the harness is a correctness, not a safety, oracle), and benchmarking on languages other than Python. 
+
+## H Licenses 
+
+This appendix lists the licences of (i) the benchmark and pipeline artefacts we release, (ii) the 19 
+
+third-party Python libraries from which knowledge bundles are derived, (iii) the model weights used in the experiments, and (iv) the third-party tools and corpora used during construction. 
+
+H.1 Released artefact 
+
+The benchmark code ( src/ , scripts/ , configs/ ), the two curated task pools (the 5-domain 1,386 -task RQ1 sample and the 1,924 -task pool for the parametric study), the test harnesses, and the natural-language task descriptions are released under the Apache-2.0 licence. The trained LoRA adapters, edited checkpoints, GRACE codebooks, the SQLite LLM cache, and full per-task evaluation logs are not redistributed; downstream reproductions regenerate them from the released task pools through the pipeline. Knowledge bundles contain (a) text we authored or that the LLM authored from upstream documentation, released under Apache-2.0; (b) verbatim source quotations of single functions or classes, which are subject to their upstream library’s licence (§H.2). Per-library licence files and the precise scope of inherited terms are listed in the artefact’s LICENSES.md .
+
+H.2 Source libraries (knowledge bundles) 
+
+Table 16 lists the licence under which each of the 19 source libraries is distributed, recorded from the installed package metadata at the version pin used for the headline results. 
+
+Copyleft handling. MDAnalysis and ase bundles are flagged in the group_manifest.json via a per-bundle m_code_license field; downstream users redistributing those specific bundles must comply with GPL-3.0+ / LGPL-2.1+ respectively (which in practice means preserving the upstream copyright header and licence notice that we ship alongside each m_code excerpt). The Apache-2.0 status of the rest of the artefact — the task descriptions, the test harnesses, and the pipeline source 35 Domain Library Licence                                       
+
+> agent_tool langgraph MIT agent_tool fastmcp MIT data_science numpy BSD-3-Clause data_science pandas BSD-3-Clause data_science scipy BSD-3-Clause ai4science rdkit BSD-3-Clause ai4science MDAnalysis GPL-3.0-or-later
+> ai4science deepchem MIT ai4science pymatgen MIT ai4science astropy BSD-3-Clause ai4science ase LGPL-2.1-or-later
+> dl diffusers Apache-2.0 dl transformers Apache-2.0 dl torch (PyTorch) BSD-3-Clause swe fastapi MIT swe flask BSD-3-Clause swe django BSD-3-Clause swe sqlalchemy MIT swe pydantic MIT
+
+Table 16: Source-library licences. Seventeen of nineteen libraries are distributed under permissive licences (MIT / BSD-3 / Apache-2.0). MDAnalysis (GPL-3.0+) and ase (LGPL-2.1+) carry copyleft obligations: bundles whose m_code excerpt is taken from these two libraries inherit those terms in the released artefact. — is unaffected, because copyleft does not propagate across the JSONL boundary that separates a bundle’s quoted source from the benchmark’s own data structures. 
+
+H.3 Models                
+
+> Role Model Licence
+> Primary backbone Qwen2.5-Coder-7B-Instruct Apache-2.0 Replication backbone Seed-Coder-8B-Instruct MIT Replication backbone OpenCoder-8B-Instruct Apache-2.0 (Inf-OpenCoder) Replication backbone DeepSeek-R1-Distill-Qwen-7B MIT (DeepSeek licence) Strong-LLM judge gpt-5-mini (API) OpenAI Terms of Service RAG retriever BAAI/bge-small-en-v1.5 MIT
+
+Table 17: Models used in the experiments. The trained LoRA adapters and edited checkpoints are not redistributed; reproductions regenerate them through the pipeline, in which case the produced artefacts inherit their base model’s licence (Apache-2.0 for Qwen2.5-Coder, Seed-Coder, and OpenCoder derivatives; MIT/DeepSeek for R1-Distill-Qwen derivatives). 
+
+API outputs. Outputs from gpt-5-mini (used for Mprose extraction, task generation, and failure-class judging) are governed by the OpenAI Terms of Service in force at the time of generation. We do 
+
+not redistribute the SQLite cache of these outputs; reproductions re-issue paid calls under whatever OpenAI terms are then in force. 
+
+H.4 Construction-time tools and corpora 
+
+• vLLM (0.19 .0): Apache-2.0 — inference engine. • HuggingFace transformers / peft / trl / accelerate : Apache-2.0 — training and inference. • FAISS (1.13 .2): MIT — RAG index. • sentence-transformers : Apache-2.0 — embedding wrapper. 36 • MEMIT (refs/memit/ ): MIT — vendored upstream clone for the parametric study; unmodified, with a thin shim in src/experiments/editing/memit_core.py (see §C.5). • AlphaEdit (refs/AlphaEdit/ ): MIT — as above. • GRACE (refs/GRACE/ ): MIT — as above. • Wikitext-103 : Creative Commons Attribution-ShareAlike 3.0 — used only as the corpus for MEMIT’s covariance precompute (§C.2); no Wikitext content is redistributed in our artefact. 
+
+Compliance summary. The released artefact (pipeline code plus the two task pools with their knowledge bundles) can be used, modified, and redistributed under Apache-2.0, with the carve-out that MDAnalysis - and ase -derived bundles inherit copyleft (flagged per-bundle in the manifest). Trained adapters, edited checkpoints, GRACE codebooks, and the LLM cache are not redistributed; downstream users who regenerate them through our pipeline must respect the corresponding base-model licences and the OpenAI Terms of Service in force at the time of regeneration. 37
