@@ -1,0 +1,1034 @@
+Title: Self-evolving LLM agents with in-distribution Optimization
+
+URL Source: https://arxiv.org/pdf/2606.07367v1
+
+Published Time: Mon, 08 Jun 2026 01:01:27 GMT
+
+Number of Pages: 18
+
+Markdown Content:
+# Self-evolving LLM agents with in-distribution Optimization 
+
+Yudi Zhang 1 Meng Fang 2 1 Zhenfang Chen 3 Mykola Pechenizkiy 1
+
+# Abstract 
+
+Large Language Models (LLMs) have recently emerged as powerful controllers for interactive agents in complex environments, yet training them to perform reliable long-horizon decision making remains a fundamental challenge. A key difficulty lies in credit assignment: agents of-ten receive delayed rewards only at the end of episodes. In this paper, we propose Q-Evolve, a self-evolving framework for LLM agents that uni-fies automatic process-reward labeling and policy learning within a principled in-distribution rein-forcement learning paradigm. In each evolving it-eration, our method learns an in-distribution critic from a hybrid off-policy dataset that combines ex-pert demonstrations with agent-generated trajecto-ries, stabilizing Bellman backups in sparse-reward settings via a weighted Implicit Q-Learning ob-jective. The learned value function is then used to derive step-wise process rewards through ad-vantage estimation, enabling dense and reliable supervision without environment backtracking or human annotation. Leveraging these signals, we perform behavior-proximal policy optimiza-tion that evolves the agent over the data used for process reward labeling, allowing iterative self-improvement without exacerbating distribu-tion shift. We evaluate our method on Alf-World, WebShop, and ScienceWorld, showing Q-Evolve outperforms strong baselines in sam-ple efficiency, robustness, and overall task per-formance. Our results demonstrate that stable agent self-evolution is achievable through the co-evolution of process-level supervision and pol-icy, both grounded within a shared in-distribution learning loop. https://qevolve.github.io/. 
+
+> 1
+
+Eindhoven University of Technology, Netherlands 2University of Liverpool, United Kingdom 3MIT-IBM Watson AI Lab. Corre-spondence to: Meng Fang <Meng.Fang@liverpool.ac.uk >.
+
+Proceedings of the 43 rd International Conference on Machine Learning , Seoul, South Korea. PMLR 306, 2026. Copyright 2026 by the author(s). 
+
+# 1. Introduction 
+
+While Large Language Models (LLMs) (Achiam et al., 2023; Zhao et al.), have demonstrated exceptional reasoning capabilities (Wei et al., 2022; Yao et al., 2023), their role is increasingly shifting from static text generation to driv-ing interactive agents (Wang et al., 2024a). These agents must move beyond simple prediction to master sequential decision-making in dynamic environments. By leveraging the cognitive power of LLMs, researchers have explored their potential in various interactive domains, including nav-igation (Song et al., 2024; Lin et al., 2025; Feng et al., 2025), gaming (Wang et al.; Liu et al.), and robotics (Kim et al.; Wang et al., 2025). However, achieving consistent and closed-loop autonomy remains a significant challenge, as LLMs must effectively bridge the gap between high-level reasoning and reliable execution. A central challenge in training LLM agents for interac-tive, long-horizon tasks is that feedback is often sparse and severely delayed (Lin et al., 2025; Feng et al., 2025). Agents typically receive meaningful supervision only at episode ter-mination, making it difficult to attribute success or failure to individual intermediate decisions (Arjona-Medina et al., 2019; Ren et al., 2022; Zhang et al., 2023a). To address this, recent efforts aim to automatically derive step-wise process rewards to avoid expensive, hard-to-scale manual annota-tion (Lightman et al., 2023; Ma et al., 2023). For example, Wang et al. (2024b;c); Lin et al. (2025) rely on extensive on-line interaction to search and estimate Q-values as process reward labels, while GiGPO (Feng et al., 2025) introduces anchor-state grouping to calculate step-level advantages. A more fundamental limitation shared by existing ap-proaches lies in the reliability of the feedback they con-sume. In particular, process-level supervision is inherently 
+
+distribution-sensitive : process rewards are only reliable on the similar state-action distribution on which they are de-rived. However, as illustrated in Figure 1, during online policy optimization or test-time scaling, the evolving policy inevitably generates unseen actions even when the starting state is sampled from the PRM’s training set. This issue is further exacerbated in dynamic environments. As the agent interacts with the environment, the underlying environmen-tal dynamics propel the agent into out-of-distribution states, might leading to a catastrophic distribution shift that in-1
+
+> arXiv:2606.07367v1 [cs.LG] 5 Jun 2026
+
+Self-evolving LLM agents with in-distribution Optimization Existing PRM pipeline                               
+
+> Collecting Data for training PRM
+> •Manual -Labeled :Cost
+> •Search -based: Discretized states
+> Two ways for Policy Improvement
+> •Explicit: online learning
+> •Implicit: test -time scaling
+> Suffer from unseen state/actions
+> Online RL
+> •Not explicitly address sparse rewards
+> •Only learn from self -play experiences
+> No Distribution Shift Methods With Distribution Shift Methods
+> Ours
+> Given Hybrid Offline Data,
+> •Estimate Process Rewards via
+> Bellman Backup
+> •Improve Policy with PRM labels
+> Self -Evolve:
+> Replace Self -Play Data in Offline Data
+> Expert + Self -Train
+> Performance on AlfWorld
+> 1K
+> 90
+> 80
+> 70
+> 60
+> 10K 100K 1M online …
+> Environment Steps (Log Scale )
+> 100
+> 1-iter,
+> 13K, 87
+> QLASS
+> 600K, 80
+> PPO ,26
+> SFT
+> 3K, 64
+> 2-iter, 20K, 90
+
+Figure 1. Comparison of existing methods. Left: Existing PRM methods rely on costly manual labels or search-based rollouts requiring discrete states, often failing due to distribution shifts between PRM training and policy improvement. Upper Mid: Most online RL does not address episodic sparse rewards. Bottom Mid: Our framework utilizes a hybrid off-policy dataset (expert + agents’ interaction data) to derive rewards via Bellman backups. By co-evolving process reward supervision and policy improvement within a shared in-distribution loop, the agent achieves stable self-evolution. Right: A visualization of performance vs environment steps required for collecting data. 
+
+validates the PRM’s feedback. Additionally, most existing frameworks rely on restrictive assumptions, such as envi-ronment determinism, the availability of state-backtracking, or discretizable state features for grouping and searching. These assumptions, coupled with the requirement for ex-haustive online interactions, significantly hinder the de-ployment of such methods in realistic, high-stakes, or non-deterministic scenarios. Therefore, there is a growing need for methods that both generate and leverage step-wise su-pervision within the same distribution to keep the process reward labeling reliable. A natural way is to use classical Bellman backups in an offline manner, which theoretically addresses long-horizon credit assignment. However, transferring this paradigm to LLM agents remains difficult. First, in the general episodic reward settings, the bootstrapping mechanism is prone to sig-nificant stochastic noise that accumulates without interme-diate signals, preventing stable convergence. This is further compounded by the combinatorial action space of LLMs, where scalar Q-values defined over multi-token sequences fail to facilitate direct policy optimization. Consequently, rather than optimizing the policy directly, existing offline RL works for LLMs often resort to using external critics learned from offline data to re-evaluate or calibrate candi-date actions (Snell et al., 2023; Xiang et al., 2024). While helpful, these approaches treat the critic as an auxiliary filter rather than an intrinsic objective. This reliance on external calibration has two drawbacks: it prevents the LLM from becoming a self-contained agent that can be further evolved, and it leaves unaddressed the distribution shift between the offline training data and the policy’s own distribution at test time. To address these limitations, we propose Q-Evolve, a self-evolving framework for training LLM agents that unifies automatic process-reward acquisition and in-distribution policy optimization within a closed learning loop. Unlike 
+
+Table 1. Comparison with the alternative methods. ✓ = explicitly supported. ✗ = not supported. SE: self-evolve; N-DS: no need for discrete state; Bellman: Bellman backup for credit assignment; PR: assign process rewards. N-EO: no need for extensive online interaction. Self-train: learn from self-collected experiences. Method SE N-DS Bellman PR N-EO Self-Train BC ✗ ✓ ✗ ✗ ✓ ✗
+
+PPO ✗ ✓ ✓ ✗ ✗ ✓
+
+ETO ✗ ✓ ✗ ✗ ✓ ✓
+
+QLASS ✗ ✗ ✓ ✓ ✗ ✓
+
+GiGPO ✗ ✗ ✗ ✓ ✗ ✓
+
+Q-Evolve ✓ ✓ ✓ ✓ ✓ ✓
+
+prior pipelines that rely on static reward models or one-shot offline critics, our framework enables the agent to it-eratively improve itself by deriving step-wise supervision from an evolving Q-based critic and updating the policy via behavior-proximal policy optimization to avoid distribution shift. Crucially, this design allows policy, critic, and data to co-evolve, while each policy update remains grounded within a hybrid offline dataset, thereby mitigating distribu-tion shift and stabilizing long-horizon credit assignment. We compare our method with alternatives in Table 1. To address sparse and delayed feedback, we derive step-wise supervision by learning an in-distribution value function on a hybrid dataset that combines expert demonstrations with agent-generated trajectories. This mixture is crucial for sta-bility: Bellman backups on purely self-generated data can be dominated by stochastic noise, especially when success rates are low, whereas expert data provides sparse-signal grounding that stabilizes the value targets. Specifically, we estimate an in-distribution critic (Kostrikov et al., 2022), utilizing a weighted Implicit Q-Learning objective to ad-dress episodic rewards. Rather than training a standalone PRM, we derive advantage estimation as process rewards via Generalized Advantage Estimation (GAE) (Schulman 2Self-evolving LLM agents with in-distribution Optimization 
+
+et al., 2016) for policy learning. This approach utilizes Bell-man propagation to “fill in” missing intermediate rewards without requiring environment backtracking or external hu-man labeling. With the step-wise process reward signals obtained, the policy is then updated via a behavior-proximal policy optimization (Zhuang et al., 2023), aiming to amplify beneficial actions and suppress harmful ones. To further promote generalization, we introduce a more permissive clipping on the objective’s lower bound, allowing for larger policy updates when suppressing bad responses. In summary, our work makes the following contributions. First, we propose Q-Evolve, a self-evolving framework that jointly performs automatic process reward labeling and in-distribution policy learning, keeping the agent’s single-step policy improvement strictly within fixed hybrid off-policy data while enabling iterative improvement toward optimal long-horizon behavior via critic updates. Second, to han-dle extremely sparse and delayed rewards, we train an in-distribution critic with a weighted Implicit Q-Learning ob-jective over a hybrid dataset, which mixes expert demon-strations with on-train agent trajectories. Third, we perform in-distribution policy learning via behavior-proximal pol-icy optimization, along with down-weighting thinking and clipping lower to amplify positive-advantage tokens and ex-plicitly suppress negative-advantage ones. Finally, we eval-uate Q-Evolve on AlfWorld, WebShop, and ScienceWorld, achieving consistent improvements over strong baselines in sample efficiency and effectiveness. 
+
+# 2. Related Work 
+
+In this section, we review the LLM agents, process reward models, and self-evolving agents. 
+
+LLM agents. Driven by the rapid advancement of LLMs, language-based agents have demonstrated strong perfor-mance across diverse domains, such as code (Roziere et al., 2023), math (Luo et al., 2023; Yuan et al., 2023), game (Wang et al.; Liu et al.; Fang et al., 2024; Zhang et al., 2025), computer use (Hong et al., 2024; Liu et al., 2026; Wang et al., 2025) and robotics (Wang et al., 2025). By using natural language both to reason and to interact with environ-ments, these agents can generalize across tasks and provide greater flexibility than traditional reinforcement learning agents (Yao et al., 2022b; Shinn et al., 2023). Recent work further extends their capabilities through planning (Song et al., 2023; Zhao et al., 2023; Chen et al., 2025), and tool use (Yuan et al., 2025; Lu et al., 2025), expanding the range of settings where they can be applied. Nevertheless, achiev-ing reliable long-horizon decision-making remains difficult, with persistent issues such as sparse rewards, credit assign-ment, and poor sample efficiency (Arjona-Medina et al., 2019; Ren et al., 2022; Zhang et al., 2023a; Feng et al., 2025). 
+
+Process reward models (PRMs) have been studied mainly for multi-step reasoning problems, such as mathematical problem solving (Cobbe et al., 2021), where they provide step-level supervision on intermediate reasoning instead of relying only on final outcome rewards (Lightman et al., 2023; Uesato et al., 2022). Early PRMs were trained with human-annotated process supervision (Uesato et al., 2022), while more recent work explores computing PRMs automat-ically, e.g., by treating them as Q-value estimates (Wang et al., 2024b; Luo et al., 2024). PRMs have been used both to train generators (Shao et al., 2024) and to enable test-time scaling via beam search (Snell et al., 2024), heuristic search (Ma et al., 2023), or tree search (Wu et al., 2024). In contrast, PRMs are much less discussed in LLM agent settings (Lin et al., 2025; Choudhury, 2025). Lin et al. (2025) extract Q-value labels by constructing an exploration tree and Bellman backup as the process reward modeling, while Choudhury (2025) builds AgentPRM and InversePRM within an RLHF framework and highlights key challenges and opportunities for PRMs in LLM agents. However, those methods all overlook the risk of the distribution shift. 
+
+Self-evolving agents. Recently, self-evolving agents have gained significant attention, shifting the focus from train-ing static models to developing agents capable of itera-tive improvement (Gao et al., 2026). Such agents can au-tonomously learn from experience and improve their ca-pabilities in an open-ended manner. Existing work stud-ies several self-improvement mechanisms, including reflec-tive reasoning and augmenting behavior with memories from prior interactions (Ouyang et al., 2025; Qian et al., 2024; Liang et al., 2024; Guan et al., 2024). More naturally, self-evolution could also be achieved through updating the training data with agents’ interaction with tasks (self-train), where agents generate novel experiences without relying on specific human-provided data (Dou et al., 2024; Guo et al., 2025; Qi et al.; Sun et al., 2025). Notably, self-evolving agents are related to, but distinct from, online RL: rather than requiring continual environment interaction during pol-icy learning, self-evolving agents target practical, rapid pol-icy improvement through iterative updates. 
+
+# 3. Preliminary 
+
+In this section, we review implicit q learning and behavior proximal policy optimization. We take the following ex-ample: learning policy from a dataset D, which consists of trajectories τ = {u} ∪ { (ot, a t, r t+1 )}T −1 
+
+> t=0
+
+with task de-scription u, observation ot, action at, reward rt+1 and the historical information ht = ( u, o 1, a 1, · · · , o t−1, a t−1).
+
+Implicit Q-Learning (IQL) (Kostrikov et al., 2022) is to learn a critic without explicitly maximizing over out-of-distribution actions. In principle, there are two separate mod-ules in the critic: a max-Q operator surrogate V (u, h t, o t)
+
+3Self-evolving LLM agents with in-distribution Optimization Evolve Critic: In -distribution Process Reward Labeling                                                         
+
+> Retrospective Labeling on hybrid data
+> 𝑟 ̃!=𝑟 !
+> "#$ +𝑟 !
+> %&'
+> •If format invalid: -0.3
+> •If environment -incompatible: -0.2
+> •If no changes on observation: -0.1
+> Evolve Policy: In -distribution Policy Learning via BPPO
+> Clip Lower: 𝐿 !=𝔼 𝒟 min (𝜂 #𝐴 $,clip (𝜂 #,1−𝜖 low ,1+𝜖 high )𝐴 $)
+> +KL [𝜋 %𝜋 ref , where 𝜖 low >𝜖 high
+> LLM Agent
+> Expert Data
+> 𝑢 ,𝑜 $,𝑎 $,𝑟 $
+> &'(
+> Evolve Critic: Learning an implicit 𝑸 under offline data support
+> Bellman Backup :
+> Add higher weight to the samples that:
+> From success trajectory & near the terminal step
+> Q-function
+> 𝑄 𝑢 ,ℎ$,𝑜 $,𝑎 $
+> V-function
+> 𝑉 𝑢 ,ℎ$,𝑜 $
+> Enter next loop: Interactively evolving the agents
+> Single In -distribution Evolving Loop Warm up via Behavior Cloning
+> Self -Collected
+> Rollout in Env
+> 𝑢 ,𝑜 $,𝑎 $,𝑟 $
+> &'( Estimate process rewards 𝑨 𝒕 via GAE
+
+Figure 2. Framework of our self-evolving agent. We first warm up the policy via behavior cloning. Then, the agent is iteratively optimized through multiple in-distribution evolving loops . In each loop, we construct a hybrid offline buffer by combining expert demonstrations with self-collected trajectories, followed by rule-based retrospective labeling to initialize reward signals. In-distribution Reward Assignment and Policy Improvement: Rewards are propagated via Bellman backups to learn a surrogate of the max-Q operator, from which step-level advantages (GAE) are derived. These advantages are further redistributed to the token level to enable provable policy optimization. Interactive Improvement: The overall framework forms a closed-loop evolution process, where the policy, critic, and dataset co-evolve, while each update remains constrained within the in-distribution data of each evolving iteration. 
+
+that approximates an expectile of the action-value distribu-tion induced by the dataset actions, as well as a Q-function 
+
+Q(u, h t, o t, a t). Specifically, V is optimized by minimizing an asymmetric regression loss 
+
+LV = ED
+
+h
+
+Lm
+
+> 2
+
+  ¯Q(u, h t, o t, a t) − V (u, h t, o t)i
+
+, (1) 
+
+where m ∈ (0 , 1) controls the expectile level, ¯Q denotes a slowly-updated target network and Lm 
+
+> 2
+
+(·) is the asymmetric squared loss defined as Lm 
+
+> 2
+
+(δ) = m − 1(δ < 0) δ2. Given 
+
+V , Q is optimized via: 
+
+LQ = ED
+
+h rt+1 + γV (u, h t+1 , o t+1 ) − Q(u, h t, o t, a t)2i
+
+.
+
+(2) 
+
+IQL does not require an explicit behavior policy and only re-lies on the dataset actions, which help mitigate extrapolation errors in training with offline trajectories. 
+
+# 4. Methodology 
+
+To address long-horizon delayed rewards without incurring the distribution-shift risks of existing PRM pipelines, our goal is to, given a shared off-policy dataset, • automatically transform trajectory-level outcomes into stepwise learning signals, • improve the policy strictly within the same data used for process reward labeling, • iteratively co-evolve process reward supervision and pol-icy through self-evolving loops, progressively approach-ing better long-horizon performance. Crucially, we seek to achieve this through a self-evolving 
+
+learning paradigm, in which the agent iteratively improves itself by (i) generating new experience with its current policy, (ii) re-deriving process-level supervision via an evolving critic, and (iii) updating the policy in a data-constrained manner. This results in a closed-loop evolution process in Q-Evolve, where the policy, critic, and dataset co-evolve, while each policy update remains grounded within the in-distribution hybrid dataset of each iteration. As shown in Figure 2, we instantiate this paradigm via a data-constrained inner loop that combines process reward acquisition and policy optimization, and further enables self-evolution by periodically refreshing the offline data with newly collected experience. 
+
+4.1. Behavior Cloning as Policy Warmup 
+
+Behavior cloning (BC) offers a simple yet effective approach to initializing agents by replicating expert demonstrations. Define an expert trajectory as τ exp =(u, o 1, a 1, r 2, o 2, a 2, r 3 . . . , o t−1, a t−1, r T , o T ), where u is the task description, ot the observation at step t, at the cor-responding expert action including chain-of-thoughts, rt the environmental rewards, ht = ( o1, a 1, . . . , o t−1, a t−1) the historical observations and actions up to step t. The expert dataset Dexpert is then defined as the collection of expert tra-jectories. Then we optimize the policy πθ by minimizing the negative log-likelihood of expert actions conditioned on the history: LBC = −E(u,h t,a t)∼D expert 
+
+ log πθ (at | u, h t, o t),where θ denotes the parameters of the LLM agent policy πθ
+
+which output the action in natural language. This objective 4Self-evolving LLM agents with in-distribution Optimization 
+
+encourages the policy to mimic expert demonstrations by reproducing the correct action sequence given the task de-scription and historical information. We denote the policy for this stage as πBC .
+
+4.2. Data Preparation 
+
+Long-horizon interactive tasks feature sparse, delayed re-wards and frequent execution errors, making it hard to ob-tain reliable step-wise supervision from raw trajectories. To enable scalable process-level training signals without additional environment access, we first construct a hybrid offline dataset and then retrospectively relabel each step with auxiliary rewards from textual feedback. 
+
+Hybrid Data Construction. To automatically obtain in-formative process-reward labels, we deliberately construct a mixed offline dataset by combining expert demonstra-tions with the agent’s own interaction trajectories, as each source resolves a complementary bottleneck in long-horizon learning. Expert data typically contains the key steps and successful subroutines required to solve the task, providing high-quality guidance for both process reward labeling and policy learning. Meanwhile, self-collected experience ex-poses the policy’s actual state-action coverage, including diverse failure modes and locally plausible but wrong ac-tions, so that process supervision is calibrated to where the agent makes mistakes under its true behavior distribution. As a result, we obtain a mix dataset D = Dexpert ∪ D self ,where Dself is the agents’ rollouts in environment, following the self-train paradigm (Dou et al., 2024). In the first policy evolution, Dself is collected by πBC .
+
+Retrospective Reward Labeling. A distinctive advantage of LLM-based agents is their interpretable, transparent de-cision process, where both observations and actions are expressed in natural language, and the environment often provides explicit textual feedback. Inspired by this, we lever-age this property to perform Retrospective Reward Labeling ,i.e., equip each timestep with rule-based auxiliary rewards by parsing the observation feedback to identify invalid ac-tions and meaningless actions. The above procedure does not require access to the environment dynamics, making it practical and broadly applicable. Specifically, given an offline trajectory τ ∼ D, where 
+
+τ = {u} ∪ { (ot, a t, r t+1 )}T −1 
+
+> t=0
+
+, we retrospectively detect execution failures by (i) validating the format of at and (ii) inspecting the subsequent observation ot+1 , which often ex-plicitly reports invalid actions or execution errors to relabel each step with an auxiliary reward raux  
+
+> t
+
+,            
+
+> raux
+> t=
+> 
+> rfmt ,if ot+1 indicates a format error
+> rinv ,if ot+1 reflecting an invalid action
+> rrepeat ,if ot=ot+1
+> 0,otherwise (3)
+
+for each timestep. In this way, we provide sparse but fine-grained reward guidance by penalizing non-executable steps immediately, which helps disentangle action validity from task success, promoting the agent to maintain valid envi-ronment interactions as much as possible. Please refer to Appendix B.3 for more details. 
+
+4.3. Estimate Advantage as Process Reward 
+
+Below we present how to automatically collect process re-wards via advantage estimation, while addressing the chal-lenging critic learning introduced by episodic rewards. 
+
+In-distribution Critic Learning. Recall our goal is to strictly constrain the process reward labeling and policy learning within a fixed dataset. Therefore, a natural choice is to adopt Implicit Q-Learning (IQL), which explicitly avoids learning over out-of-distribution actions. However, even with principal Bellman Backup in IQL, learning a reliable critic remains challenging under sparse and delayed feed-back: Bellman backups can, in principle, propagate terminal supervision backward to earlier steps, but this mechanism often becomes ineffective when episodic rewards are ex-tremely sparse: most transitions receive zero reward, and the learning targets are dominated by noisy bootstrapping. The issue is particularly pronounced for weak agents in early-stage exploration, where trajectories are failure-prone and seldom reach rewarding terminal states, leaving the offline data heavily skewed toward low-signal regions. To address this, our remedy is threefold, targeting data cov-erage, learning stability, and signal prioritization. First, we build a hybrid offline dataset that combines expert demon-strations (to cover successful, high-reward regions) with rollouts from weaker policies (to reflect the agent’s explo-ration distribution), providing both informative successes and hard negatives. Second, we decouple critic learning from policy improvement by first training an in-distribution offline critic on the fixed dataset, which avoids a noisy co-learning feedback loop and yields more stable value es-timates for downstream supervision. Third, we adopt a simple but efficient weighted IQL objective that prioritizes informative samples by upweighting steps from successful trajectories and placing larger weights on later steps that are more correlated with terminal outcomes. 
+
+Weighted IQL objective. During critic training, we use a shaped reward rt+1 = renv  
+
+> t+1
+
++ raux 
+
+> t+1
+
+, where renv  
+
+> t+1
+
+is the episodic reward returned by the environment and raux  
+
+> t+1
+
+is assigned by retrospective labeling. We then learn the in-distribution critic with IQL (Eq. 1 and Eq. 2), but reweight each transition to prioritize informative supervision. Con-cretely, for a trajectory of length T , we assign a step weight         
+
+> wt= ( t/T +d)·0.5 + 0 .5,t= 1 , . . . , T, (4)
+
+where d ∈ { 0, 1} indicates whether the trajectory terminates 5Self-evolving LLM agents with in-distribution Optimization 
+
+with non-zero episodic reward. This design (i) upweights successful trajectories ( d = 1 ) and (ii) places larger weights on later steps that are more correlated with terminal out-comes. We incorporate wt by reweighting the per-transition losses in IQL. For example, the expectile regression be-comes           
+
+> LV=Ewt·Lτ
+> 2( ¯Q(u, h t, o t, a t)−V(u, h t, o t)) ,(5)
+
+and we apply the same weighting to the Q-function regres-sion loss. With these weighted objectives, the critic receives stronger signals from informative steps, leading to more stable and reliable value estimates for downstream process-reward labeling and policy improvement. 
+
+Obtain Process Reward Labels . Given a learned critic, consisting of functions V and Q, we use advantage to assess action quality and treat it as a process-level reward signal that reflects long-term returns. To obtain robust advantage estimation, we compute step-wise advantages with general-ized advantage estimation (GAE) (Schulman et al., 2016), rather than directly taking the difference of Q and V .For a trajectory τ = {(u, o t, a t, r t+1 )}T −1 
+
+> t=0
+
+and V function, we have                
+
+> δt=renv
+> t+1 +γV (u, h t+1 , o t+1 )−V(u, h t, o t),At=δt+λγA t+1 ,AT= 0 ,(6)
+
+where renv  
+
+> t+1
+
+is environmental episodic rewards. We find that excluding raux from advantage estimation yields better performance than either (i) removing raux entirely or (ii) also including it in advantage estimation. This design keeps the process reward aligned with the true task objec-tive and preserves the optimal policy invariant; we refer to Appendix A.2 for a formal analysis. 
+
+4.4. Self-Evolve: Policy Learning with Process Rewards 
+
+In order to learn policy from fixed dataset in the inner-loop, our first attempt is to follow IQL and perform advantage-weighted regression (AWR) for policy learning via Lπ (θ) = 
+
+E(u,h t,o t,a t,A t)∼D 
+
+h
+
+exp( At) log πθ (at | u, h t, o t)
+
+i
+
+. How-ever, we found this formulation prone to overfitting: it mono-tonically increases the likelihood of actions present in the offline dataset, and provides no mechanism to explicitly 
+
+decrease the probability of actions with negative process-reward signals. Therefore, we adopt an alternative behavior proximal pol-icy objective (BPPO) that uses the sign and magnitude of process rewards to both upweight beneficial actions and suppress negatively labeled ones. 
+
+In-distribution Policy Optimization. Similar to learn the critic, our goal is to update the policy over dataset state and actions only . Concretely, we use a clipped, behavior-proximal policy objective:            
+
+> Lπ(θ) = ED
+> h
+> min
+> 
+> ηtAt,clip  ηt,1−ϵlow ,1 + ϵhigh
+> At
+> i
+> +αKL( πϕ|πref ),
+> (7)
+
+where ηt = πϕ(at|u,h t,o t) 
+
+> πold (at|u,h t,o t)
+
+is the importance ratio between the current policy and a lagged behavior policy πold used to generate the offline trajectories, α ∈ [0 , 1] controls KL regularization strength, and ϵlow , ϵ high are hyper-parameters. 
+
+Remark. Eq. 7 follows the PPO-style clipped surrogate, but differs in how the advantage signal is obtained. Instead of training an online critic with extensive online interactions, we directly use the labeled process rewards At introduced above as step-wise advantages for policy updates. Moreover, we use an asymmetric clipping scheme with ϵlow > ϵ high :we permit more aggressive suppression (larger decreases) for negatively labeled actions while keeping probability in-creases more tightly constrained for preventing overfitting. This encourages conservative, in-support updates that sup-press harmful actions without aggressively extrapolating beyond the offline data distribution. We denote the optimized policy via Eq 7 as πevolved .
+
+Interactive Improvement. The procedure above defines an inner loop that learns an improved policy πevolve from a fixed hybrid dataset. While each inner-loop update is strictly grounded within the in-distribution data of the cur-rent policy, the resulting policy can be used to correct the data distribution and unlock further improvements. Con-cretely, we use πevolve to interact with the environment and collect new trajectories, forming Dπevolve , and then refresh the off-policy dataset by merging them with expert demon-strations: D ← D exp ∪ D πevolve . With the updated dataset, we rerun the inner loop to relearn an in-distribution critic and relabel process rewards, yielding a stronger policy for the next iteration. Overall, the pipeline forms a closed-loop evolution process where the policy, critic, and dataset co-evolve, while each policy update remains grounded within the in-distribution hybrid dataset of the current iteration. In our experiments, we run two training loops for SciWorld and AlfWorld, while three loops for WebShop. The complete Q-Evolve procedure is summarized in Algo-rithm 1. 
+
+# 5. Experiments 
+
+Here we empirically evaluate our method and compare it against a range of strong baselines. 
+
+5.1. Setup 
+
+We first describe the experimental setup, including the base model used for agents and the evaluation environments. 6Self-evolving LLM agents with in-distribution Optimization                                                                                   
+
+> Table 2. Performance comparison on WebShop, SciWorld (Seen/Unseen), and ALFWorld (Seen/Unseen). The best result is bolded and the second-best result is underlined. Method WebShop SciWorld ALFWorld Average Seen Unseen Seen Unseen GPT-4 63.2 64.8 64.4 42.9 38.1 54.7 GPT-3.5-Turbo 62.4 16.5 13.0 7.9 10.5 22.1 Reflexion (Shinn et al., 2023) 64.2 60.3 64.4 45.7 55.2 58.0 Base Agent (Llama-2-7B-Chat) 17.9 3.8 3.1 0.0 0.0 5.0 SFT (Chen et al., 2023) 63.1 67.4 53.0 60.0 67.2 62.1 RFT (Zhang et al., 2023b) 63.6 71.6 54.3 62.9 66.4 63.8 PPO (Schulman et al., 2017) 64.2 59.4 51.7 22.1 29.1 45.3 Best-of-N 67.9 70.2 57.6 62.1 69.4 65.4 ETO (Song et al., 2024) 67.4 73.8 65.0 68.6 72.4 69.4 DMPO (Shi et al., 2024) 70.1 72.4 61.7 ---QLASS (Lin et al., 2025) 70.3 75.3 66.4 77.9 82.8 74.5
+> Q-Evolve (Ours) 70.5 76.3 69.7 90.7 89.6 79.4
+
+Algorithm 1 Q-Evolve                                                            
+
+> Input: Expert dataset Dexpert ; environment Env; iterations K
+> Output: Evolved policy πθ
+> Warm up πθvia behavior cloning on Dexpert for k= 1 , . . . , K do
+> // Stage 1: Hybrid Data Construction
+> Dself ←rollout (πθ,Env );D ← D expert ∪ D self Assign
+> raux
+> tto each step via retrospective labeling (Eq. 3)
+> // Stage 2: In-distribution Critic Learning
+> Train V,Qon Dby minimizing LV,LQ(Eqs. 1–2)
+> // Stage 3: Process Reward Derivation
+> Compute Atvia GAE on renv and V(Eq. 6)
+> // Stage 4: In-distribution Policy Optimization
+> Update πθby maximizing Lπ(Eq. 7)
+> return πθ
+
+Agent Base Model and Rollout. We use Llama2-7B-Chat (Touvron et al., 2023) as the base model for building LLM agents following Song et al. (2024); Lin et al. (2025). We list all the prompts used in Appendix B.1. For self-collected data, we sample 3 trajectories per task, while the number of tasks is shown in the Appendix (Table 12). 
+
+Evaluation Tasks We conduct experiments on three en-vironments that naturally exhibit delayed rewards, A LF -WORLD (Shridhar et al.) for embodied house holding tasks, WEB SHOP (Yao et al., 2022a) for web navigation, and S CI -
+
+> ENCE
+
+WORLD (Wang et al., 2022) for embodied science experiments. ALF WORLD is a text-based embodied en-vironment where agents must complete household tasks through long action sequences, making credit assignment particularly challenging. The agent only receives a binary reward at the final step, 1 for success and 0 for failure. WEB SHOP evaluates goal-oriented dialogue and decision making in an online shopping environment, where rewards are only observed after the action, “click [Buy Now]”. If the purchased item satisfies all required attributes, the agent re-ceives a reward of 1; otherwise, the agent receives a reward proportional to the number of attributes it meets. S CIENCE -WORLD is a text-based virtual environment requiring the agents to complete tasks with subgoals, with sparse success signals from 0 to 1 provided at the end of episodes to in-dicate the achievement of the subgoals. For ScienceWorld and ALFWorld, we evaluate both seen and unseen tasks to investigate the generalization of agents. We report the average accumulated rewards as the evaluation metrics. 
+
+Baselines. We compare our method against three cate-gories of baselines: (1) zero-shot LLMs , including GPT-3.5-Turbo and GPT-4 with ReAct prompting (Shinn et al., 2023), which are directly applied without task-specific adaptation; (2) fine-tuned LLMs trained without reward redistribution, such as SFT (Chen et al., 2023), which is supervised fine-tuning on expert trajectories, and RFT (Rejection sampling Fine-Tuning) (Zhang et al., 2023b), a self-improvement baseline trained on merged successful trajectories and expert data; (3) LLMs with existing reward redistribution strategies ,including ETO (Song et al., 2024), which updates policies via constructing trajectory-level preference pairs and DPO, 
+
+DMPO (Shi et al., 2024), which utilizes a multi-turn prefer-ence objective to optimize the agent, and PPO (Schulman et al., 2017), a reinforcement learning baseline optimizing the final reward. In addition, we also evaluate inference-time strategies such as Best-of-N (with N = 6 ), QLASS (Lin et al., 2025), which constructs an exploration tree to esti-mate the Q-value of state-action pairs, enabling planning on a behavior cloning agent, and closed-source agents like GPT-4o with Reflexion (Shinn et al., 2023). 
+
+5.2. Main Result 
+
+Table 2 shows that our method achieves the best overall performance across all benchmarks, obtaining the highest average score among all baselines. Compared with QLASS, 7Self-evolving LLM agents with in-distribution Optimization 
+
+which similarly relies on value-based signals, Q-Evolve achieves substantially higher scores while reducing depen-dence on heavy online sampling (600K for QLASS and 20K for Q-Evolve in AlfWorld). In particular, QLASS estimates 
+
+Q-values through online rollouts and search, whereas Q-Evolve learns an in-distribution critic and derives process re-wards largely from offline relabeling, enabling more sample-efficient and robust improvements under limited additional interaction. Compared with ETO, Q-Evolve achieves better overall performance, which we attribute to a more stable inner-loop self-evolution that grounds policy updates in a hybrid offline dataset via in-distribution critic learning and process-level supervision. Compared with baselines that do not explicitly address the episodic rewards, Q-Evolve consistently performs better across all tasks, highlighting the benefit and significance that Q-Evolve provides denser and more reliable credit assignment. 
+
+5.3. Ablation Study 
+
+In this subsection, we conduct several ablations to investi-gate the components in the proposed Q-Evolve. Without specification, we adopt only one interactive policy learning in the ablation study. 
+
+Using process rewards with vs. without support of the data distribution. We create an ablation version of w/o PI, using process rewards for out-of-distribution implicit policy learning, where we use the critic to perform test-time scaling. Specifically, we rerank the candidate answers produced by 
+
+πBC , according to the score from the critic, Q−V . As shown in Figure 3, empirically, in-distribution policy learning (Full and w/o GAE) outperforms πBC . In contrast, using critic test-time scaling does not necessarily help, and can even underperform πBC , caused by a distribution mismatch. Such a distribution shift comes from two aspects: first, the models might provide unseen action candidates that may lie outside the PRM’s reliable scoring regime; second, the environmen-tal dynamics might push the agent toward unseen states, which are even worse when the policies are implicitly im-proved. By contrast, our policy training partially mitigates this issue by aligning the policy’s learning data distribution with the PRM’s distribution and relying on generalizable es-timation to estimate a more robust advantage. Therefore, it is crucial to use process reward labels within a controllable, in-distribution regime where its scoring remains reliable .
+
+Ablation on key components. Table 3 presents acomponent-wise ablation of our framework on ALFWorld. Overall, removing any single module degrades performance, confirming that the final gains come from their synergy rather than a single trick. First, removing retrospective rela-beling (w/o RT) leads to a clear performance drop, indicat-ing that RT provides important intermediate learning signals and improves generalization by identifying obvious failures                                                  
+
+> Table 3. Ablation study on key components on AlfWorld. RR: Ret-rospective relabeling; W-IQL: Weighted IQL, GAE: generalized advantage estimation and PI: One-step Policy Improvement. w/o PI: using critic in test-time scaling. w/o PI + AWR: using critic with advantage weighted regression for policy improvement. Variant RR W-IQL GAE PI Seen Unseen Q-Evolve (1-iter) ✓✓✓✓87.9 86.6
+> SFT ✗✗✗✗60.0 67.2 w/o RR ✗✓✓✓83.6 82.7 w/o W-IQL ✓✗✓✓83.6 76.1 w/o GAE ✓✓✗✓74.3 74.6 w/o PI ✓✓✓✗58.6 59.0 w/o PI + AWR ✓✓✓✓64.3 67.9
+
+without additional environment interaction. Second, w/o W-IQL , replacing weighted IQL by standard IQL causes a clear regression, suggesting that weighted IQL improves robustness of the critic under episodic rewards. Third, GAE is a key bridge from critic estimation to policy supervision: removing GAE (w/o GAE) leads to a substantial decline, highlighting the importance of obtaining high-quality ad-vantage estimation. Finally, one-step policy improvement (PI) is indispensable for translating step-wise signals into actual policy gains, which we explain with more details in the ablation of in-distribution policy learning vs. out-of-distribution policy learning and ablation on the choice of policy learning. Together, these ablations validate that (i) RR, W-IQL, and GAE yield reliable advantage signals, and (ii) PI is the dominant mechanism that converts those signals into consistent improvements. 
+
+Comparison of process reward choice. We compare mul-tiple alternatives for process rewards: one step advantage 
+
+Q − V , potential-based shaping renv + γV ′ − V , GAE with 
+
+renv , and GAE with renv +raux , given Q and V . As shown in Table 4, GAE with renv outperforms other alternatives, indi-cating that multi-step advantage estimation provides more reliable credit assignment while keeping policy updates aligned with task success. In contrast, the one-step Q − V
+
+signal is much weaker, likely due to bootstrapping noise in long-horizon tasks. Potential-based shaping renv + γV ′ − V ,suggests that advantage could produce better temporal credit assignment, where V ′ denotes the value estimation of next timestep. Finally, including raux inside GAE hurts over-all performance, showing that heuristic auxiliary rewards may bias the policy learning, while still being useful as an auxiliary objective (Table 3). 
+
+Comparison of policy learning choice: AWR vs. BPPO. 
+
+As shown in Table 3 (last row), we construct “w/o PI + AWR” via replacing the BPPO policy optimization with advantage-weighted regression, the same as IQL. AWR op-timizes a weighted behavior cloning objective, where all ac-tions (including negative-advantage ones) are still imitated, 8Self-evolving LLM agents with in-distribution Optimization 
+
+Table 4. Comparison of different process-reward choices. Process rewards Seen Unseen 
+
+Q − V 74.3 74.6 
+
+renv + γV ′ − V 80.0 74.6 GAE with renv (Ours, 1-iter) 87.9 86.6 
+
+GAE with renv + raux 81.4 82.8 50     
+
+> 60
+> 70
+> 80
+> 90
+> 100
+> WebShop SciW-Seen SciW-Unseen AlfW-Seen AlfW-Unseen
+> BC
+> Iter-1
+> Iter-2
+
+Figure 3. Ablation on interactive improvement. 
+
+differing only in their effective learning speed via advantage-dependent weights. In contrast, our objective uses signed advantage to explicitly upweight positive-advantage actions while downweighting negative ones, enabling more direct correction of harmful behaviors. This ablation highlights the importance of explicit negative-action suppression in long-horizon policy improvement. 
+
+Ablation on interactive improvement. To isolate the effect of iterative data collection and refinement, we compare two consecutive rounds of our self-evolving pipeline, shown in Figure 3. The consistent gain from the first loop (Iter-1) to the second loop (Iter-2) indicates that each iteration con-tributes additional useful supervision, and that the pipeline can stably accumulate improvements across multiple rounds rather than relying on a one-off boost. 
+
+Sample Efficiency. Table 5 provides an apples-to-apples comparison against online RL methods on ALFWorld on Qwen2.5-7B-Instruct 1 as the backbone, where all online RL methods are trained for 320K environment steps. Q-Evolve (1-iter) uses only 13K environment steps, while outperforming all online RL baselines by a large margin on both seen and unseen splits. Above shows that, Q-Evolve has better sample efficiency compared with the alternative methods. 
+
+Generalization across model architectures To assess whether Q-Evolve’s gains transfer across model families and scales, we evaluate on two additional settings. Table 6 reports results with Llama-3-8B-Instruct 2, compared with some planning-based methods, MPO (Xiong et al., 2025), KnowAgent (Zhu et al., 2025), WKM (Qiao et al., 2024), 
+
+> 1
+
+https://huggingface.co/Qwen/Qwen2.5-7B-Instruct 
+
+> 2
+
+https://huggingface.co/meta-llama/Meta-Llama-3-8B-Instruct 
+
+Table 5. Sample efficiency comparison on ALFWorld (Qwen2.5-7B-Instruct). All online RL baselines use 320K environment steps. 
+
+Bold : best result. Method Env. Steps Seen Unseen PPO (Schulman et al., 2017) 320K 59.4 67.7 RLOO 320K 56.4 36.6 GRPO (Feng et al., 2025) 320K 39.7 32.2 SFT 0 74.9 62.3 SFT + PPO 320K 72.6 77.6 SFT + RLOO 320K 75.0 51.4 SFT + GRPO 320K 66.7 74.1 
+
+Q-Evolve (1-iter) 13K 88.6 87.3 
+
+Table 6. Results with Llama-3-8B-Instruct. Best result in bold ,second-best underlined. 
+
+Method WebShop SciWorld ALFWorld Seen Unseen Seen Unseen SFT 63.3 65.3 57.0 79.3 80.6 ETO 68.4 81.3 74.1 77.1 76.4 KnowAgent 64.8 81.7 69.6 80.0 74.9 WKM 66.9 82.1 76.5 77.5 78.2 SFT + MPO 65.5 70.2 65.9 80.7 81.3 ETO + MPO 70.2 83.4 80.8 85.0 79.1 
+
+Q-Evolve 71.1 86.4 82.4 89.6 90.3 
+
+ETO+MPO. Q-Evolve consistently outperforms all base-lines across all tasks and both seen/unseen splits, demon-strating that the method is not tied to any particular model architecture or initialization. We also provide an ablation on hyper-parameter ϵlow and 
+
+ϵhigh in Appendix B.4. 
+
+# 6. Conclusion 
+
+In this work, we introduce Q-Evolve, a self-evolving frame-work for training LLM agents on long-horizon interactive tasks under episodic rewards. Our key idea is to derive auto-matic process-level supervision with in-distribution policy improvement in an inner loop. Specifically, we learn a critic from a hybrid offline dataset (expert demonstrations and agent trajectories) using weighted Implicit Q-Learning. The value function enables step-wise process-reward labeling via advantage estimation, yielding dense supervision without backtracking or human annotation. Guided by these signals, we adopt behavior-proximal policy optimization to improve the agent while staying within the in-distribution data of the policy for each iteration, avoiding distribution shift. This forms a closed-loop process where the policy, critic, and dataset co-evolve. Experiments on AlfWorld, WebShop, and ScienceWorld show consistent gains in sample efficiency, robustness, and task success. 9Self-evolving LLM agents with in-distribution Optimization 
+
+# Impact Statement 
+
+This work introduces a self-evolving framework for LLM agents that can significantly influence the deployment of au-tonomous systems in complex, real-world environments. By grounding agent evolution in a hybrid in-distribution dataset rather than unconstrained online exploration, our method provides a safer pathway for developing autonomous agents in sensitive domains like robotics and web-based services where trial-and-error costs are high. The elimination of expensive manual step-wise annotations and the need for environment backtracking makes it feasible for smaller or-ganizations to train sophisticated reasoning agents without massive labeling budgets or specialized simulator features. Furthermore, the use of behavior-proximal optimization and KL-regularization ensures that as agents evolve to solve specific tasks, they retain their foundational language ca-pabilities and do not develop harmful, out-of-distribution behaviors. Ultimately, our approach demonstrates that pro-cess rewards can be derived automatically from episodic outcomes, offering a scalable alternative to human-in-the-loop supervision, which is essential as AI tasks grow in complexity beyond human monitoring capacities. 
+
+# References 
+
+J. Achiam, S. Adler, S. Agarwal, L. Ahmad, I. Akkaya, F. L. Aleman, D. Almeida, J. Altenschmidt, S. Altman, S. Anadkat, et al. Gpt-4 technical report. arXiv preprint arXiv:2303.08774 , 2023. J. A. Arjona-Medina, M. Gillhofer, M. Widrich, T. Un-terthiner, J. Brandstetter, and S. Hochreiter. Rudder: Re-turn decomposition for delayed rewards. Advances in Neural Information Processing Systems , 32, 2019. B. Chen, C. Shu, E. Shareghi, N. Collier, K. Narasimhan, and S. Yao. Fireact: Toward language agent fine-tuning. 
+
+arXiv preprint arXiv:2310.05915 , 2023. Z. Chen, D. Chen, R. Sun, W. Liu, and C. Gan. Scaling autonomous agents via automatic reward modeling and planning. In The Thirteenth International Conference on Learning Representations , 2025. S. Choudhury. Process reward models for llm agents: Practical framework and directions. arXiv preprint arXiv:2502.10325 , 2025. K. Cobbe, V. Kosaraju, M. Bavarian, M. Chen, H. Jun, L. Kaiser, M. Plappert, J. Tworek, J. Hilton, R. Nakano, et al. Training verifiers to solve math word problems. 
+
+arXiv preprint arXiv:2110.14168 , 2021. Z.-Y. Dou, C.-F. Yang, X. Wu, K.-W. Chang, and N. Peng. Re-rest: Reflection-reinforced self-training for language agents. In Proceedings of the 2024 Conference on Em-pirical Methods in Natural Language Processing , pages 15394–15411, 2024. M. Fang, S. Deng, Y. Zhang, Z. Shi, L. Chen, M. Pech-enizkiy, and J. Wang. Large language models are neurosymbolic reasoners. Proceedings of the AAAI Conference on Artificial Intelligence , 38(16): 17985–17993, Mar. 2024. doi: 10.1609/aaai.v38i16. 29754. URL https://ojs.aaai.org/index. php/AAAI/article/view/29754 .L. Feng, Z. Xue, T. Liu, and B. An. Group-in-group policy optimization for LLM agent training. In The Thirty-ninth Annual Conference on Neural Information Processing Systems , 2025. URL https://openreview.net/ forum?id=QXEhBMNrCW .H.-a. Gao, J. Geng, W. Hua, M. Hu, X. Juan, H. Liu, S. Liu, J. Qiu, X. Qi, Y. Wu, et al. A survey of self-evolving agents: What, when, how, and where to evolve on the path to artificial super intelligence. Transactions on Machine Learning Research , 2026. Z. Guan, X. Kong, F. Zhong, and Y. Wang. Richelieu: Self-evolving llm-based agents for ai diplomacy. Advances in Neural Information Processing Systems , 37:123471– 123497, 2024. Y. Guo, J. Lin, H. Wang, Y. Han, S. Hu, Z. Ni, L. Wang, and M. Chen. SE-agent: Self-evolution trajectory opti-mization in multi-step reasoning with LLM-based agents. In The Thirty-ninth Annual Conference on Neural In-formation Processing Systems , 2025. URL https: //openreview.net/forum?id=isATAFP71B .W. Hong, W. Wang, Q. Lv, J. Xu, W. Yu, J. Ji, Y. Wang, Z. Wang, Y. Dong, M. Ding, et al. Cogagent: A visual language model for gui agents. In Proceedings of the IEEE/CVF conference on computer vision and pattern recognition , pages 14281–14290, 2024. M. J. Kim, K. Pertsch, S. Karamcheti, T. Xiao, A. Bal-akrishna, S. Nair, R. Rafailov, E. P. Foster, P. R. San-keti, Q. Vuong, et al. Openvla: An open-source vision-language-action model. In 8th Annual Conference on Robot Learning .I. Kostrikov, A. Nair, and S. Levine. Offline reinforcement learning with implicit q-learning. In International Confer-ence on Learning Representations , 2022. URL https: //openreview.net/forum?id=68n2s9ZJWF8 .X. Liang, Y. He, Y. Xia, X. Song, J. Wang, M. Tao, L. Sun, X. Yuan, J. Su, K. Li, et al. Self-evolving agents with re-flective and memory-augmented abilities. arXiv preprint arXiv:2409.00872 , 2024. 10 Self-evolving LLM agents with in-distribution Optimization 
+
+H. Lightman, V. Kosaraju, Y. Burda, H. Edwards, B. Baker, T. Lee, J. Leike, J. Schulman, I. Sutskever, and K. Cobbe. Let’s verify step by step. In The Twelfth International Conference on Learning Representations , 2023. Z. Lin, Y. Tang, X. Yao, D. Yin, Z. Hu, Y. Sun, and K.-W. Chang. QLASS: Boosting language agent inference via q-guided stepwise search. In Forty-second International Conference on Machine Learning , 2025. URL https: //openreview.net/forum?id=f6lio2CZIM .X. Liu, H. Yu, H. Zhang, Y. Xu, X. Lei, H. Lai, Y. Gu, H. Ding, K. Men, K. Yang, et al. Agentbench: Evaluating llms as agents. In The Twelfth International Conference on Learning Representations .Y. Liu, P. Li, Z. Wei, C. Xie, X. Hu, X. Xu, S. Zhang, X. Han, H. Yang, and F. Wu. Infiguiagent: A multimodal generalist gui agent with native reasoning and reflection. In Proceedings of the 19th Conference of the European Chapter of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 1035–1051, 2026. J. Lu, T. Holleis, Y. Zhang, B. Aumayer, F. Nan, H. Bai, S. Ma, S. Ma, M. Li, G. Yin, Z. Wang, and R. Pang. ToolSandbox: A stateful, conversational, interactive eval-uation benchmark for LLM tool use capabilities. In L. Chiruzzo, A. Ritter, and L. Wang, editors, Find-ings of the Association for Computational Linguistics: NAACL 2025 , pages 1160–1183, Albuquerque, New Mex-ico, Apr. 2025. Association for Computational Linguis-tics. ISBN 979-8-89176-195-7. doi: 10.18653/v1/2025. findings-naacl.65. URL https://aclanthology. org/2025.findings-naacl.65/ .H. Luo, Q. Sun, C. Xu, P. Zhao, J. Lou, C. Tao, X. Geng, Q. Lin, S. Chen, and D. Zhang. Wizardmath: Em-powering mathematical reasoning for large language models via reinforced evol-instruct. arXiv preprint arXiv:2308.09583 , 2023. L. Luo, Y. Liu, R. Liu, S. Phatale, M. Guo, H. Lara, Y. Li, L. Shu, Y. Zhu, L. Meng, et al. Improve mathemati-cal reasoning in language models by automated process supervision. arXiv preprint arXiv:2406.06592 , 2024. Q. Ma, H. Zhou, T. Liu, J. Yuan, P. Liu, Y. You, and H. Yang. Let’s reward step by step: Step-level reward model as the navigators for reasoning. arXiv preprint arXiv:2310.10080 , 2023. S. Ouyang, J. Yan, I.-H. Hsu, Y. Chen, K. Jiang, Z. Wang, R. Han, L. T. Le, S. Daruki, X. Tang, V. Tirumalashetty, G. Lee, M. Rofouei, H. Lin, J. Han, C.-Y. Lee, and T. Pfis-ter. Reasoningbank: Scaling agent self-evolving with rea-soning memory, 2025. URL https://arxiv.org/ abs/2509.25140 .Z. Qi, X. Liu, I. L. Iong, H. Lai, X. Sun, J. Sun, X. Yang, Y. Yang, S. Yao, W. Xu, et al. Webrl: Training llm web agents via self-evolving online curriculum reinforcement learning. In The Thirteenth International Conference on Learning Representations .C. Qian, S. Liang, Y. Qin, Y. Ye, X. Cong, Y. Lin, Y. Wu, Z. Liu, and M. Sun. Investigate-consolidate-exploit: A general strategy for inter-task agent self-evolution. arXiv preprint arXiv:2401.13996 , 2024. S. Qiao, R. Fang, N. Zhang, Y. Zhu, X. Chen, S. Deng, Y. Jiang, P. Xie, F. Huang, and H. Chen. Agent plan-ning with world knowledge model. In The Thirty-eighth Annual Conference on Neural Information Processing Systems , 2024. URL https://openreview.net/ forum?id=j6kJSS9O6I .Z. Ren, R. Guo, Y. Zhou, and J. Peng. Learning long-term re-ward redistribution via randomized return decomposition. In International Conference on Learning Representations ,2022. B. Roziere, J. Gehring, F. Gloeckle, S. Sootla, I. Gat, X. E. Tan, Y. Adi, J. Liu, R. Sauvestre, T. Remez, et al. Code llama: Open foundation models for code. arXiv preprint arXiv:2308.12950 , 2023. J. Schulman, P. Moritz, S. Levine, M. Jordan, and P. Abbeel. High-dimensional continuous control using generalized advantage estimation. 2016. J. Schulman, F. Wolski, P. Dhariwal, A. Radford, and O. Klimov. Proximal policy optimization algorithms, 2017. URL https://arxiv.org/abs/1707. 06347 .Z. Shao, P. Wang, Q. Zhu, R. Xu, J. Song, X. Bi, H. Zhang, M. Zhang, Y. Li, et al. Deepseekmath: Pushing the lim-its of mathematical reasoning in open language models. 
+
+arXiv preprint arXiv:2402.03300 , 2024. W. Shi, M. Yuan, J. Wu, Q. Wang, and F. Feng. Direct multi-turn preference optimization for language agents. In Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing , pages 2312– 2324, 2024. N. Shinn, F. Cassano, A. Gopinath, K. Narasimhan, and S. Yao. Reflexion: Language agents with verbal rein-forcement learning. Advances in Neural Information Processing Systems , 36:8634–8652, 2023. M. Shridhar, X. Yuan, M.-A. Cote, Y. Bisk, A. Trischler, and M. Hausknecht. Alfworld: Aligning text and embodied environments for interactive learning. In International Conference on Learning Representations .11 Self-evolving LLM agents with in-distribution Optimization 
+
+C. Snell, J. Lee, K. Xu, and A. Kumar. Scaling llm test-time compute optimally can be more effective than scal-ing model parameters. arXiv preprint arXiv:2408.03314 ,2024. C. V. Snell, I. Kostrikov, Y. Su, S. Yang, and S. Levine. Of-fline RL for natural language generation with implicit lan-guage q learning. In The Eleventh International Confer-ence on Learning Representations , 2023. URL https: //openreview.net/forum?id=aBH_DydEvoH .C. H. Song, J. Wu, C. Washington, B. M. Sadler, W.-L. Chao, and Y. Su. Llm-planner: Few-shot grounded planning for embodied agents with large language models. In 
+
+Proceedings of the IEEE/CVF international conference on computer vision , pages 2998–3009, 2023. Y. Song, D. Yin, X. Yue, J. Huang, S. Li, and B. Y. Lin. Trial and error: Exploration-based trajectory optimization of LLM agents. In L.-W. Ku, A. Martins, and V. Sriku-mar, editors, Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Vol-ume 1: Long Papers) , pages 7584–7600, Bangkok, Thai-land, Aug. 2024. Association for Computational Linguis-tics. doi: 10.18653/v1/2024.acl-long.409. URL https: //aclanthology.org/2024.acl-long.409/ .Z. Sun, Z. Liu, Y. Zang, Y. Cao, X. Dong, T. Wu, D. Lin, and J. Wang. Seagent: Self-evolving computer use agent with autonomous learning from experience. arXiv preprint arXiv:2508.04700 , 2025. H. Touvron, L. Martin, K. Stone, P. Albert, A. Almahairi, Y. Babaei, N. Bashlykov, S. Batra, P. Bhargava, S. Bhos-ale, D. Bikel, L. Blecher, C. C. Ferrer, M. Chen, G. Cu-curull, D. Esiobu, J. Fernandes, J. Fu, W. Fu, B. Fuller, C. Gao, V. Goswami, N. Goyal, A. Hartshorn, S. Hos-seini, R. Hou, H. Inan, M. Kardas, V. Kerkez, M. Khabsa, I. Kloumann, A. Korenev, P. S. Koura, M.-A. Lachaux, T. Lavril, J. Lee, D. Liskovich, Y. Lu, Y. Mao, X. Martinet, T. Mihaylov, P. Mishra, I. Molybog, Y. Nie, A. Poulton, J. Reizenstein, R. Rungta, K. Saladi, A. Schelten, R. Silva, E. M. Smith, R. Subramanian, X. E. Tan, B. Tang, R. Tay-lor, A. Williams, J. X. Kuan, P. Xu, Z. Yan, I. Zarov, Y. Zhang, A. Fan, M. Kambadur, S. Narang, A. Ro-driguez, R. Stojnic, S. Edunov, and T. Scialom. Llama 2: Open foundation and fine-tuned chat models, 2023. URL 
+
+https://arxiv.org/abs/2307.09288 .J. Uesato, N. Kushman, R. Kumar, F. Song, N. Siegel, L. Wang, A. Creswell, G. Irving, and I. Higgins. Solving math word problems with process-and outcome-based feedback. arXiv preprint arXiv:2211.14275 , 2022. G. Wang, Y. Xie, Y. Jiang, A. Mandlekar, C. Xiao, Y. Zhu, L. Fan, and A. Anandkumar. Voyager: An open-ended embodied agent with large language models. Transac-tions on Machine Learning Research .L. Wang, C. Ma, X. Feng, Z. Zhang, H. Yang, J. Zhang, Z. Chen, J. Tang, X. Chen, Y. Lin, et al. A survey on large language model based autonomous agents. Frontiers of Computer Science , 18(6):186345, 2024a. L. Wang, F. Yang, C. Zhang, J. Lu, J. Qian, S. He, P. Zhao, B. Qiao, H. Huang, S. Qin, Q. Su, J. Ye, Y. Zhang, J.-G. Lou, Q. Lin, S. Rajmohan, D. Zhang, and Q. Zhang. Large action models: From inception to implementation. Transactions on Machine Learn-ing Research , 2025. ISSN 2835-8856. URL https: //openreview.net/forum?id=bYdKtf0Q31 .P. Wang, L. Li, Z. Shao, R. Xu, D. Dai, Y. Li, D. Chen, Y. Wu, and Z. Sui. Math-shepherd: Verify and reinforce llms step-by-step without human annotations. In ACL (1) ,2024b. R. Wang, P. Jansen, M.-A. C ˆot ´e, and P. Ammanabrolu. Sci-enceworld: Is your agent smarter than a 5th grader? In Proceedings of the 2022 Conference on Empirical Methods in Natural Language Processing , pages 11279– 11298, 2022. Z. Wang, Y. Li, Y. Wu, L. Luo, L. Hou, H. Yu, and J. Shang. Multi-step problem solving through a verifier: An empir-ical analysis on model-induced process supervision. In 
+
+EMNLP (Findings) , 2024c. J. Wei, X. Wang, D. Schuurmans, M. Bosma, F. Xia, E. Chi, Q. V. Le, D. Zhou, et al. Chain-of-thought prompting elicits reasoning in large language models. Advances in neural information processing systems , 35:24824–24837, 2022. Y. Wu, Z. Sun, S. Li, S. Welleck, and Y. Yang. Inference scal-ing laws: An empirical analysis of compute-optimal in-ference for problem-solving with language models. arXiv preprint arXiv:2408.00724 , 2024. Y. Xiang, Y. Shen, Y. Zhang, and C.-T. Nguyen. Retro-spex: Language agent meets offline reinforcement learn-ing critic. In Y. Al-Onaizan, M. Bansal, and Y.-N. Chen, editors, Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing , pages 4650– 4666, Miami, Florida, USA, Nov. 2024. Association for Computational Linguistics. doi: 10.18653/v1/2024. emnlp-main.268. URL https://aclanthology. org/2024.emnlp-main.268/ .W. Xiong, Y. Song, Q. Dong, B. Zhao, F. Song, XWang, and S. Li. MPO: Boosting LLM agents with meta plan op-timization. In C. Christodoulopoulos, T. Chakraborty, C. Rose, and V. Peng, editors, Findings of the Asso-ciation for Computational Linguistics: EMNLP 2025 ,12 Self-evolving LLM agents with in-distribution Optimization 
+
+pages 3914–3935, Suzhou, China, Nov. 2025. Asso-ciation for Computational Linguistics. ISBN 979-8-89176-335-7. doi: 10.18653/v1/2025.findings-emnlp. 210. URL https://aclanthology.org/2025. findings-emnlp.210/ .S. Yao, H. Chen, J. Yang, and K. Narasimhan. Webshop: To-wards scalable real-world web interaction with grounded language agents. Advances in Neural Information Pro-cessing Systems , 35:20744–20757, 2022a. S. Yao, J. Zhao, D. Yu, N. Du, I. Shafran, K. R. Narasimhan, and Y. Cao. React: Synergizing reasoning and acting in language models. In The eleventh international confer-ence on learning representations , 2022b. S. Yao, D. Yu, J. Zhao, I. Shafran, T. Griffiths, Y. Cao, and K. Narasimhan. Tree of thoughts: Deliberate problem solving with large language models. Advances in neural information processing systems , 36:11809–11822, 2023. S. Yuan, K. Song, J. Chen, X. Tan, Y. Shen, K. Ren, D. Li, and D. Yang. EASYTOOL: Enhancing LLM-based agents with concise tool instruction. In L. Chiruzzo, A. Ritter, and L. Wang, editors, Proceedings of the 2025 Conference of the Nations of the Americas Chapter of the Association for Computational Linguistics: Human Lan-guage Technologies (Volume 1: Long Papers) , pages 951– 972, Albuquerque, New Mexico, Apr. 2025. Association for Computational Linguistics. ISBN 979-8-89176-189-6. doi: 10.18653/v1/2025.naacl-long.44. URL https:// aclanthology.org/2025.naacl-long.44/ .Z. Yuan, H. Yuan, C. Li, G. Dong, K. Lu, C. Tan, C. Zhou, and J. Zhou. Scaling relationship on learning mathemati-cal reasoning with large language models. arXiv preprint arXiv:2308.01825 , 2023. Y. Zhang, Y. Du, B. Huang, Z. Wang, J. Wang, M. Fang, and M. Pechenizkiy. Interpretable reward redistribution in reinforcement learning: A causal approach. In A. Oh, T. Naumann, A. Globerson, K. Saenko, M. Hardt, and S. Levine, editors, Advances in Neural Information Pro-cessing Systems , volume 36, pages 20208–20229. Curran Associates, Inc., 2023a. Y. Zhang, J. Yang, Y. Yuan, and A. C.-C. Yao. Cumulative reasoning with large language models. arXiv preprint arXiv:2308.04371 , 2023b. Y. Zhang, P. Xiao, L. Wang, C. Zhang, M. Fang, Y. Du, Y. Puzyrev, R. Yao, S. Qin, Q. Lin, et al. Ruag: Learned-rule-augmented generation for large language models. In 
+
+International Conference on Learning Representations ,volume 2025, pages 37697–37720, 2025. W. X. Zhao, K. Zhou, J. Li, T. Tang, X. Wang, Y. Hou, Y. Min, B. Zhang, J. Zhang, Z. Dong, et al. A survey of large language models. Z. Zhao, W. S. Lee, and D. Hsu. Large language models as commonsense knowledge for large-scale task planning. 
+
+Advances in neural information processing systems , 36: 31967–31987, 2023. Y. Zhu, S. Qiao, Y. Ou, S. Deng, S. Lyu, Y. Shen, L. Liang, J. Gu, H. Chen, and N. Zhang. KnowAgent: Knowledge-augmented planning for LLM-based agents. In L. Chiruzzo, A. Ritter, and L. Wang, editors, Find-ings of the Association for Computational Linguistics: NAACL 2025 , pages 3709–3732, Albuquerque, New Mex-ico, Apr. 2025. Association for Computational Linguis-tics. ISBN 979-8-89176-195-7. doi: 10.18653/v1/2025. findings-naacl.205. URL https://aclanthology. org/2025.findings-naacl.205/ .Z. Zhuang, K. LEI, J. Liu, D. Wang, and Y. Guo. Be-havior proximal policy optimization. In The Eleventh International Conference on Learning Representations ,2023. URL https://openreview.net/forum? id=3c13LptpIph .13 Self-evolving LLM agents with in-distribution Optimization 
+
+# Limitations 
+
+Q-Evolve has several limitations worth noting. The retro-spective reward signals depend on structured environment feedback and may require task-specific adaptation; for in-stance, the repetition penalty is meaningful only in environ-ments where repeated observations reliably indicate stag-nation. The self-evolving loop relies on greedy rollouts for data collection, which reduces trajectory diversity over itera-tions and can cause the policy to converge to locally optimal but suboptimal behaviors. Finally, while the in-distribution constraint stabilizes learning within each iteration, distribu-tion shift accumulates across iterations as the policy evolves, and the current framework does not explicitly correct for this cross-iteration drift. 
+
+# A. Analysis of Design Choices 
+
+A.1. Retrospective reward design. 
+
+The auxiliary reward values are set according to three prin-ciples that govern their interaction with the primary task signal: (i) small magnitude relative to the extrinsic reward, so that policy learning prioritizes task completion rather than penalty avoidance; (ii) non-dominance in cumulative return , ensuring that auxiliary signals shape rather than override the episodic reward; and (iii) severity-based order-ing , where failure types are ranked by their impact on task execution—format errors invalidate the action protocol en-tirely and carry the highest penalty, non-executable actions violate environmental constraints and receive a moderate penalty, and repeated or no-op actions indicate ineffective exploration with the lowest penalty. These considerations yield (rfmt , r inv , r repeat ) = ( −0.3, −0.2, −0.1) .Table 7 evaluates the robustness of these choices on ALF-World. Performance is stable across alternative reward scales ( RR-alt ), but deteriorates substantially when the for-mat penalty is inflated to rfmt = −1 (RR-high-fmt ), as it begins to dominate the cumulative return and undermines the task-level signal. For weighted IQL, both the temporal and success terms contribute positively; the temporal term has a larger effect on unseen tasks, where reliable value propagation is especially important for generalization. 
+
+A.2. Analysis of Retrospective Rewards in Advantage Estimation 
+
+We formally justify why raux is excluded from the GAE used for policy optimization. Let V be the value function trained under the full shaped reward renv + raux , and let Aenv  
+
+> t
+
+,
+
+Afull  
+
+> t
+
+denote the GAE advantages computed with renv and 
+
+renv + raux , respectively. 
+
+Proposition A.1. For all 0 ≤ t ≤ T − 1,
+
+Afull  
+
+> t
+
+− Aenv  
+
+> t
+
+= 
+
+> T−t−1
+
+X
+
+> l=0
+
+(γλ )l raux 
+
+> t+1+ l
+
+.
+
+Proof. The GAE recursion with AT = 0 unrolls to At =PT −t−1 
+
+> l=0
+
+(γλ )lδt+l, where δt = rt+1 + γV (st+1 ) − V (st).Since V is the same in both cases, the TD residuals differ only by δfull  
+
+> t
+
+− δenv  
+
+> t
+
+= raux 
+
+> t+1
+
+. Subtracting the two expansions gives the result. Proposition A.1 shows that including raux in GAE directly adds a discounted auxiliary-return term to the policy-side ad-vantage target. To see why this changes the policy objective, consider first the case λ = 1 : GAE reduces to the Monte Carlo advantage, giving Aenv  
+
+> t
+
+= P 
+
+> l≥0
+
+γlrenv  
+
+> t+1+ l
+
+− V (st)
+
+(where the V -terms telescope and V (sT ) = 0 ). Using only 
+
+renv therefore keeps the policy update aligned with the origi-nal environment-return objective Jenv (π) = Eπ [P 
+
+> t
+
+γtrenv  
+
+> t
+
+]
+
+and does not change the optimal policy. For λ < 1, GAE no longer equals the Monte Carlo return exactly, but it still defines an environment-reward λ-return surrogate; the key identity Afull  
+
+> t
+
+− Aenv  
+
+> t
+
+= PT −t−1 
+
+> l=0
+
+(γλ )lraux  
+
+> t+1+ l
+
+remains exact, and excluding raux keeps policy learning aligned with this environment-reward surrogate alone. This is corroborated empirically in Table 4. 
+
+A.3. Weighted IQL design. 
+
+The step-weight wt in Eq. 1 incorporates two complemen-tary terms. The temporal term assigns larger weights to later transitions, which have shorter remaining bootstrap horizons and thus more reliable TD targets under sparse rewards. The success term upweights trajectories with non-zero episodic rewards: under extreme reward sparsity, successful rollouts constitute a small but disproportionately informative subset, and without reweighting, critic learning would be dominated by the abundant low-signal failure trajectories. 
+
+A.4. Memory cost. 
+
+Beyond environment interactions, Q-Evolve also incurs lower training and inference overhead: during policy opti-mization, only the policy and reference models are loaded (two models), matching the memory footprint of GRPO, since the critic’s advantages are pre-computed offline and need not be retained. At inference time, Q-Evolve requires no additional critic evaluation, whereas QLASS performs multi-candidate scoring per step, adding non-trivial infer-ence cost. 14 Self-evolving LLM agents with in-distribution Optimization 
+
+Table 7. Sensitivity analysis on AlfWorld (single iteration). Bold :best result. Variant Seen Unseen w/o RR 83.6 82.7 RR-alt (−0.1, −0.05 , −0.03) 85.7 84.3 RR-high-fmt (−1, −0.2, −0.1) 69.3 64.2 w/o W-IQL 83.6 76.1 W-IQL w/o temporal term 83.6 79.1 W-IQL w/o success term 85.0 83.6 
+
+Q-Evolve 87.9 86.6 
+
+# B. Implementation Details 
+
+B.1. Prompts in Experiments 
+
+We list all the prompts used in our experiments in Figure 4 (AlfWorld), Figure 5 (SciWorld) and Figure 6 (Webshop). 
+
+B.2. Critic Model Structure Critic Model. We parameterize the critic with a single pretrained LLM backbone and route computation through lightweight LoRA adapters to predict both the state value 
+
+V (s) and the state–action value Q(s, a ). This shared-backbone design preserves a common representation while enabling head-specific specialization, avoiding the overhead of maintaining separate LLMs for V and Q.Let fθ denote the pretrained LLM. Given a tokenized input 
+
+x, it produces hidden states H = fθ (x) ∈ RB×T ×d. We attach two LoRA adapters: a value adapter ϕv and a Qadapter ϕq . For each forward pass, we activate the corre-sponding adapter: 
+
+H(v) = fθ,ϕ v (x), H(q) = fθ,ϕ q (x). (8) The input to the critic is a trajectory formatted as a multi-turn chat transcript (user observations and assistant actions) and then tokenized into a single sequence x = ( x1, . . . , x T )
+
+using the same chat template as the policy. We tokenize the 
+
+full trajectory once to obtain the token ids, and for each step 
+
+t we additionally tokenize three prefixes of the transcript: (i) the prefix ending at the current observation (state prefix), (ii) the prefix ending after the agent action is appended (state– action prefix), and (iii) the prefix ending at the next observa-tion (next-state prefix). The lengths of these three tokenized prefixes define their end-token indices p(s) 
+
+> t
+
+, p (sa ) 
+
+> t
+
+, p (s′) 
+
+> t
+
+(i.e., the last token positions of each prefix in the full sequence). Given hidden states H(v) = fθ,ϕ v (x) and H(q) = fθ,ϕ q (x),we represent each segment by the hidden state at its end position (last-token pooling): 
+
+h(s) 
+
+> t
+
+= H(v)
+
+> p(s)
+> t
+
+, h(sa ) 
+
+> t
+
+= H(q)
+
+> p(sa )
+> t
+
+, h(s′) 
+
+> t
+
+= H(v)
+
+> p(s′)
+> t
+
+.
+
+In practice, we can sample multiple steps from the same trajectory (e.g., K steps) and gather the corresponding hid-den states in one forward pass; these pooled vectors are then fed into small MLP heads to produce V (s), V (s′), and Double-Q(s, a ) predictions. 
+
+Prediction heads. On top of the routed hidden states, we use lightweight heads to produce scalar predictions. For each step, we first pool the routed hidden states at the pre-computed end-token positions, obtaining vectors h(s) 
+
+> t
+
+, h(sa ) 
+
+> t
+
+,and h(s′) 
+
+> t
+
+. We then apply one value head gv and two Q heads 
+
+gq1 , g q2 for Double Q-learning: 
+
+V (st) = gv
+
+
+
+h(s)
+
+> t
+
+
+
+,Q1(st, a t) = gq1
+
+
+
+h(sa )
+
+> t
+
+
+
+,Q2(st, a t) = gq2
+
+
+
+h(sa )
+
+> t
+
+
+
+.
+
+(9) 
+
+Delayed Q network. For stable target estimation in Bellman-style backups, we maintain a delayed (target) Q
+
+network that mirrors the on-training Q branch. It shares the same backbone fθ but uses a separate set of EMA param-eters ( ¯ϕq , ¯gq1 , ¯gq2 ). Concretely, the delayed branch routes the input through the target Q adapter 
+
+¯H(q) = fθ, ¯ϕq (x), (10) pools the end-of-action representation ¯h(sa ) 
+
+> t
+
+in the same way as the online branch, and predicts target Double-Q values: 
+
+¯Q1(st, a t) = ¯ gq1
+
+¯h(sa )
+
+> t
+
+
+
+, ¯Q2(st, a t) = ¯ gq2
+
+¯h(sa )
+
+> t
+
+
+
+.
+
+(11) The target parameters are updated by an exponential moving average of the online Q parameters: 
+
+¯ϕq ← (1 − λEMA ) ¯ϕq + λEMA ϕq ,
+
+¯gq1 ← (1 − λEMA ) ¯ gq1 + λEMA gq1 ,
+
+¯gq2 ← (1 − λEMA ) ¯ gq2 + λEMA gq2 .
+
+(12) We apply this soft update every K optimization steps; in our implementation, we set K = 2 and λEMA = 0 .005 for both the Q heads and the Q adapter. 
+
+Optimization with step weights and Double-Q. Each sampled step t is associated with a nonnegative weight wt
+
+(stored in the offline dataset), which upweights more in-formative steps (e.g., later steps or decisive transitions). We train the critic with Double-Q: two separate heads Q1
+
+and Q2 are learned in parallel on the same representation 
+
+h(sa ) 
+
+> t
+
+and the same TD target. Concretely, for a transition 
+
+(st, a t, r t, s t+1 , d t) we compute the bootstrap target using the value branch, 
+
+yt = rt + γ(1 − dt) V (st+1 ),
+
+15 Self-evolving LLM agents with in-distribution Optimization 
+
+Table 8. Rewards for penalty. 
+
+Task rfmt rinv rrepeat 
+
+AlfWorld −0.3 −0.2 −0.1
+
+WebShop −0.3 0 0
+
+SciWorld −0.3 −0.2 −0.1
+
+Table 9. Hyperparameters. Hyperparameter Value 
+
+Batch size dynamic Number of policy training epochs 3Number of critic training epochs 20 Weight decay 0.0 Warmup ratio 0.03 SFT learning rate 1e-5 LR scheduler type Cosine Model max length 4096 Discount factor γ 0.95 Discount factor λ in GAE 0.95 Maximum episode length on WebShop 10 Maximum episode length on SciWorld 24 Maximum episode length on ALFWorld 30 Sampled trajectory number for self-training 3Exploration temperature 2.0 
+
+and regress both heads to this target with a weighted squared loss: 
+
+LQ = X
+
+> t
+
+wt
+
+h
+
+(Q1(st, a t) − yt)2 + ( Q2(st, a t) − yt)2i
+
+.
+
+Using two Q heads helps reduce overestimation and im-proves stability: when fitting the value function, we form a conservative target from the delayed (EMA) Q network by taking the minimum of the two target heads, 
+
+¯Q(st, a t) = min   ¯Q1(st, a t), ¯Q2(st, a t),
+
+and update V via a (weighted) expectile regression toward 
+
+¯Q:
+
+LV = X
+
+> t
+
+wt ℓexp 
+
+  ¯Q(st, a t) − V (st).
+
+The delayed Q network is not optimized by gradient descent; instead, its adapter and heads are updated by EMA from the on-training Q parameters every K steps. 
+
+B.3. Hyperparameters 
+
+We summarize the hyperparameters used across all stages in this section. All hyperparameters leveraged in our method are in the Table 9 and Table 11. The hyperparameters of the reward penalty are shown in Table 8. In general, we impose a stronger penalty on action–think format errors than on invalid-but-parsable ac-tions, since the former violates the interaction protocol 
+
+Algorithm 2 Critic optimization with Double-Q, delayed 
+
+Q (EMA), and step weights 
+
+Input: Offline trajectory tokens; per-step indices p(s) 
+
+> t
+
+, p (sa ) 
+
+> t
+
+, p (s′)
+
+> t
+
+and weights wt; discount γ; expectile m; EMA rate λEMA ;update period K.Initialize online params (ϕv , g v ) and (ϕq , g q1 , g q2 ) Set target params ( ¯ϕq , ¯gq1 , ¯gq2 ) ← (ϕq , g q1 , g q2 )
+
+for n = 1 , 2, . . . do 
+
+Sample a trajectory and select K steps {tk }Kk=1 with weights 
+
+{wtk }
+
+Build a token prefix x truncated to the longest selected next-state prefix Compute H(v) = fθ,ϕ v (x) and H(q) = fθ,ϕ q (x)
+
+Gather h(s) 
+
+> tk
+
+= H(v)
+
+> p(s)
+> tk
+
+, h (sa ) 
+
+> tk
+
+= H(q)
+
+> p(sa )
+> tk
+
+, h (s′) 
+
+> tk
+
+= H(v)
+
+> p(s′)
+> tk
+
+if n is a Q-update step then // update QV ′ 
+
+> tk
+
+← gv
+
+
+
+h(s′)
+
+> tk
+
+
+
+, ytk ← rtk + γ(1 − dtk )V ′
+
+> tk
+
+Q1,t k ← gq1
+
+
+
+h(sa )
+
+> tk
+
+
+
+, Q2,t k ← gq2
+
+
+
+h(sa )
+
+> tk
+
+
+
+LQ ← PKk=1 wtk
+
+h
+
+(Q1,t k − ytk )2 + ( Q2,t k − ytk )2
+
+i
+
+Update (ϕq , g q1 , g q2 ) by descending ∇L Q
+
+else 
+
+// update VVtk ← gv
+
+
+
+h(s)
+
+> tk
+
+
+
+Compute ¯H(q) = fθ, ¯ϕq (x) and gather ¯h(sa ) 
+
+> tk
+
+= ¯H(q)
+
+> p(sa )
+> tk
+
+¯Q1,t k ← ¯gq1
+
+¯h(sa )
+
+> tk
+
+
+
+, ¯Q2,t k ← ¯gq2
+
+¯h(sa )
+
+> tk
+
+
+
+¯Qtk ← min( ¯Q1,t k , ¯Q2,t k )
+
+LV ← PKk=1 wtk ℓexp 
+
+  ¯Qtk − Vtk
+
+
+
+Update (ϕv , g v ) by descending ∇L V
+
+if n mod K = 0 then 
+
+( ¯ϕq , ¯gq1 , ¯gq2 ) ← (1 − λEMA )( ¯ϕq , ¯gq1 , ¯gq2 ) +
+
+λEMA (ϕq , g q1 , g q2 )
+
+and typically prevents any meaningful environment tran-sition, whereas the latter reflects a semantically infeasible choice under a valid protocol. We additionally penalize non-meaningful actions when the observation remains un-changed after executing an action, which encourages explo-ration and discourages ineffective interactions; we exclude cases where no-op behavior is part of the environment de-sign (e.g., the wait action in SciWorld, and unchanged observations in WebShop). 
+
+B.4. Additional Experiments. Ablation study on Hyper-parameter ϵlow and ϵhigh on Alf-world. As shown in Table 10, larger clipping thresholds allow more aggressive policy updates. When ϵ is small, varying ϵlow and ϵhigh has only a mild effect, since the up-date magnitude is tightly constrained. As ϵ increases, using a larger ϵlow becomes more beneficial: it enables stronger down-weighting of known incorrect actions, which reduces 16 Self-evolving LLM agents with in-distribution Optimization 
+
+Table 10. Ablation study on hyper-parameters ϵlow and ϵhigh on AlfWorld. Best in each split is in bold .
+
+ϵlow ϵhigh Seen Unseen 0.2 0.2 77.9 78.4 0.4 0.2 74.3 77.6 0.2 0.4 75.7 81.3 0.4 0.4 80.7 85.1 0.8 0.4 87.9 86.6 
+
+0.4 0.8 81.4 83.6 0.8 0.8 86.4 85.8 overfitting to suboptimal behaviors and leads to better gen-eralization on the Unseen split. 
+
+B.5. Runtime Analysis 
+
+All experiments were conducted on a single node with 4×H100 GPUs. In our pipeline, behavior cloning takes approximately 5 minutes per epoch, critic training takes about 1 hour per epoch, and policy learning takes around 15 minutes per epoch. Overall, the runtime is dominated by critic training, while the policy learning and behavior cloning stages are comparatively lightweight. 
+
+Interact with a household to solve a task. Imagine you are an intelligent agent in a household environment and your target is to perform actions to complete the task goal. At the beginning of your interactions, you will be given the detailed description of the current environment and your goal to accomplish. For each of your turns, you will be given the observation from the last turn. You should first think about the current condition and plan your future actions, and then output your action in this turn. Your output must strictly follow this format: Thought: your thoughts. Action: your next action. The available actions are: 1. go to {recep }
+
+2. take {obj } from {recep }
+
+3. put {obj } in/on {recep }
+
+4. open {recep }
+
+5. close {recep }
+
+6. toggle {obj } { recep }
+
+7. clean {obj } with {recep }
+
+8. heat {obj } with {recep }
+
+9. cool {obj } with {recep }
+
+where {obj } and {recep } correspond to objects and re-ceptacles. After each turn, the environment will give you immediate feedback based on which you plan your next few steps. If the environment outputs "Nothing happened" , that means the previous action is invalid and you should try more options. Your response should use the following format: Thought: <your thoughts >
+
+Action: <your next action >
+
+Figure 4. The instruction prompt provided to the language agent on AlfWorld. 
+
+17 Self-evolving LLM agents with in-distribution Optimization 
+
+Table 11. Hyper-parameters for Iteration 1 vs Iteration 2. 
+
+Hyper-parameter Iter 1 Iter 2 
+
+Environment AlfWorld / SciWorld / WebShop AlfWorld / SciWorld / WebShop 
+
+Token length (max) 3600/4096/4096 3600/4096/4096 Learning rate for Policy Learning 1e-5/5e-6/5e-6 5e-6/5e-6/5e-6 Learning rate for Critic Learning 1e-5/1e-5/1e-5 1e-5/5e-6/5e-6 Epochs for Policy Learning 3/2/2 2/2/2 Epochs for Critic Learning 20/20/20 2/2/2 Steps for old policy backup no/50/200 200/200/200 You are a helpful assistant to do some scientific experiment in an environment. In the environment, there are several rooms: kitchen, foundry, workshop, bathroom, outside, living room, bedroom, greenhouse, art studio, hallway You should explore the environment and find the items you need to complete the experiment. You can teleport to any room in one step. All containers in the environment have already been opened, you can directly get items from the containers. The available actions are: open OBJ: open a container close OBJ: close a container activate OBJ: activate a device deactivate OBJ: deactivate a device connect OBJ to OBJ: connect electrical components disconnect OBJ: disconnect electrical components use OBJ [on OBJ]: use a device/item look around: describe the current room examine OBJ: describe an object in detail look at OBJ: describe a container’s contents read OBJ: read a note or book move OBJ to OBJ: move an object to a container pick up OBJ: move an object to the inventory pour OBJ into OBJ: pour a liquid into a container mix OBJ: chemically mix a container teleport to LOC: teleport to a specific room focus on OBJ: signal intent on a task object wait: task no action for 10 steps wait1: task no action for a step Your response should use the following format: Thought: <your thoughts >
+
+Action: <your next action >
+
+Figure 5. The instruction prompt provided to the language agent on SciWorld. You are web shopping. I will give you instructions about what to do. You have to follow the instructions. Every round I will give you an observation and alist of available actions, you have to respond anaction based on the state and instruction. You can use search action if search is available. You can click one of the buttons in clickables. An action should be of the following structure: 
+
+search[keywords] click[value] 
+
+If the action is not valid, perform nothing.Keywords in search are up to you, but the valuein click must be a value in the list of available actions.Remember that your keywords in search shouldbe carefully designed.Your response should use the following format:Thought: I think ...Action: click[something] 
+
+Figure 6. The instruction prompt provided to language agent on WebShop. 
+
+Table 12. Dataset statistics. “Test (Seen)” and “Test (Unseen)” in-dicate evaluation scenarios. “Ave. Steps” is the average interaction steps. 
+
+Task Train Test (Seen) Test (Unseen) Ave. Steps 
+
+WebShop 1938 200 - 4.9 ScienceWorld 1483 194 241 14.4 ALFWorld 3321 140 134 10.1 
+
+18
