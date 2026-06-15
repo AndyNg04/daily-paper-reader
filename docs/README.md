@@ -6,100 +6,113 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-14
-- 运行时间：2026-06-14 21:55:52 UTC
+- 最新运行日期：2026-06-15
+- 运行时间：2026-06-15 23:09:53 UTC
 - 运行状态：成功
-- 本次总论文数：26
-- 精读区：12
+- 本次总论文数：30
+- 精读区：16
 - 速读区：14
 
 ### 今日简报（AI）
-今天精选26篇AI论文，重点精读了用户反馈实时分类与多智能体稳定协调两项前沿研究。  
-最值得关注的是LLM自动分类用户反馈（9.0分）和DICE熵正则化方法实现多智能体均衡协调（9.0分），两者均为9分高价值成果。  
-普通读者可优先从速读列表中《AI Agent重塑知识工作》切入，理解自主性与效率提升的实际影响。
-- 详情：[/202606/14/README](/202606/14/README)
+- 今日共生成 30 篇推荐（精读 16 篇，速读 14 篇）
+- 精读：《RunAgent SuperBrowser: A Theory of Autonomous Web Navigation Grounded in Human Browsing Behaviour》（9.0/10）, 《Seeing the Hivemind: A Consensus-Aware Interaction Technique for Mitigating AI Homogenization》（9.0/10）
+- 速读：《In-Situ Immersive Analytics Authoring through Ergonomic Keyboard Support》（8.0/10）, 《Personalization Meets Safety:Mechanisms,Risks,and Mitigations in Personalized LLMs》（8.0/10）, 《H2HMem: A Multimodal Memory Benchmark for Agents in Human-Human Interactions》（8.0/10）
+- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
+- 详情：[/202606/15/README](/202606/15/README)
 
 ### 精读区论文标签
-1. [Automatic, Real-time Classification of User Feedback Using Large Language Models](/202606/14/2606.08050v1-automatic-real-time-classification-of-user-feedback-using-large-language-models)  
+1. [RunAgent SuperBrowser: A Theory of Autonomous Web Navigation Grounded in Human Browsing Behaviour](/202606/15/2606.09399v1-runagent-superbrowser-a-theory-of-autonomous-web-navigation-grounded-in-human-browsing-behaviour)  
    标签：评分：9.0/10、query:human-ai
-   evidence：自动分类用户反馈以评估AI用户体验
-2. [DICE: Entropy-Regularized Equilibrium Selection for Stable Multi-Agent LLM Coordination](/202606/14/2606.08068v1-dice-entropy-regularized-equilibrium-selection-for-stable-multi-agent-llm-coordination)  
-   标签：评分：9.0/10、query:social-rl
-   evidence：多智能体LLM均衡选择实现协调合作
-3. [LCAM: A Framework for Diagnosing Interactional Alignment Failures in Con-versational AI](/202606/14/2606.08131v1-lcam-a-framework-for-diagnosing-interactional-alignment-failures-in-con-versational-ai)  
+   evidence：设计模仿人类浏览行为的AI代理
+2. [Seeing the Hivemind: A Consensus-Aware Interaction Technique for Mitigating AI Homogenization](/202606/15/2606.09587v1-seeing-the-hivemind-a-consensus-aware-interaction-technique-for-mitigating-ai-homogenization)  
    标签：评分：9.0/10、query:human-ai
-   evidence：诊断对话式AI中的交互对齐失败
-4. [SpatialWorld: Benchmarking Interactive Spatial Reasoning of Multimodal Agents in Real-World Tasks](/202606/14/2606.09669v1-spatialworld-benchmarking-interactive-spatial-reasoning-of-multimodal-agents-in-real-world-tasks)  
-   标签：评分：9.0/10、query:human-ai
-   evidence：评估多模态智能体在真实世界任务中交互空间推理的基准
-5. [Representation-Aware Advantage Estimation: Your Reward Model Provides More Than A Scalar Output](/202606/14/2606.10528v1-representation-aware-advantage-estimation-your-reward-model-provides-more-than-a-scalar-output)  
-   标签：评分：9.0/10、query:human-ai
-   evidence：通过RLHF奖励模型隐藏状态利用人类反馈
-6. [Learning to Assist: Collaborative VLAs for Implicit Human-Robot Collaboration](/202606/14/2606.12475v1-learning-to-assist-collaborative-vlas-for-implicit-human-robot-collaboration)  
-   标签：评分：9.0/10、query:human-ai
-   evidence：端到端视觉-语言-动作模型用于隐式人机协作
-7. [Strategic Decision Support for AI Agents](/202606/14/2606.12587v1-strategic-decision-support-for-ai-agents)  
-   标签：评分：9.0/10、query:human-ai
-   evidence：人类-AI协作与决策支持角色反转
-8. [Teach-and-Repeat: Accurately Extracting Operational Knowledge from Mobile Screen Demonstrations to Empower GUI Agents](/202606/14/2606.12817v1-teach-and-repeat-accurately-extracting-operational-knowledge-from-mobile-screen-demonstrations-to-empower-gui-agents)  
+   evidence：语义排斥技术增加AI创意输出多样性
+3. [TouchThinker: Scaling Tactile Commonsense Reasoning to the Open World with Large-scale Data and Action-aware Representation](/202606/15/2606.11637v1-touchthinker-scaling-tactile-commonsense-reasoning-to-the-open-world-with-large-scale-data-and-action-aware-representation)  
    标签：评分：9.0/10、query:interaction
-   evidence：从移动屏幕演示中提取操作知识用于GUI代理
-9. [The Rise of AI-Native Software Engineering: Implications for Practice, Education, and the Future Workforce](/202606/14/2606.12986v1-the-rise-of-ai-native-software-engineering-implications-for-practice-education-and-the-future-workforce)  
+   evidence：利用大规模数据和动作感知表示扩展触觉常识推理
+4. [Beyond Third-Person Audits: Situated Interaction Auditing for User-Centered LLM Bias Research](/202606/15/2606.12247v1-beyond-third-person-audits-situated-interaction-auditing-for-user-centered-llm-bias-research)  
    标签：评分：9.0/10、query:human-ai
-   evidence：系统综述涵盖软件工程中的人机协作主题
-10. [$α$-fair heterogeneous agent reinforcement learning](/202606/14/2606.13076v1--fair-heterogeneous-agent-reinforcement-learning)  
-   标签：评分：9.0/10、query:social-rl
-   evidence：面向异质多代理系统的公平感知强化学习，促进合作社会行为
-11. [Reasoning for Mobile User Experience with Multimodal LLMs: Task, Benchmark, and Approach](/202606/14/2606.13192v1-reasoning-for-mobile-user-experience-with-multimodal-llms-task-benchmark-and-approach)  
+   evidence：以用户为中心的LLM偏见审计框架，关注用户体验
+5. [SkillChain: Closing the Loop on Skill Evolution for Image-Based E-Commerce AI Assistants](/202606/15/2606.12984v1-skillchain-closing-the-loop-on-skill-evolution-for-image-based-e-commerce-ai-assistants)  
    标签：评分：9.0/10、query:human-ai
-   evidence：使用多模态大语言模型评估移动UI用户体验的基准
-12. [GIVE: Grounding Human Gestures in Vision-Language-Action Models](/202606/14/2606.13435v1-give-grounding-human-gestures-in-vision-language-action-models)  
+   evidence：基于图像的电商AI助手技能演化系统
+6. [A Multi-Modal Framework with Cross-Subject Pseudo-Labeling and Semantic Alignment for Micro-Gesture Recognition](/202606/15/2606.13030v1-a-multi-modal-framework-with-cross-subject-pseudo-labeling-and-semantic-alignment-for-micro-gesture-recognition)  
    标签：评分：9.0/10、query:interaction
-   evidence：将人类手势融入视觉-语言-动作模型用于人机交互
+   evidence：多模态微手势识别框架
+7. [PolyAlign: Conditional Human-Distribution Alignment](/202606/15/2606.13227v1-polyalign-conditional-human-distribution-alignment)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：根据交互上下文条件性地将语言模型响应与人类分布对齐
+8. [Adaptive Turn-Taking for Real-time Multi-Party Voice Agents](/202606/15/2606.13544v1-adaptive-turn-taking-for-real-time-multi-party-voice-agents)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：多人口语代理的自适应轮流策略
+9. [YeasierAgent: Agentic Social Sandbox as a Canvas for Intent-Driven Creation of Platform-Agnostic Symbiotic Agent-Native Applications](/202606/15/2606.13722v1-yeasieragent-agentic-social-sandbox-as-a-canvas-for-intent-driven-creation-of-platform-agnostic-symbiotic-agent-native-applications)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：构建智能体原生应用的协作交互范式
+10. [The Silent Cost of Artificial Intelligence Assistance: A Theory of Autonomy Surrender, the Recovery Mechanism, and the Restoration of Human Agency](/202606/15/2606.13962v1-the-silent-cost-of-artificial-intelligence-assistance-a-theory-of-autonomy-surrender-the-recovery-mechanism-and-the-restoration-of-human-agency)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：AI辅助中自主权让渡理论直接涉及人机协作
+11. [The N2D Haptic Glove: A Multi-Finger Glove for 2D Directional Force Feedback for Contact Rich Manipulation](/202606/15/2606.14083v1-the-n2d-haptic-glove-a-multi-finger-glove-for-2d-directional-force-feedback-for-contact-rich-manipulation)  
+   标签：评分：9.0/10、query:interaction
+   evidence：用于力方向反馈的触觉手套
+12. [Contract-Based Compositional Shielding for Safe Multi-Agent Reinforcement Learning](/202606/15/2606.14130v1-contract-based-compositional-shielding-for-safe-multi-agent-reinforcement-learning)  
+   标签：评分：9.0/10、query:social-rl
+   evidence：去中心化协调下的安全多智能体强化学习
+13. [Thinking Outside the [Chat]Box: Bridging Computer Science and Industrial Design for Cognitive-Inclusive Generative AI](/202606/15/2606.14306v1-thinking-outside-the-chatbox-bridging-computer-science-and-industrial-design-for-cognitive-inclusive-generative-ai)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：为认知无障碍设计替代性GenAI界面直接与AI助手交互设计相关
+14. [Communication Policy Evolution for Proactive LLM Agents](/202606/15/2606.14314v1-communication-policy-evolution-for-proactive-llm-agents)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：LLM智能体与用户跨模态的通信策略研究
+15. [AERMANI-PLACE: Language Guided Object Placement with Aerial Manipulators](/202606/15/2606.14531v1-aermani-place-language-guided-object-placement-with-aerial-manipulators)  
+   标签：评分：9.0/10、query:interaction
+   evidence：语言和手势的多模态交互方法用于空中机械手
+16. [Learning Coordinated Preference for Multi-Objective Multi-Agent Reinforcement Learning](/202606/15/2606.14693v1-learning-coordinated-preference-for-multi-objective-multi-agent-reinforcement-learning)  
+   标签：评分：9.0/10、query:social-rl
+   evidence：多智能体强化学习用于合作
 
 ### 速读区论文标签
-1. [How AI Agents Reshape Knowledge Work: Autonomy, Efficiency, and Scope](/202606/14/2606.07489v1-how-ai-agents-reshape-knowledge-work-autonomy-efficiency-and-scope)  
+1. [In-Situ Immersive Analytics Authoring through Ergonomic Keyboard Support](/202606/15/2606.08927v1-in-situ-immersive-analytics-authoring-through-ergonomic-keyboard-support)  
+   标签：评分：8.0/10、query:interaction
+   evidence：AR中自然的键盘交互界面
+2. [Personalization Meets Safety:Mechanisms,Risks,and Mitigations in Personalized LLMs](/202606/15/2606.09038v1-personalization-meets-safetymechanismsrisksand-mitigations-in-personalized-llms)  
    标签：评分：8.0/10、query:human-ai
-   evidence：AI代理重塑知识工作
-2. [MemToolAgent: Leveraging Memory for Tool Using Agents Based on Environment and User Feedback](/202606/14/2606.07909v2-memtoolagent-leveraging-memory-for-tool-using-agents-based-on-environment-and-user-feedback)  
+   evidence：全面综述个性化LLM的用户表示与安全性对用户体验的影响
+3. [H2HMem: A Multimodal Memory Benchmark for Agents in Human-Human Interactions](/202606/15/2606.09461v1-h2hmem-a-multimodal-memory-benchmark-for-agents-in-human-human-interactions)  
    标签：评分：8.0/10、query:human-ai
-   evidence：利用记忆和用户反馈改进LLM代理的工具使用
-3. [Online Agent-as-a-Judge: Situation-Generating Evaluation for Interactive Agents](/202606/14/2606.08200v1-online-agent-as-a-judge-situation-generating-evaluation-for-interactive-agents)  
+   evidence：评估AI代理在人人交互场景中记忆能力的基准
+4. [$τ$-Rec: A Verifiable Benchmark for Agentic Recommender Systems](/202606/15/2606.10156v1--rec-a-verifiable-benchmark-for-agentic-recommender-systems)  
    标签：评分：8.0/10、query:human-ai
-   evidence：交互式AI智能体评估，用户体验评测
-4. [QueryWeaver: Reliable Multi-Tool Query Execution Planning via LLM-Based Graph Generation](/202606/14/2606.08300v1-queryweaver-reliable-multi-tool-query-execution-planning-via-llm-based-graph-generation)  
+   evidence：面向多轮对话式智能推荐系统的可验证基准
+5. [HIPIF: Hierarchical Planning and Information Folding for Long-Horizon LLM Agent Learning](/202606/15/2606.10507v1-hipif-hierarchical-planning-and-information-folding-for-long-horizon-llm-agent-learning)  
    标签：评分：8.0/10、query:human-ai
-   evidence：基于LLM的多工具查询规划，用于AI助手交互设计
-5. [ToolRec: Calibrated Preference Alignment for Query Recommendation in On-Device Assistants](/202606/14/2606.08466v1-toolrec-calibrated-preference-alignment-for-query-recommendation-in-on-device-assistants)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：面向设备端助手的查询推荐对齐
-6. [MemToolAgent overview with a simple restaurant booking scenario where the agent retrieves similar memories, receives feedback on an invalid time format, and generates a reflection to update its memory](/202606/14/2606.07909v1-memtoolagent-overview-with-a-simple-restaurant-booking-scenario-where-the-agent-retrieves-similar-memories-receives-feedback-on-an-invalid-time-format-and-generates-a-reflection-to-update-its-memory)  
+   evidence：针对LLM智能体长时程任务的分层规划与信息折叠机制
+6. [Bridging the Agent-World Gap: Text World Models for LLM-based Agents](/202606/15/2606.09032v1-bridging-the-agent-world-gap-text-world-models-for-llm-based-agents)  
    标签：评分：7.0/10、query:human-ai
-   evidence：通过用户反馈的记忆管理提升工具使用
-7. [Voting Protocols as Coordination Mechanisms for Role-Constrained Multi-Agent Tutoring Systems](/202606/14/2606.08030v1-voting-protocols-as-coordination-mechanisms-for-role-constrained-multi-agent-tutoring-systems)  
+   evidence：面向交互式LLM智能体的文本世界模型
+7. [Anything2Skill: Compiling External Knowledge into Reusable Skills for Agents](/202606/15/2606.09316v2-anything2skill-compiling-external-knowledge-into-reusable-skills-for-agents)  
    标签：评分：7.0/10、query:human-ai
-   evidence：多智能体辅导系统使用投票协议协调干预
-8. [Ego-Pi: VLA Fine-Tuning for Ego-Centric Human and Robot Data](/202606/14/2606.08107v1-ego-pi-vla-fine-tuning-for-ego-centric-human-and-robot-data)  
+   evidence：将外部知识编译为AI智能体的可复用技能
+8. [Leveraging Machine-Learned Advice in Strategic Interactions with No-Regret Learners](/202606/15/2606.10261v1-leveraging-machine-learned-advice-in-strategic-interactions-with-no-regret-learners)  
+   标签：评分：7.0/10、query:social-rl
+   evidence：在重复博弈中利用建议与无遗憾学习者互动
+9. [STAGE-Claw: Automated State-based Agent Benchmarking for Realistic Scenarios](/202606/15/2606.10394v1-stage-claw-automated-state-based-agent-benchmarking-for-realistic-scenarios)  
    标签：评分：7.0/10、query:human-ai
-   evidence：利用人类第一人称数据训练机器人，实现人类-AI协作
-9. [Unintended Consequences of Recommender System Interventions: Evidence from a Field Experiment](/202606/14/2606.08265v1-unintended-consequences-of-recommender-system-interventions-evidence-from-a-field-experiment)  
+   evidence：个人AI代理的自动化基准测试
+10. [Soul Computing: A Theoretical Framework and Technical Architecture for Intelligent Agents with Independent Consciousness](/202606/15/2606.10413v1-soul-computing-a-theoretical-framework-and-technical-architecture-for-intelligent-agents-with-independent-consciousness)  
    标签：评分：7.0/10、query:human-ai
-   evidence：推荐系统干预的现场实验，揭示自适应用户-系统交互动态
-10. [Provably Efficient Personalized Multi-Objective Bandits with Proactive Conversational Queries](/202606/14/2606.08410v1-provably-efficient-personalized-multi-objective-bandits-with-proactive-conversational-queries)  
-   标签：评分：7.0/10、query:human-ai
-   evidence：用户对话查询作为多目标Bandit中的结构化反馈
-11. [Co-Evolving Skill Generation and Policy Optimization](/202606/14/2606.08755v1-co-evolving-skill-generation-and-policy-optimization)  
+   evidence：智能体独立意识框架与人机交互
+11. [SkillHone: A Harness for Continual Agent Skill Evolution Through Persistent Decision History](/202606/15/2606.08671v1-skillhone-a-harness-for-continual-agent-skill-evolution-through-persistent-decision-history)  
    标签：评分：6.0/10、query:human-ai
-   evidence：语言智能体的技能增强强化学习，协同进化技能生成与策略优化
-12. [Claw-R1: A Step-Level Data Middleware System for Agentic Reinforcement Learning](/202606/14/2606.09138v1-claw-r1-a-step-level-data-middleware-system-for-agentic-reinforcement-learning)  
+   evidence：基于持久决策历史的智能体技能持续演化
+12. [One Model, Multiple Goals: Adaptive Multi-Objective Learning for E-commerce Dialogue Systems](/202606/15/2606.09293v1-one-model-multiple-goals-adaptive-multi-objective-learning-for-e-commerce-dialogue-systems)  
    标签：评分：6.0/10、query:human-ai
-   evidence：智能体强化学习数据全周期中间件，支持交互式AI系统
-13. [Dense Force Estimation with an Event-based Optical Tactile Sensor](/202606/14/2606.09451v1-dense-force-estimation-with-an-event-based-optical-tactile-sensor)  
+   evidence：面向电商对话系统的多目标强化学习
+13. [AetheRock: An Arm-Worn Robot Teaching System for Force-Guided Vision-Tactile Learning](/202606/15/2606.09777v1-aetherock-an-arm-worn-robot-teaching-system-for-force-guided-vision-tactile-learning)  
    标签：评分：6.0/10、query:interaction
-   evidence：基于事件触觉传感器的稠密力估计用于触觉反馈
-14. [Exploratory Responsiveness and Adaptive Rigidity under AI-Assisted Optimization](/202606/14/2606.10086v1-exploratory-responsiveness-and-adaptive-rigidity-under-ai-assisted-optimization)  
+   evidence：臂戴式触觉数据采集与力引导学习设备
+14. [GUI-AC: Enhancing Continual Learning in GUI Agents](/202606/15/2606.10522v1-gui-ac-enhancing-continual-learning-in-gui-agents)  
    标签：评分：6.0/10、query:human-ai
-   evidence：AI辅助优化下探索性适应的理论框架
+   evidence：提升GUI代理在人际交互中的持续学习能力
 
 
 <div class="dpr-home-promo-card">
