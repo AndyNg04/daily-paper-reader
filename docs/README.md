@@ -6,113 +6,138 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-15
-- 运行时间：2026-06-15 23:09:53 UTC
+- 最新运行日期：2026-06-21
+- 运行时间：2026-06-21 21:59:21 UTC
 - 运行状态：成功
-- 本次总论文数：30
-- 精读区：16
+- 本次总论文数：38
+- 精读区：24
 - 速读区：14
 
 ### 今日简报（AI）
-- 今日共生成 30 篇推荐（精读 16 篇，速读 14 篇）
-- 精读：《RunAgent SuperBrowser: A Theory of Autonomous Web Navigation Grounded in Human Browsing Behaviour》（9.0/10）, 《Seeing the Hivemind: A Consensus-Aware Interaction Technique for Mitigating AI Homogenization》（9.0/10）
-- 速读：《In-Situ Immersive Analytics Authoring through Ergonomic Keyboard Support》（8.0/10）, 《Personalization Meets Safety:Mechanisms,Risks,and Mitigations in Personalized LLMs》（8.0/10）, 《H2HMem: A Multimodal Memory Benchmark for Agents in Human-Human Interactions》（8.0/10）
-- 这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。
-- 详情：[/202606/15/README](/202606/15/README)
+今日38篇AI研究，聚焦认知轨迹建模与智能体可视化，精读24篇中最高分文章探讨人机共创量化。
+
+最值得关注《Cognitive Trajectory Modeling》提出认知交互轨迹量化框架和《Graph of Trace》可视化科学智能体执行痕迹，后者速读中《Beyond APIs》揭示多模态大模型物理工具使用局限。
+
+建议优先精读前两篇高分论文，速读可作为方向补充，关注智能体交互与认知建模的最新进展。
+- 详情：[/202606/21/README](/202606/21/README)
 
 ### 精读区论文标签
-1. [RunAgent SuperBrowser: A Theory of Autonomous Web Navigation Grounded in Human Browsing Behaviour](/202606/15/2606.09399v1-runagent-superbrowser-a-theory-of-autonomous-web-navigation-grounded-in-human-browsing-behaviour)  
+1. [Cognitive Trajectory Modeling: Quantifying Human-AI Co-Creation through Cognitively Grounded Interaction Trajectories](/202606/21/2606.15358v1-cognitive-trajectory-modeling-quantifying-human-ai-co-creation-through-cognitively-grounded-interaction-trajectories)  
+   标签：评分：10.0/10、query:human-ai
+   evidence：通过认知轨迹量化人类-AI共同创造
+2. [Graph of Trace: Visualizing Execution Traces of Scientific Agent](/202606/21/2606.15116v1-graph-of-trace-visualizing-execution-traces-of-scientific-agent)  
    标签：评分：9.0/10、query:human-ai
-   evidence：设计模仿人类浏览行为的AI代理
-2. [Seeing the Hivemind: A Consensus-Aware Interaction Technique for Mitigating AI Homogenization](/202606/15/2606.09587v1-seeing-the-hivemind-a-consensus-aware-interaction-technique-for-mitigating-ai-homogenization)  
+   evidence：可视化智能体执行轨迹以促进人机协作
+3. [CoeusBI: A Comprehensive Interactive Business Intelligence System Powered by LLMs at Baidu [Extended Version]](/202606/21/2606.15384v1-coeusbi-a-comprehensive-interactive-business-intelligence-system-powered-by-llms-at-baidu-extended-version)  
    标签：评分：9.0/10、query:human-ai
-   evidence：语义排斥技术增加AI创意输出多样性
-3. [TouchThinker: Scaling Tactile Commonsense Reasoning to the Open World with Large-scale Data and Action-aware Representation](/202606/15/2606.11637v1-touchthinker-scaling-tactile-commonsense-reasoning-to-the-open-world-with-large-scale-data-and-action-aware-representation)  
+   evidence：基于LLM的交互式商业智能系统，提供自然语言界面
+4. [A Bilateral Teleoperation Framework for Dexterous Manipulation](/202606/21/2606.15434v1-a-bilateral-teleoperation-framework-for-dexterous-manipulation)  
    标签：评分：9.0/10、query:interaction
-   evidence：利用大规模数据和动作感知表示扩展触觉常识推理
-4. [Beyond Third-Person Audits: Situated Interaction Auditing for User-Centered LLM Bias Research](/202606/15/2606.12247v1-beyond-third-person-audits-situated-interaction-auditing-for-user-centered-llm-bias-research)  
+   evidence：提出包含多尺度触觉反馈和共享控制的双手遥操作框架，涉及人机交互中的触觉技术
+5. [What do you mean by human-AI collaboration: Prerequisite functions and the affordances needed to achieve it](/202606/21/2606.15509v1-what-do-you-mean-by-human-ai-collaboration-prerequisite-functions-and-the-affordances-needed-to-achieve-it)  
    标签：评分：9.0/10、query:human-ai
-   evidence：以用户为中心的LLM偏见审计框架，关注用户体验
-5. [SkillChain: Closing the Loop on Skill Evolution for Image-Based E-Commerce AI Assistants](/202606/15/2606.12984v1-skillchain-closing-the-loop-on-skill-evolution-for-image-based-e-commerce-ai-assistants)  
+   evidence：分析真正人类-AI协作的前提条件
+6. [SCAN: A Decision-Making Framework for Effective Task Allocation with Generative AI](/202606/21/2606.15601v1-scan-a-decision-making-framework-for-effective-task-allocation-with-generative-ai)  
    标签：评分：9.0/10、query:human-ai
-   evidence：基于图像的电商AI助手技能演化系统
-6. [A Multi-Modal Framework with Cross-Subject Pseudo-Labeling and Semantic Alignment for Micro-Gesture Recognition](/202606/15/2606.13030v1-a-multi-modal-framework-with-cross-subject-pseudo-labeling-and-semantic-alignment-for-micro-gesture-recognition)  
-   标签：评分：9.0/10、query:interaction
-   evidence：多模态微手势识别框架
-7. [PolyAlign: Conditional Human-Distribution Alignment](/202606/15/2606.13227v1-polyalign-conditional-human-distribution-alignment)  
+   evidence：人机任务分配框架
+7. [Rethinking Scaffolding in LLM Tutors: The Interactional Mismatch Between Benchmarks and Real-World Deployments](/202606/21/2606.15766v1-rethinking-scaffolding-in-llm-tutors-the-interactional-mismatch-between-benchmarks-and-real-world-deployments)  
    标签：评分：9.0/10、query:human-ai
-   evidence：根据交互上下文条件性地将语言模型响应与人类分布对齐
-8. [Adaptive Turn-Taking for Real-time Multi-Party Voice Agents](/202606/15/2606.13544v1-adaptive-turn-taking-for-real-time-multi-party-voice-agents)  
+   evidence：评估LLM导师中的脚手架及真实世界交互不匹配
+8. [Bridging the Usability Gap: Lessons from Interpreting Studies for Machine Interpreting Design](/202606/21/2606.16009v1-bridging-the-usability-gap-lessons-from-interpreting-studies-for-machine-interpreting-design)  
    标签：评分：9.0/10、query:human-ai
-   evidence：多人口语代理的自适应轮流策略
-9. [YeasierAgent: Agentic Social Sandbox as a Canvas for Intent-Driven Creation of Platform-Agnostic Symbiotic Agent-Native Applications](/202606/15/2606.13722v1-yeasieragent-agentic-social-sandbox-as-a-canvas-for-intent-driven-creation-of-platform-agnostic-symbiotic-agent-native-applications)  
+   evidence：机器口译系统中的用户体验
+9. [AI as a Sparring Partner -- an HCAI Approach to Promote Human Capabilities](/202606/21/2606.16020v1-ai-as-a-sparring-partner----an-hcai-approach-to-promote-human-capabilities)  
    标签：评分：9.0/10、query:human-ai
-   evidence：构建智能体原生应用的协作交互范式
-10. [The Silent Cost of Artificial Intelligence Assistance: A Theory of Autonomy Surrender, the Recovery Mechanism, and the Restoration of Human Agency](/202606/15/2606.13962v1-the-silent-cost-of-artificial-intelligence-assistance-a-theory-of-autonomy-surrender-the-recovery-mechanism-and-the-restoration-of-human-agency)  
+   evidence：AI作为陪练伙伴促进人机协作
+10. [SceneCraft: Interactive System for Image Editing via Scene Graph](/202606/21/2606.16103v1-scenecraft-interactive-system-for-image-editing-via-scene-graph)  
    标签：评分：9.0/10、query:human-ai
-   evidence：AI辅助中自主权让渡理论直接涉及人机协作
-11. [The N2D Haptic Glove: A Multi-Finger Glove for 2D Directional Force Feedback for Contact Rich Manipulation](/202606/15/2606.14083v1-the-n2d-haptic-glove-a-multi-finger-glove-for-2d-directional-force-feedback-for-contact-rich-manipulation)  
-   标签：评分：9.0/10、query:interaction
-   evidence：用于力方向反馈的触觉手套
-12. [Contract-Based Compositional Shielding for Safe Multi-Agent Reinforcement Learning](/202606/15/2606.14130v1-contract-based-compositional-shielding-for-safe-multi-agent-reinforcement-learning)  
+   evidence：通过场景图进行交互式图像编辑
+11. [UXBench: Measuring the Actionability of LLM-Generated UX Critiques](/202606/21/2606.16262v1-uxbench-measuring-the-actionability-of-llm-generated-ux-critiques)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：评估AI用户体验批评的基准
+12. [User as Code: Executable Memory for Personalized Agents](/202606/21/2606.16707v1-user-as-code-executable-memory-for-personalized-agents)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：个性化AI代理的可执行用户记忆
+13. [Talking to Your Data: Exploring Embodied Conversation as an Interface for Personal Health Reflection](/202606/21/2606.17767v1-talking-to-your-data-exploring-embodied-conversation-as-an-interface-for-personal-health-reflection)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：设计具身对话智能体，通过自然语言对话帮助用户反思个人健康数据，是一种AI助手交互设计
+14. [Beyond Failure Recovery: An Engagement-Aware Human-in-the-loop Framework for Robotic Systems](/202606/21/2606.18189v1-beyond-failure-recovery-an-engagement-aware-human-in-the-loop-framework-for-robotic-systems)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：面向机器人系统的关注参与度的人机协同框架
+15. [Searching for Synergy in Shared Workspace Human-AI Collaboration](/202606/21/2606.18413v1-searching-for-synergy-in-shared-workspace-human-ai-collaboration)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：共享工作空间人机协作团队研究
+16. [Searching for Synergy in Shared Workspace Human-AI Collaboration](/202606/21/2606.18413v2-searching-for-synergy-in-shared-workspace-human-ai-collaboration)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：共享工作空间人机协作
+17. [Human-AI Agent Interaction in a Business Context](/202606/21/2606.18716v1-human-ai-agent-interaction-in-a-business-context)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：商业场景中的AI用户体验与交互模式
+18. [R2D-RL: A RoboCup 2D Soccer Environment for Multi-Agent Reinforcement Learning](/202606/21/2606.18786v1-r2d-rl-a-robocup-2d-soccer-environment-for-multi-agent-reinforcement-learning)  
    标签：评分：9.0/10、query:social-rl
-   evidence：去中心化协调下的安全多智能体强化学习
-13. [Thinking Outside the [Chat]Box: Bridging Computer Science and Industrial Design for Cognitive-Inclusive Generative AI](/202606/15/2606.14306v1-thinking-outside-the-chatbox-bridging-computer-science-and-industrial-design-for-cognitive-inclusive-generative-ai)  
+   evidence：RoboCup足球多智能体强化学习环境
+19. [Human-AI Coevolution Dynamics: A Formal Theory of Social Intelligence Emergence Through Long-Term Interaction](/202606/21/2606.19144v1-human-ai-coevolution-dynamics-a-formal-theory-of-social-intelligence-emergence-through-long-term-interaction)  
    标签：评分：9.0/10、query:human-ai
-   evidence：为认知无障碍设计替代性GenAI界面直接与AI助手交互设计相关
-14. [Communication Policy Evolution for Proactive LLM Agents](/202606/15/2606.14314v1-communication-policy-evolution-for-proactive-llm-agents)  
+   evidence：人机交互与社会智能的正式理论
+20. [LLM-Mediated Human-AI Interaction in Search and Rescue: Impact of Expertise on Attentional Allocation](/202606/21/2606.19514v1-llm-mediated-human-ai-interaction-in-search-and-rescue-impact-of-expertise-on-attentional-allocation)  
    标签：评分：9.0/10、query:human-ai
-   evidence：LLM智能体与用户跨模态的通信策略研究
-15. [AERMANI-PLACE: Language Guided Object Placement with Aerial Manipulators](/202606/15/2606.14531v1-aermani-place-language-guided-object-placement-with-aerial-manipulators)  
-   标签：评分：9.0/10、query:interaction
-   evidence：语言和手势的多模态交互方法用于空中机械手
-16. [Learning Coordinated Preference for Multi-Objective Multi-Agent Reinforcement Learning](/202606/15/2606.14693v1-learning-coordinated-preference-for-multi-objective-multi-agent-reinforcement-learning)  
-   标签：评分：9.0/10、query:social-rl
-   evidence：多智能体强化学习用于合作
+   evidence：LLM中介的人机团队在搜救中
+21. [Uncertainty-Aware Reward Modeling for Stable RLHF](/202606/21/2606.19818v1-uncertainty-aware-reward-modeling-for-stable-rlhf)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：不确定性感知的奖励建模以实现稳定RLHF
+22. [Co-policy: Responsive Human-Robot Co-Creation for Musical Performances](/202606/21/2606.19914v1-co-policy-responsive-human-robot-co-creation-for-musical-performances)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：人机音乐共创
+23. [MemGUI-Agent: An End-to-End Long-Horizon Mobile GUI Agent with Proactive Context Management](/202606/21/2606.19926v1-memgui-agent-an-end-to-end-long-horizon-mobile-gui-agent-with-proactive-context-management)  
+   标签：评分：9.0/10、query:human-ai
+   evidence：具有主动上下文管理的移动GUI代理
+24. [AI Economist Agent: An Agentic Framework for Model-Grounded Economic Analysis with RAG, Knowledge Graphs, and Large Language Models](/202606/21/2606.20041v1-ai-economist-agent-an-agentic-framework-for-model-grounded-economic-analysis-with-rag-knowledge-graphs-and-large-language-models)  
+   标签：评分：9.0/10、query:llm-econ
+   evidence：使用LLM的AI经济学家代理进行经济预测和分析
 
 ### 速读区论文标签
-1. [In-Situ Immersive Analytics Authoring through Ergonomic Keyboard Support](/202606/15/2606.08927v1-in-situ-immersive-analytics-authoring-through-ergonomic-keyboard-support)  
-   标签：评分：8.0/10、query:interaction
-   evidence：AR中自然的键盘交互界面
-2. [Personalization Meets Safety:Mechanisms,Risks,and Mitigations in Personalized LLMs](/202606/15/2606.09038v1-personalization-meets-safetymechanismsrisksand-mitigations-in-personalized-llms)  
+1. [Beyond APIs: Probing the Limits of MLLMs in Physical Tool Use](/202606/21/2606.10803v1-beyond-apis-probing-the-limits-of-mllms-in-physical-tool-use)  
    标签：评分：8.0/10、query:human-ai
-   evidence：全面综述个性化LLM的用户表示与安全性对用户体验的影响
-3. [H2HMem: A Multimodal Memory Benchmark for Agents in Human-Human Interactions](/202606/15/2606.09461v1-h2hmem-a-multimodal-memory-benchmark-for-agents-in-human-human-interactions)  
+   evidence：MLLM物理工具使用基准，评估AI助手能力
+2. [From Perception to Action: Can UI Interventions Foster Sustainable LLM Chatbot](/202606/21/2606.10861v1-from-perception-to-action-can-ui-interventions-foster-sustainable-llm-chatbot)  
    标签：评分：8.0/10、query:human-ai
-   evidence：评估AI代理在人人交互场景中记忆能力的基准
-4. [$τ$-Rec: A Verifiable Benchmark for Agentic Recommender Systems](/202606/15/2606.10156v1--rec-a-verifiable-benchmark-for-agentic-recommender-systems)  
+   evidence：UI干预对LLM聊天机器人可持续用户体验的影响
+3. [Role-Agent: Bootstrapping LLM Agents via Dual-Role Evolution](/202606/21/2606.10917v1-role-agent-bootstrapping-llm-agents-via-dual-role-evolution)  
    标签：评分：8.0/10、query:human-ai
-   evidence：面向多轮对话式智能推荐系统的可验证基准
-5. [HIPIF: Hierarchical Planning and Information Folding for Long-Horizon LLM Agent Learning](/202606/15/2606.10507v1-hipif-hierarchical-planning-and-information-folding-for-long-horizon-llm-agent-learning)  
+   evidence：利用预测状态与实际状态的对齐作为LLM智能体学习的过程奖励
+4. [Workflow-GYM: Towards Long-Horizon Evaluation of Computer-use Agentic tasks in Real-World Professional Fields](/202606/21/2606.11042v1-workflow-gym-towards-long-horizon-evaluation-of-computer-use-agentic-tasks-in-real-world-professional-fields)  
    标签：评分：8.0/10、query:human-ai
-   evidence：针对LLM智能体长时程任务的分层规划与信息折叠机制
-6. [Bridging the Agent-World Gap: Text World Models for LLM-based Agents](/202606/15/2606.09032v1-bridging-the-agent-world-gap-text-world-models-for-llm-based-agents)  
+   evidence：评估AI代理在专业GUI任务上的基准
+5. [Workflow-GYM: Towards Long-Horizon Evaluation of Computer-use Agentic tasks in Real-World Professional Fields](/202606/21/2606.11042v2-workflow-gym-towards-long-horizon-evaluation-of-computer-use-agentic-tasks-in-real-world-professional-fields)  
+   标签：评分：8.0/10、query:human-ai
+   evidence：评估AI智能体操作专业GUI工作流的基准
+6. ["OpenBloom": A Stigma-Sensitive LLM Design Probe for Reproductive Well-Being](/202606/21/2606.15536v1-openbloom-a-stigma-sensitive-llm-design-probe-for-reproductive-well-being)  
    标签：评分：7.0/10、query:human-ai
-   evidence：面向交互式LLM智能体的文本世界模型
-7. [Anything2Skill: Compiling External Knowledge into Reusable Skills for Agents](/202606/15/2606.09316v2-anything2skill-compiling-external-knowledge-into-reusable-skills-for-agents)  
+   evidence：面向生殖健康的人机交互LLM设计探测
+7. [Uncertainty-Aware Haptic Signal Estimation for Reliable and Resource Efficient Tactile Internet](/202606/21/2606.15775v1-uncertainty-aware-haptic-signal-estimation-for-reliable-and-resource-efficient-tactile-internet)  
+   标签：评分：7.0/10、query:interaction
+   evidence：触觉互联网中的触觉信号估计
+8. [Towards Pareto-Optimal Tool-Integrated Agents with Pareto Ranking Policy Optimization](/202606/21/2606.16111v1-towards-pareto-optimal-tool-integrated-agents-with-pareto-ranking-policy-optimization)  
    标签：评分：7.0/10、query:human-ai
-   evidence：将外部知识编译为AI智能体的可复用技能
-8. [Leveraging Machine-Learned Advice in Strategic Interactions with No-Regret Learners](/202606/15/2606.10261v1-leveraging-machine-learned-advice-in-strategic-interactions-with-no-regret-learners)  
-   标签：评分：7.0/10、query:social-rl
-   evidence：在重复博弈中利用建议与无遗憾学习者互动
-9. [STAGE-Claw: Automated State-based Agent Benchmarking for Realistic Scenarios](/202606/15/2606.10394v1-stage-claw-automated-state-based-agent-benchmarking-for-realistic-scenarios)  
+   evidence：用于工具集成代理的帕累托多目标对齐优化方法
+9. [TimeVista: Exploring and Exploiting Vision-Language Models as Judges for Time Series Forecasting](/202606/21/2606.16173v1-timevista-exploring-and-exploiting-vision-language-models-as-judges-for-time-series-forecasting)  
+   标签：评分：7.0/10、query:llm-econ
+   evidence：利用视觉语言模型评估时间序列预测，可应用于经济预测
+10. [ACCORD: Action-Conditioned Contextual Grounding for Language Agents](/202606/21/2606.16432v1-accord-action-conditioned-contextual-grounding-for-language-agents)  
    标签：评分：7.0/10、query:human-ai
-   evidence：个人AI代理的自动化基准测试
-10. [Soul Computing: A Theoretical Framework and Technical Architecture for Intelligent Agents with Independent Consciousness](/202606/15/2606.10413v1-soul-computing-a-theoretical-framework-and-technical-architecture-for-intelligent-agents-with-independent-consciousness)  
-   标签：评分：7.0/10、query:human-ai
-   evidence：智能体独立意识框架与人机交互
-11. [SkillHone: A Harness for Continual Agent Skill Evolution Through Persistent Decision History](/202606/15/2606.08671v1-skillhone-a-harness-for-continual-agent-skill-evolution-through-persistent-decision-history)  
-   标签：评分：6.0/10、query:human-ai
-   evidence：基于持久决策历史的智能体技能持续演化
-12. [One Model, Multiple Goals: Adaptive Multi-Objective Learning for E-commerce Dialogue Systems](/202606/15/2606.09293v1-one-model-multiple-goals-adaptive-multi-objective-learning-for-e-commerce-dialogue-systems)  
-   标签：评分：6.0/10、query:human-ai
-   evidence：面向电商对话系统的多目标强化学习
-13. [AetheRock: An Arm-Worn Robot Teaching System for Force-Guided Vision-Tactile Learning](/202606/15/2606.09777v1-aetherock-an-arm-worn-robot-teaching-system-for-force-guided-vision-tactile-learning)  
+   evidence：语言代理的上下文接地
+11. [Inference-time Policy Steering via Vision and Touch](/202606/21/2606.14981v1-inference-time-policy-steering-via-vision-and-touch)  
    标签：评分：6.0/10、query:interaction
-   evidence：臂戴式触觉数据采集与力引导学习设备
-14. [GUI-AC: Enhancing Continual Learning in GUI Agents](/202606/15/2606.10522v1-gui-ac-enhancing-continual-learning-in-gui-agents)  
+   evidence：视觉与触觉融合的推理时策略引导
+12. [AI Contagion in Social Networks](/202606/21/2606.15206v1-ai-contagion-in-social-networks)  
    标签：评分：6.0/10、query:human-ai
-   evidence：提升GUI代理在人际交互中的持续学习能力
+   evidence：研究AI与社交网络互动如何影响集体知识稳定性
+13. [RetailBench: Benchmarking long horizon reasoning and coherent decision making of LLM agents in realistic retail environments](/202606/21/2606.15862v2-retailbench-benchmarking-long-horizon-reasoning-and-coherent-decision-making-of-llm-agents-in-realistic-retail-environments)  
+   标签：评分：6.0/10、query:llm-econ
+   evidence：用于零售环境的LLM智能体基准，与经济学相关
+14. [State-Grounded Multi-Agent Synthetic Data Generation for Tool-Augmented LLMs](/202606/21/2606.16307v1-state-grounded-multi-agent-synthetic-data-generation-for-tool-augmented-llms)  
+   标签：评分：6.0/10、query:human-ai
+   evidence：为工具增强型LLM助手生成多智能体合成数据
 
 
 <div class="dpr-home-promo-card">

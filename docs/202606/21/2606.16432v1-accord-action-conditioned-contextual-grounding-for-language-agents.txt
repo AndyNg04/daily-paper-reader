@@ -1,0 +1,1021 @@
+Title: ACCORD: Action-Conditioned Contextual Grounding for Language Agents
+
+URL Source: https://arxiv.org/pdf/2606.16432v1
+
+Published Time: Tue, 16 Jun 2026 01:57:42 GMT
+
+Number of Pages: 26
+
+Markdown Content:
+# ACCORD : Action-Conditioned Contextual Grounding for Language Agents 
+
+Lai Jiang 1 Cheng Qian 1 Zhenhailong Wang 1 Pan Lu 2 Heng Ji 1 Hao Peng 1
+
+> 1
+
+University of Illinois Urbana-Champaign 
+
+> 2
+
+Stanford University 
+
+## Abstract 
+
+User instructions are often underspecified because humans rely on implicit assump-tions about the surrounding environment. For large language model (LLM) agents operating in information-rich digital and physical environments, these assumptions cannot be inferred from the instruction alone; they must be recovered from the current state of tools, data, interfaces, and observations. Effective execution there-fore requires agents to identify missing context, ground it in observed evidence, and carry it forward into subsequent actions. We show that current agents often fail to do so. They act from assumed rather than observed specifics, overlook information they could have gathered, and fail to incorporate evidence that has already been returned. Building on this insight, we propose A CCORD (Action-
+
+Conditioned Co ntextual G roun ding), a simple and effective agent framework for 
+
+adaptive grounding . Before each action, A CCORD actively probes the environ-ment for missing information and integrates relevant context from the agent’s trajectory that would otherwise be overlooked. Requiring no additional training or task-success signals, A CCORD improves task-goal completion on AppWorld by up to +20 .6 points with GPT-5-mini, from 42 .0% to 62 .6% , compared to strong baselines. These gains persist with a substantially stronger base model ( +10 .8 with Claude-4.5-sonnet), an open-weight model ( +10 .1 with Qwen3.5-27B-FP8), and on the embodied AlfWorld benchmark ( +7 .4 success rate with GPT-5-mini). 
+
+## 1 Introduction 
+
+Large language models (LLMs) are increasingly deployed as agents that translate a user’s natural-language request into sequences of tool and API calls, ranging from coding assistants [ 26 , 7] to web and personal-app agents [ 2, 32 , 21 ], all built on top of general-purpose tool-use mechanisms [ 15 , 13 ,14 ]. The success of every such deployment rests on the agent correctly inferring what they should do from a short natural-language prompt and the environment. Yet communication in natural language is inherently context dependent: humans converse against a backdrop of implicit assumptions and shared knowledge about the surrounding environment, and rarely spell out the concrete entities, constraints, and procedural details needed to act on a request [ 16 ,20 ]. User prompts thus often arrive underspecified , admitting multiple plausible interpretations of intent. As a result, without grounding in the environment, the agent overlooks the disambiguating context and often acts on the wrong interpretation. Consider the shopping-assistant task in Figure 1: the user asks the agent to order the items on an emailed checklist, but the cart already contains three off-checklist items from earlier browsing. The prompt alone does not tell which set of items the user means; the resolution lives in the environment itself, in the cart state and the filter affordance, not in the instruction. We argue that as LLMs are embedded in increasingly rich digital and physical environments [ 21 , 27 ,32 ], every write action that commits state to the environment should be explicitly grounded in the                    
+
+> Project page: https://github.com/Jianglai-0023/ACCORD
+> arXiv:2606.16432v1 [cs.CL] 15 Jun 2026 Grounded action: Filter unrelated items first
+> filtered_cart = filter (cart, checklist)
+> place_order (filtered_cart)
+> User: “Buy stuff according to the checklist my
+> wife sent me over email .”
+> Ungrounded action: place order directly
+> place_order(cart)
+> Redundant items in cart , but missed by agent
+> User: “Buy stuff according to the checklist my
+> wife sent me over email .”
+> Agent Trajectory
+> Step1. Read Email
+> Step2. Add products to shopping cart
+> Here is the checklist
+> kite x 1, ninja blender x 2,
+> toaster x 3, scale x 1,
+> Floatation Suit x 2
+> Agent Trajectory
+> Step1. Read Email
+> Step2. Add products to shopping cart
+> Here is the checklist
+> kite x 1, ninja blender x 2,
+> toaster x 3, scale x 1,
+> Floatation Suit x 2
+> Step3.
+> Step3.
+> Grounded action: Query shopping cart
+> amazon.show_cart()
+
+Figure 1: Ungrounded agent behavior ( left ) vs. grounded behavior in the environment ( right ). The user gives an underspecified instruction whose intended meaning is fixed by the environmental state. Yellow highlights indicate the objects that need further clarification. Both panels share the same prior trajectory. Crucially, the cart also contains unrelated items, leaving the agent’s trajectory incomplete 
+
+at decision time. (Ungrounded) The agent issues place_order(cart) directly; the redundant items are submitted unnoticed. (Grounded) The agent first probe amazon.show_cart() to surface the cart state, then filter(cart, checklist) and place_order(filtered_cart) so only the matching items are submitted. contextual signals surfaced by ongoing interaction with the environment. Executing an instruction increasingly requires action grounding : at every step, the agent must align the next write with the environmental state that resolves the underspecified parts of the request. Current LLM agent frameworks treat the environment in two predominant modes: as a site of task execution, where actions are issued and tools are invoked [ 29 , 15 , 13 , 14 ], and as a source of feedback for self-correction or wider search [ 18 , 4, 31 , 5 ]. What remains under-explored is treating the environment as a source of information for resolving the user’s underspecified intent .Two structural gaps keep this kind of grounding from happening reliably, and they map directly onto two failure modes that we show that are common among current agent systems: Figure 2;§2.2– 2.3. On the input side , agents fall back on priors likely shaped by training on similar instructions, hallucinating tool affordances and argument values rather than probing the environment, so the trajectory ends up incomplete , lacking the information the upcoming write requires. On the feedback side , the environment returns observations formatted for its own purposes, not for the instruction: schemas are verbose, decisive facts are buried in long responses [ 11 , 3], and key signals are conveyed only implicitly (e.g., a success code without the resulting state), leaving the information present but overlooked at the decision point. We refer to these two modes as incomplete and overlooked 
+
+grounding failures, and target both with a unified inference-time mechanism (§3). Building on this analysis, we adopt a simple but effective approach that closes both grounding gaps at two complementary layers of the agent system (§3). At the inference-time layer (§3.1), our framework resurfaces existing trajectory evidence and probes the environment facts, so that the agent’s context contains the information needed for the upcoming action. At the policy layer (§3.2), we additionally encourage the main agent’s to actively probe and explore the environment, so that its trajectory carries enough environmental information for the inference-time layer to draw on. Together, the two layers ensure the agent acts on the right interpretation of the user’s intent. We call this two-layer framework ACCORD (Action-Conditioned Co ntextual G roun ding). At the inference-time layer, A CCORD intervenes before any write action being executed by the environment, pausing the agent and constructing an action-ready grounded state : a context include information required by the upcoming action. Crucially, A CCORD grounds writes in objective signals 
+
+2from the environment itself , such as live observations, returned data, and tool schemas, rather than in the agent’s own subjective self-critique, as in reflection- or refine-style approaches [ 18 , 4] that iterate over the model’s internal beliefs. In unseen environments, the agent’s internal model is unreliable, so reflecting on that model cannot resolve the underlying information deficit. Moreover, ACCORD ’s policy layer modifies the main agent’s policy with a prompt that encourages it to gather sufficient environmental information early in the trajectory. The two layers play distinct roles. The inference-time layer is where grounding actually happens and the policy layer is supporting. Both layers are training-free and model-agnostic, allowing the same mechanism to transfer unchanged across tasks, environments, and underlying base models. We evaluate A CCORD on AppWorld and ALFWorld across three LLMs: closed-weight GPT-5-mini and Claude-4.5-sonnet, and open-weight Qwen3.5-27B-FP8. Across all settings, A CCORD 
+
+improves task completion over a ReAct baseline by 7.4% –20 .6% , with the largest gains on the harder AppWorld test-challenge split: +20 .6 TGC on GPT-5-mini and +16 .1 on Qwen3.5-27B-FP8. ACCORD generalizes to ALFWorld, improving Qwen3.5-27B-FP8 from 80 .7% to 88 .1% success rate. Our work reveals that whether an agent can effectively probe and use environmental information is a decisive factor in its performance. We hope this work helps push forward the understanding of the meta-capabilities agents will need to develop, and prompts further thinking about how agents can better interact with their environments and manage their own context, so that they can operate effectively in continuously changing environments with minimal human intervention. 
+
+## 2 Problem Formulation and Empirical Analysis 
+
+2.1 Action selection in interactive environments 
+
+We consider an LM agent operating in an interactive environment E to accomplish a natural-language task τ . At each step t, the agent selects an action at ∈ A based on the context 
+
+ct = ( τ, a 0, o 0, . . . , a t−1, o t−1), where oi is the observation returned by E after ai. The action space A varies by environment: in our experiments, an action is a Python snippet that invokes one or more APIs (AppWorld) or a natural-language command such as “pick up X” (ALFWorld). As in real-world deployment, the agent receives no task-level reward or success signal during execution: all feedback comes through the environment’s own observations oi, which may include API error We single out the subset of write actions W ⊆ A that alter the environment state: these are typically irreversible and largely determine task success (e.g., place order, delete emails). 
+
+Action grounding. The central question we study is whether each write w is properly grounded in the information available at the time of the decision. We say ct is action-ready for a candidate write 
+
+w, denoted ActionReady( ct, w ), when ct exposes the affordance, argument values, and constraints relevant to w, and w is consistent with those signals (no element of w contradicts what ct exposes). Otherwise we say there is a grounding gap between ct and w, arising in two distinct ways: incomplete, when the required information has not entered ct, and overlooked, when w contradicts information already in ct. The next two subsections characterize each mode in turn, quantifying its prevalence on ALFWorld and AppWorld and identifying recurring failure patterns. 
+
+2.2 Incomplete: Writes ungrounded in the environment 
+
+In incomplete failures, ct does not yet carry the affordance, arguments, or constraints needed to execute w correctly, and the agent writes anyway rather than first probing E for the missing facts. The required information has not yet entered the trajectory, so any w the agent issues against this under-specified picture of the environment is effectively a hallucination rather than a grounded decision. 
+
+Quantifying the gap. AppWorld [ 21 ] is an API-based LLM-agent benchmark spanning nine in-terconnected everyday applications, and ALFWorld [ 19 ] is a text-based embodied benchmark of household tasks. We randomly sample 30 failed trajectories from the GPT-5-mini ReAct baseline on each, and annotate each failed write w for whether the information required to execute w cor-rectly was already present in ct at the time w was issued. AppWorld annotations are produced by Claude Opus 4.6 with a multi-label rubric; ALFWorld annotations are produced by a rule-based string-matching script. Both rubrics and per-class counts are provided in Appendix A.2. A consistent 3Grounding Error Other 
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Share of Failures (%)
+> 93.3% (28/30)
+> 6.7% (2/30)
+> Incomplete
+> 26.7% (8/30)
+> Overlooked
+> 66.7% (20/30)
+
+(a) ALFWorld ( n = 30 ). Grounding Error Other  
+
+> 0
+> 10
+> 20
+> 30
+> 40
+> 50
+> 60
+> 70
+> 80
+> Share of Failures (%)  70.0% (21/30)
+> 30.0% (9/30)
+> Incomplete
+> 36.7% (11/30)
+> Overlooked
+> 33.3% (10/30)
+
+(b) AppWorld ( n = 30 ). 
+
+Figure 2: Distribution of grounding-gap types among baseline ReAct (GPT-5-mini) failures on ALFWorld (a) and AppWorld (b). Overlooked (Section 2.3): the required information was already present in ct but not used. Incomplete (Section 2.2): the information was never acquired before the write. Other : residual failures not attributable to a grounding gap. quarter of failures occur under an incomplete gap, where the agent had not acquired the required information before acting: 26.7% (8/30) on ALFWorld and 36.7% (11/30) on AppWorld (Figure 2, “Incomplete”). 
+
+Why agents act on incomplete information. We identify two recurring patterns from the annotated failures, both instances where the agent never probed for the required information. First, agents 
+
+assume environmental content rather than reading it: having located a relevant resource (e.g., a note, a document, a record), the agent skips inspecting its content and writes a parser or downstream action against an assumed format. Second, agents stop at known affordances : having handled the task through APIs they have already seen, the agent does not probe E for additional APIs the task may also require, leaving parts of the task undone. For example, asked to delete a payment card across applications, the agent deletes it in one app and assumes no other app stores one, never inspecting the other apps’ APIs. Both patterns reflect the same underlying behavior—the agent treats information acquisition as optional when its prior is confident enough, even when the prior is uncalibrated to the current environment. 
+
+2.3 Overlooked: Writes ungrounded in the prior trajectory 
+
+In overlooked failures, the required information has already entered ct through earlier observations, but the agent issues a w whose content contradicts that information. No additional probe is needed; the context already carries what is needed, but the agent writes as if it did not. 
+
+Quantifying the gap. Annotations follow §2.2 (full rubrics and per-class counts in Appendix A.2). The overlooked case accounts for a substantial fraction of failures on both benchmarks: 66.7% (20/30) on ALFWorld and 33.3% (10/30) on AppWorld (Figure 2, “Overlooked”). This indicates that simply acquiring more information is insufficient: the agent must also be steered to use what it has already observed. 
+
+Why agents overlook what they already have. Two conditions make overlooking more likely, and together they suggest why acquired information fails to ground writes. First, distance : the information relevant to the current write often lives many steps away from the write itself. This echoes recent findings that LM performance on long-context tasks degrades with input length even when the relevant content is already present in the input [ 11 , 8, 6 , 3]. Second, format mismatch : information returned in a form that diverges from the write’s argument schema—buried in a long, noisy response with many irrelevant fields, or conveyed only implicitly. This echoes work showing that LLM reasoning degrades when relevant facts are embedded in irrelevant or noisy context [17, 24, 1]. Both observations point to the conclusion that whether ct is action-ready depends not only on what it contains but on whether the contents are in a form the agent can attend to. This motivates treating overlooked grounding as a problem of re-surfacing relevant prior information at decision time, which our method addresses directly. 4Grounding Agent                       
+
+> Main Agent
+> (generates action at)
+> at∈
+> W ?
+> No
+> Execute aton ε
+> Update ct+1
+> Input: ( at,ct,x )
+> (A) Re-surface from ct
+> →addresses overlooked
+> (B) Probe ε(read-only)
+> →addresses missing
+> Output: ( c’ i,decision)
+> Yes
+> Approve? Execute aton ε
+> Approve
+> Append etto context
+> Reject
+> Re-propose
+> Environment ε
+> Grounding Execution Context update Reject & feedback
+> W : write set ct: context at step t
+> et: conflicting evidence
+> ε: environment
+> ◉Read-only probes
+> (via Grounding Agent)
+> Update ct+1
+> Execute at
+
+Figure 3: A CCORD ’s adaptive grounding loop (full pseudocode in Algorithm 1). At each step the main agent proposes a write wt; if wt ∈ W (a write action), the grounding agent (blue) receives 
+
+(wt, c t, x ) and augments the context via two complementary moves: (A) re-surfacing trajectory evidence (addressing the overlooked mode) and (B) probing E via read-only calls (addressing the 
+
+incomplete mode). On APPROVE , wt executes on E; on REJECT , the conflicting evidence et is appended and the main agent re-proposes. 
+
+Summary. Both subsections describe a write action issued without sufficient grounding. Our method targets both forms under a single mechanism for closing the grounding gap before each write. 
+
+## 3 ACCORD : Action-Conditioned Contextual Grounding 
+
+ACCORD operates at two complementary layers of the agent system, unified by a single principle: grounding should be driven by environmental signals. Figure 3 summarizes the overall procedure. 
+
+3.1 Adaptive inference-time grounding When grounding is triggered. ACCORD intervenes on every write action w ∈ W , i.e., every action that mutates the environment’s state and is therefore costly to undo. W is constructed automatically and only once per environment, with no manual annotation in either path. Where the environment exposes API metadata, we read W directly off it—e.g., AppWorld categorizes endpoints by HTTP method, so POST /PUT /DELETE go straight into W without any LLM call. Where no such metadata is available, a single lightweight LLM pass classifies each API from its signature and natural-language description; this scales linearly in the number of APIs and is amortized over all subsequent tasks in the environment. 
+
+Action-conditioned context augmentation. When the main agent proposes a write w ∈ W , a separate grounding agent pauses execution and receives the proposed w, the prior trajectory ct, and the task instruction. Its job is to construct an updated context c′ 
+
+> t
+
+⊇ ct such that ActionReady( c′
+
+> t
+
+, w )
+
+holds, then emit an A PPROVE /R EJECT decision on w. The grounding agent operates from a single prompt (reproduced verbatim in §A.5) that exposes two complementary moves: (A) re-surfacing decisive facts already present in ct but unattended by the main agent, and (B) probing E via read-only calls for facts not yet in ct. These two moves correspond directly to the two failure modes formalized in §2.2–2.3: move (A) addresses the overlooked mode, where the relevant information already lives in ct but w would contradict it; move (B) addresses the incomplete mode, where the relevant information has not yet entered ct.
+
+Verification checklist. Before deciding, the grounding agent inspects the proposed action from several complementary angles: whether its arguments and schema align with what the environment actually exposes, whether the referenced entities are unambiguously resolved, and whether the action satisfies the constraints stated in the task. w is approved only when all checks agree. 5Decision and feedback loop. In standard agent loops a proposed action is dispatched directly to the environment. A CCORD treats the moment between propose and execute as a deliberate intervention point: the grounding agent decides whether w is action-ready before w ever reaches the environment. An A PPROVE releases w and the environment executes it as usual. A R EJECT blocks execution entirely; the conflicting environmental evidence emitted by the grounding agent is appended to the main agent’s history, the failed attempt is removed, and the main agent regenerates w conditioned on new context. By design the grounding agent surfaces only objective environmental signals here and never its own reasoning, so the main agent corrects against the environment rather than against an opinion. This preserves the same objective-signals-only discipline that motivates the framework. The grounding agent may also perform multiple read-only probes within a single pass before reaching its decision. 
+
+3.2 Light-weight policy-level shaping 
+
+The second layer of A CCORD is a prompt-level intervention applied to the main agent itself, encour-aging it to gather environmental information early in the trajectory rather than acting on assumed content. We append to the main agent’s system prompt instructions to (i) explore the environment before acting on the task, and (ii) inspect concrete content rather than guessing the value. These additions introduce no new component and do not modify the agent loop; they only bias the main agent toward observation calls and away from acting on assumed content. The role of this layer is to enrich the trajectory before the grounding agent runs. The prompt is one minimum-effort instantiation of this policy modification; we treat the prompt as a deployable default. 
+
+## 4 Experiments 
+
+4.1 Experimental Setup Benchmarks. We evaluate on two complementary benchmarks that stress different aspects of action grounding. AppWorld [ 21 ] tests LLM agents on complex, multi-step workflows across nine interconnected everyday applications (e.g., email, calendar, file storage, e-commerce). Each task requires the agent to interact with a realistic API ecosystem. Every task is paired with its own environment instance with the personal data of a simulated user (e.g., emails, contacts, calendar entries, orders). We report results on two official test splits: test-normal, which contains tasks of moderate complexity, and test-challenge, which includes tasks requiring longer action sequences, more cross-application coordination, and greater environmental reasoning. AlfWorld [ 19 ] is a text-based embodied benchmark in which the agent must complete household tasks (e.g., locating, cleaning, or heating objects) by issuing high-level actions in a partially observed environment. We use the standard unseen evaluation split with 109 tasks. 
+
+Metrics. Following the AppWorld evaluation protocol, we report two complementary metrics: Task Goal Completion (TGC), which measures whether the overall task goal is achieved, and Scenario Goal Completion (SGC), which measures whether all three related tasks in a scenario are completed in full. For AlfWorld, we report binary task success rate and the corresponding number of solved tasks out of 109. 
+
+Models. To demonstrate generality across model capabilities, we evaluate with three LLMs spanning closed- and open-weight families: closed-weight GPT-5-mini and Claude-4.5-sonnet, and open-weight Qwen3.5-27B-FP8. Results on a smaller open-weight model (Qwen3.5-9B, non-thinking) are reported in Appendix A.4.3. 
+
+Baselines. Our primary baseline is ReAct [ 29 ], the standard agent paradigm that interleaves reasoning traces with action execution. we compare Self-Refine [ 12 ], we adapt it to refine each proposed write action before execution (evaluated on GPT-5-mini). We further include FullCodeReflex, full-code agent variant in which the agent emits the complete code for each step and applies Reflexion-style self-reflection on errors before retrying. we follow the implementation from the official AppWorld repository. Finally, we include ACE [ 30 ], an online , memory-based agent that accumulates a textual “playbook” from previous trajectories to guide the next, as a reference point for cross-trajectory adaptation; it is not directly comparable to the per-trajectory methods above and is therefore placed in a separate group of Table 1. See Appendix A.4.4 for details on the public ACE release used in this evaluation. 6Our method. We evaluate A CCORD (Section 3.1–3.2) together with one ablation that drops the grounding agent and keeps only the lightweight grounding prompt—the two-sentence prefix appended to the main agent’s system prompt (§3.2). The ablation isolates the contribution of prompt-based encouragement; the full A CCORD adds the grounding agent (§3.1) that intercepts each write w ∈ W 
+
+and constructs an action-ready context for it. 
+
+4.2 App-use agent (AppWorld) 
+
+Table 1 presents the main results on AppWorld. Our method consistently improves task completion across both models, both test splits, and both metrics. Table 1: Main results on AppWorld. TGC = Task Goal Completion (%); SGC = Scenario Goal Completion (%). Best results per column are in bold . ACE is included as a reference point only                                                                
+
+> test-normal test-challenge GPT-5-mini TGC SGC TGC SGC ReAct 63.7 46.4 42.0 20.9 Self-Refine 60.1 ↓3.6 39.3 ↓7.1 40.1 ↓1.9 17.3 ↓3.6
+> FullCodeReflex 43.5 ↓20.2 30.4 ↓16.0 ——ACCORD 78.0 ↑14.3 62.5 ↑16.1 62.6 ↑20.6 38.9 ↑18.0
+> Cross-trajectory memory methods
+> ACE (online) 21.8 ↓41.9 10.2 ↓36.2 7.1 ↓34.9 6.4 ↓14.5
+> Claude-4.5-sonnet
+> ReAct 88.1 83.9 73.4 59.7 ACCORD 92.3 ↑4.2 87.5 ↑3.6 84.2 ↑10.8 70.5 ↑10.8
+> Qwen3.5-27B-FP8
+> ReAct 71.4 51.8 63.1 46.8 ACCORD 81.5 ↑10.1 67.9 ↑16.1 69.8 ↑6.7 53.2 ↑6.4
+
+Consistent gains across models and difficulty levels. On GPT-5-mini, our method improves TGC by +14.3 on test-normal and +20.6 on test-challenge over the ReAct baseline, with corresponding SGC gains of +16.1 and +18.0. On Claude-4.5-sonnet, a substantially stronger base model, we observe TGC gains of +4.2 on test-normal and +10.8 on test-challenge. On the open-weight Qwen3.5-27B-FP8, A CCORD adds +10.1 TGC / +16.1 SGC on test-normal and +6.7 TGC / +6.4 SGC on test-challenge, indicating that the gains carry over to open-weight base models as well. Notably, the improvements on the closed-weight models are larger on the challenge split , indicating that our method is most beneficial when tasks demand greater environmental information. 
+
+Post-hoc self-correction does not help. Both self-correction baselines under-perform the ReAct baseline on GPT-5-mini. We attribute this to the fact that the refinement step itself is not grounded in environmental facts. Inspecting the refined trajectories, we frequently observe incorrect assumptions about the environment, then overconfidently rejecting actions on the basis of those assumptions rather than on any observed evidence. The pattern indicates that augmenting an agent’s reasoning alone does not translate into better performance. 
+
+4.3 Embodied agent (AlfWorld) 
+
+We next evaluate A CCORD in an embodied setting, where the action space and observation format differ substantially from the structured API ecosystem of AppWorld. Table 2 reports task success rate on the AlfWorld unseen split. A CCORD again improves over the ReAct baseline on both GPT-5-mini and Qwen3.5-27B-FP8, while Self-Refine again degrades performance. Results on a smaller open-weight backbone (Qwen3.5-9B) are deferred to Appendix A.4.3. Environmental information in AlfWorld is substantially more implicit than in AppWorld. Rather than returning structured records, the environment communicates state changes only through the issued actions and whether they succeed; the agent is never handed an explicit summary of the current environment state. A CCORD ’s grounding agent compensates for this by aggregating the implicit signals scattered across prior actions and observations into a coherent picture of the environment, which the main agent can then act on directly. 7Method Success (%) Solved GPT-5-mini              
+
+> ReAct 70.6 77/109 Self-Refine 62.4 ↓8.2 68/109 ACCORD 78.0 ↑7.4 85/109 Qwen3.5-27B-FP8
+> ReAct 80.7 88/109 ACCORD 88.1 ↑7.4 96/109
+
+Table 2: Results on AlfWorld (unseen split, 109 tasks).                           
+
+> normal challenge Config. TGC SGC TGC SGC ReAct 63.7 46.4 42.0 20.9 + GP 69.6 53.6 54.2 30.2 + PE 61.9 ———+ PE + GP 72.0 58.9 60.4 35.2 ACCORD (full) 78.0 62.5 62.6 38.9
+
+Table 3: Ablation on AppWorld (GPT-5-mini). GP = grounding prompt; PE = pre-exploration prompt. 
+
+## 5 Analysis 
+
+5.1 Ablation Study 
+
+Recall from §3 that A CCORD has two layers: a policy-level prompt appended to the main agent, and the grounding agent that intercepts each write at inference time. The policy-level prompt itself decomposes naturally into two complementary sub-prompts: a grounding prompt (GP) that asks the agent to inspect the content it already has rather than act on assumed values, and a pre-exploration prompt (PE) that asks the agent to survey the environment before issuing any write. Table 3 separates generic prompting and generic context expansion from the central mechanism of A CCORD : action-conditioned context augmentation immediately before a proposed write. 
+
+Prompting increases action-local context density. On its own, GP lifts test-normal TGC by +5 .9
+
+and test-challenge TGC by +12 .2 over the baseline, the largest gain attributable to any single prompt-level intervention. GP asks the main agent to inspect the environment before acting, so it increases the amount of action-relevant information near the eventual write rather than leaving the agent to act from a sparse or stale context. This is why GP is effective: it moves the trajectory closer to an action-ready state even without a separate grounding agent. However, the information gathered under GP is still selected by the main agent’s own policy, before a concrete write has been externally checked. It therefore improves action grounding, but does not fully replace the action-conditioned augmentation performed by the grounding agent. 
+
+Generic context expansion is not enough. Adding PE in isolation slightly hurts performance on test-normal ( 63 .7 → 61 .9 TGC), despite adding more environmental information. The issue is that PE augments context only at the beginning of the trajectory, before the concrete write action is known. By the time the agent commits to a later action, relevant facts may be buried behind many intervening steps, and missing facts remain missing because the upfront survey was not conditioned on the actual write that must be grounded. 
+
+The remaining gain comes from action-conditioned augmentation. PE only becomes useful paired with GP: PE + GP reaches 72 .0 TGC, exceeding either alone. Adding the grounding agent on top yields the full A CCORD (78 .0 / 62 .6 TGC, +6 .0 / +2 .2 over PE + GP). This final improvement isolates the value of augmenting context at the moment of action: the grounding agent observes the proposed write, retrieves or re-surfaces the evidence needed for that specific decision, and then returns an action-ready context to the main agent. The ablation therefore supports the paper’s central claim that effective grounding is not merely more exploration or stronger prompting, but context augmentation conditioned on the upcoming action. 
+
+5.2 Exploration Efficiency More reads, not more writes. Figure 4 shows that under A CCORD the share of API calls devoted to reads rises substantially: 70 .4% → 82 .7% on test-normal and 88 .2% → 95 .3% on test-challenge. The write share correspondingly drops, indicating that the additional API budget goes almost entirely toward gathering information rather than committing more state changes. Combined with the higher TGC reported in Table 1, this means each write under A CCORD is more likely to succeed. 8Read Write  
+
+> 0
+> 2000
+> 4000
+> 6000
+> 8000
+> 10000
+> Total API Calls
+> 70.4%
+> 29.6%
+> 82.7%
+> 17.3%
+> Test Normal
+> Baseline
+> Accord
+> Read Write
+> 0
+> 20000
+> 40000
+> 60000
+> 80000
+> Total API Calls
+> 88.2%
+> 11.8%
+> 95.3%
+> 4.7%
+> Test Challenge
+> Baseline
+> Accord
+
+Figure 4: Share of API calls devoted to reads (GET + API doc) vs. writes (POST/PUT/DEL) on AppWorld with GPT-5-mini, on the ReAct baseline and A CCORD .
+
+5.3 Further Analysis 
+
+Additional behavioral and breakdown analyses—read-write dynamics across trajectory steps, per-formance stratified by AppWorld task difficulty, the per-task-type breakdown on ALFWorld, and an evaluation on a smaller open-weight backbone (Qwen3.5-9B)—are deferred to Appendix A.4. 
+
+## 6 Conclusion 
+
+We argued that the dominant failure mode of LLM agents is not a reasoning deficit but a failure of contextual grounding. A CCORD closes both gaps with a training-free, model-agnostic mechanism that intercepts each write, re-surfaces relevant trajectory evidence, and probes the environment for missing facts before the write is committed. Across AppWorld and AlfWorld and three base LLMs, ACCORD consistently improves task completion while leaving the write budget unchanged or smaller, indicating that gains come from better-grounded actions rather than brute-force retries. 
+
+Limitations. ACCORD relies on a write/read-only categorization of environment APIs; the grounding agent also adds read-only calls and additional model rollouts per write, raising per-task token cost even as the write budget itself stays bounded. 
+
+Future work. A natural next step is to strengthen the policy layer itself, for instance through distillation or reinforcement learning, so that the main agent internalizes the grounding behavior currently delivered by an external grounding agent. 
+
+## 7 Related Work 
+
+7.1 LLM Agents in Complex Tool-Use Environments 
+
+The development of LLM-based agents that interact with external tools has progressed rapidly. Early work established foundational paradigms for tool-augmented generation, including Toolformer [ 15 ], which taught models to decide when and how to call APIs, and TaskMatrix.AI [ 10 ], which connected foundation models to millions of task-specific tools. ReAct [ 29 ] introduced the interleaving of reasoning traces and actions, enabling more interpretable and grounded decision-making. Subsequent work scaled these ideas to increasingly complex environments: API-Bank [ 9] and ToolBench [ 14 ]proposed large-scale benchmarks with hundreds of real-world APIs, while frameworks such as OpenAgents [25] demonstrated end-to-end agent systems for open-ended tasks. More recently, benchmarks have shifted focus toward evaluating agents in realistic, unseen envi-ronments where tools and data schemas are not known in advance. AppWorld [ 21 ] tests agents on multi-step workflows across interconnected applications with complex state dependencies. These benchmarks reveal that strong in-distribution performance does not guarantee transfer to unfamiliar environments—a gap our work directly addresses. 
+
+7.2 Inference-Time Adaptation and Reflection 
+
+A growing line of research seeks to improve LLM agent behavior at inference time without additional training. Chain-of-thought prompting [ 23 ] and its variants (e.g., self-consistency [ 22 ], tree-of-thought [ 28 ]) improve reasoning quality by eliciting intermediate steps, but do not explicitly address 9the agent’s interaction with unknown environments. Reflexion [ 18 ] introduced verbal self-reflection, where agents critique their own failed trajectories and retry with updated strategies. Similarly, CRITIC [4] allows models to verify and correct their outputs using external tool feedback. Our setting differs in two respects: each task is solved per-trajectory with no oracle reward or success signal, and grounding is anchored in environmental facts surfaced by interaction rather than in the agent’s own reasoning or self-critique. 
+
+## Acknowledgements 
+
+This work is supported by the Capital One Illinois Center for Generative AI Safety, Knowledge Systems, and Cybersecurity (ASKS). 
+
+## References 
+
+[1] Florin Cuconasu, Giovanni Trappolini, Federico Siciliano, Simone Filice, Cesare Campagnano, Yoelle Maarek, Nicola Tonellotto, and Fabrizio Silvestri. The power of noise: Redefining retrieval for rag systems. In Proceedings of the 47th International ACM SIGIR Conference on Research and Development in Information Retrieval , pages 719–729, 2024. [2] Xiang Deng, Yu Gu, Boyuan Zheng, Shijie Chen, Samuel Stevens, Boshi Wang, Huan Sun, and Yu Su. Mind2web: Towards a generalist agent for the web. In Thirty-seventh Conference on Neural Information Processing Systems Datasets and Benchmarks Track , 2023. [3] Yufeng Du, Minyang Tian, Srikanth Ronanki, Subendhu Rongali, Sravan Bodapati, Aram Galstyan, Azton Wells, Roy Schwartz, Eliu A Huerta, and Hao Peng. Context length alone hurts llm performance despite perfect retrieval, 2025. [4] Zhibin Gou, Zhihong Shao, Yeyun Gong, yelong shen, Yujiu Yang, Nan Duan, and Weizhu Chen. CRITIC: Large language models can self-correct with tool-interactive critiquing. In The Twelfth International Conference on Learning Representations , 2024. [5] Shibo Hao, Yi Gu, Haodi Ma, Joshua Jiahua Hong, Zhen Wang, Daisy Zhe Wang, and Zhiting Hu. Reasoning with language model is planning with world model. In The 2023 Conference on Empirical Methods in Natural Language Processing , 2023. [6] Cheng-Ping Hsieh, Simeng Sun, Samuel Kriman, Shantanu Acharya, Dima Rekesh, Fei Jia, and Boris Ginsburg. RULER: What’s the real context size of your long-context language models? In First Conference on Language Modeling , 2024. [7] Carlos E Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir Press, and Karthik R Narasimhan. SWE-bench: Can language models resolve real-world github issues? In The Twelfth International Conference on Learning Representations , 2024. [8] Mosh Levy, Alon Jacoby, and Yoav Goldberg. Same task, more tokens: the impact of input length on the reasoning performance of large language models. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 15339–15353, 2024. [9] Minghao Li, Yingxiu Zhao, Bowen Yu, Feifan Song, Hangyu Li, Haiyang Yu, Zhoujun Li, Fei Huang, and Yongbin Li. API-bank: A comprehensive benchmark for tool-augmented LLMs. In Houda Bouamor, Juan Pino, and Kalika Bali, editors, Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing , pages 3102–3116, Singapore, December 2023. Association for Computational Linguistics. [10] Yaobo Liang, Chenfei Wu, Ting Song, Wenshan Wu, Yan Xia, Yu Liu, Yang Ou, Shuai Lu, Lei Ji, Shaoguang Mao, et al. Taskmatrix. ai: Completing tasks by connecting foundation models with millions of apis. Intelligent Computing , 3:0063, 2024. [11] Nelson F. Liu, Kevin Lin, John Hewitt, Ashwin Paranjape, Michele Bevilacqua, Fabio Petroni, and Percy Liang. Lost in the middle: How language models use long contexts. Transactions of the Association for Computational Linguistics , 12:157–173, 2024. [12] Aman Madaan, Niket Tandon, Prakhar Gupta, Skyler Hallinan, Luyu Gao, Sarah Wiegreffe, Uri Alon, Nouha Dziri, Shrimai Prabhumoye, Yiming Yang, Shashank Gupta, Bodhisattwa Prasad Majumder, Katherine Hermann, Sean Welleck, Amir Yazdanbakhsh, and Peter Clark. Self-refine: Iterative refinement with self-feedback. In Thirty-seventh Conference on Neural Information Processing Systems , 2023. 
+
+10 [13] Shishir G Patil, Tianjun Zhang, Xin Wang, and Joseph E. Gonzalez. Gorilla: Large language model connected with massive APIs. In The Thirty-eighth Annual Conference on Neural Information Processing Systems , 2024. [14] Yujia Qin, Shihao Liang, Yining Ye, Kunlun Zhu, Lan Yan, Yaxi Lu, Yankai Lin, Xin Cong, Xiangru Tang, Bill Qian, Sihan Zhao, Lauren Hong, Runchu Tian, Ruobing Xie, Jie Zhou, Mark Gerstein, dahai li, Zhiyuan Liu, and Maosong Sun. ToolLLM: Facilitating large language models to master 16000+ real-world APIs. In The Twelfth International Conference on Learning Representations , 2024. [15] Timo Schick, Jane Dwivedi-Yu, Roberto Dessi, Roberta Raileanu, Maria Lomeli, Eric Hambro, Luke Zettlemoyer, Nicola Cancedda, and Thomas Scialom. Toolformer: Language models can teach themselves to use tools. In Thirty-seventh Conference on Neural Information Processing Systems , 2023. [16] Omar Shaikh, Kristina Gligori´ c, Ashna Khetan, Matthias Gerstgrasser, Diyi Yang, and Dan Jurafsky. Grounding gaps in language model generations. In Kevin Duh, Helena Gomez, and Steven Bethard, editors, 
+
+Proceedings of the 2024 Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies (Volume 1: Long Papers) , pages 6279–6296, Mexico City, Mexico, June 2024. Association for Computational Linguistics. [17] Freda Shi, Xinyun Chen, Kanishka Misra, Nathan Scales, David Dohan, Ed H. Chi, Nathanael Schärli, and Denny Zhou. Large language models can be easily distracted by irrelevant context. In Andreas Krause, Emma Brunskill, Kyunghyun Cho, Barbara Engelhardt, Sivan Sabato, and Jonathan Scarlett, editors, 
+
+Proceedings of the 40th International Conference on Machine Learning , volume 202 of Proceedings of Machine Learning Research , pages 31210–31227. PMLR, 23–29 Jul 2023. [18] Noah Shinn, Federico Cassano, Ashwin Gopinath, Karthik R Narasimhan, and Shunyu Yao. Reflexion: language agents with verbal reinforcement learning. In Thirty-seventh Conference on Neural Information Processing Systems , 2023. [19] Mohit Shridhar, Xingdi Yuan, Marc-Alexandre Cote, Yonatan Bisk, Adam Trischler, and Matthew Hausknecht. {ALFW}orld: Aligning text and embodied environments for interactive learning. In 
+
+International Conference on Learning Representations , 2021. [20] Alex Tamkin, Kunal Handa, Avash Shrestha, and Noah Goodman. Task ambiguity in humans and language models. In The Eleventh International Conference on Learning Representations , 2023. [21] Harsh Trivedi, Tushar Khot, Mareike Hartmann, Ruskin Manku, Vinty Dong, Edward Li, Shashank Gupta, Ashish Sabharwal, and Niranjan Balasubramanian. AppWorld: A controllable world of apps and people for benchmarking interactive coding agents. In Lun-Wei Ku, Andre Martins, and Vivek Srikumar, editors, 
+
+Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 16022–16076, Bangkok, Thailand, August 2024. Association for Computational Linguistics. [22] Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc V Le, Ed H. Chi, Sharan Narang, Aakanksha Chowdhery, and Denny Zhou. Self-consistency improves chain of thought reasoning in language models. In The Eleventh International Conference on Learning Representations , 2023. [23] Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, brian ichter, Fei Xia, Ed H. Chi, Quoc V Le, and Denny Zhou. Chain of thought prompting elicits reasoning in large language models. In Alice H. Oh, Alekh Agarwal, Danielle Belgrave, and Kyunghyun Cho, editors, Advances in Neural Information Processing Systems , 2022. [24] Siye Wu, Jian Xie, Jiangjie Chen, Tinghui Zhu, Kai Zhang, and Yanghua Xiao. How easily do irrelevant inputs skew the responses of large language models? In First Conference on Language Modeling , 2024. [25] Tianbao Xie, Fan Zhou, Zhoujun Cheng, Peng Shi, Luoxuan Weng, Yitao Liu, Toh Jing Hua, Junning Zhao, Qian Liu, Che Liu, et al. Openagents: An open platform for language agents in the wild. arXiv preprint arXiv:2310.10634 , 2023. [26] John Yang, Carlos E Jimenez, Alexander Wettig, Kilian Lieret, Shunyu Yao, Karthik R Narasimhan, and Ofir Press. SWE-agent: Agent-computer interfaces enable automated software engineering. In The Thirty-eighth Annual Conference on Neural Information Processing Systems , 2024. [27] Shunyu Yao, Noah Shinn, Pedram Razavi, and Karthik Narasimhan. τ -bench: A benchmark for tool-agent-user interaction in real-world domains. In International Conference on Learning Representations (ICLR) ,2025. 
+
+11 [28] Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran, Thomas L. Griffiths, Yuan Cao, and Karthik R Narasimhan. Tree of thoughts: Deliberate problem solving with large language models. In Thirty-seventh Conference on Neural Information Processing Systems , 2023. [29] Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik R Narasimhan, and Yuan Cao. React: Synergizing reasoning and acting in language models. In The Eleventh International Conference on Learning Representations , 2023. [30] Qizheng Zhang, Changran Hu, Shubhangi Upasani, Boyuan Ma, Fenglu Hong, Vamsidhar Kamanuru, Jay Rainton, Chen Wu, Mengmeng Ji, Hanchen Li, et al. Agentic context engineering: Evolving contexts for self-improving language models. arXiv preprint arXiv:2510.04618 , 2025. [31] Andy Zhou, Kai Yan, Michal Shlapentokh-Rothman, Haohan Wang, and Yu-Xiong Wang. Language agent tree search unifies reasoning, acting, and planning in language models. In International Conference on Machine Learning (ICML) , 2024. [32] Shuyan Zhou, Frank F. Xu, Hao Zhu, Xuhui Zhou, Robert Lo, Abishek Sridhar, Xianyi Cheng, Tianyue Ou, Yonatan Bisk, Daniel Fried, Uri Alon, and Graham Neubig. Webarena: A realistic web environment for building autonomous agents. In The Twelfth International Conference on Learning Representations , 2024. 
+
+## A Appendix 
+
+A.1 ACCORD pseudocode 
+
+Algorithm 1 provides the full pseudocode for A CCORD ’s adaptive grounding loop sketched in Figure 3. 
+
+Algorithm 1 ACCORD : adaptive grounding loop 
+
+Require: Task instruction x, environment E, write action set W (which includes C OMPLETE TASK ), grounding prompt πgp (§3.2), max steps T , max rejects K 
+
+> 1:
+
+Initialize history h ← (πgp , x ); nreject ← 0 
+
+> 2:
+
+for t = 1 , . . . , T do  
+
+> 3:
+
+at ← MAIN AGENT (h) {Propose action}  
+
+> 4:
+
+if at invokes any API in W then  
+
+> 5:
+
+(decision , e t) ← GROUNDING AGENT (at, h, x, E ) {Integrate, probe, verify, decide}  
+
+> 6:
+
+if decision = R EJECT and nreject < K then  
+
+> 7:
+
+Append conflicting evidence et to h; nreject ← nreject + 1  
+
+> 8:
+
+continue {Re-propose action}  
+
+> 9:
+
+end if  
+
+> 10:
+
+end if  
+
+> 11:
+
+ot ← EXECUTE (E, a t) {Action reaches environment}  
+
+> 12:
+
+h ← h ∪ (at, o t) 
+
+> 13:
+
+if at = C OMPLETE TASK then  
+
+> 14:
+
+break  
+
+> 15:
+
+end if  
+
+> 16:
+
+end for A.2 Failure-mode annotation procedure 
+
+This appendix describes the annotation procedure used to produce the failure-mode distribution reported in Figure 2 and discussed in §2.2–2.3. 
+
+Sampling. For each benchmark (ALFWorld and AppWorld) we randomly sample 30 trajectories from the GPT-5-mini ReAct baseline that did not achieve task success. For each trajectory the annotator inspects the full environment-IO log together with the per-task evaluation report (which records what the task expected and which assertions failed), and assigns one or more error-mode labels covering the trajectory. 
+
+AppWorld rubric (LLM-based, multi-label). AppWorld annotation uses a 7-class multi-label 
+
+rubric: 12 • A1 — No read. The agent did not call any relevant read API before mutating or answering; the needed information was simply not fetched. • A2 — Read but overlooked. The agent called the right read API but ignored the field, filter, or row that mattered; the information was on screen but unused. • A3 — Schema / value assumed. The agent assumed an ID, attribute name, or response schema it never observed in this trajectory (e.g., assumed card_id but the real key is 
+
+payment_card_id ). • B — Reasoning. All required information was observed; the failure was in logic, matching, arithmetic, or loop construction. • C — API misuse. Wrong API for the intended action, or wrong argument shape (e.g., used a reply mechanism when forward was needed). • D — Task misinterpretation. The agent misread the natural-language instruction itself (scope, OR-clause, subject of action). • E — Giveup / max steps. Premature complete_task(status=’fail’) when alterna-tives were untried, or the trajectory exhausted its step budget. The annotator assigns a second (or third) label only when it captures a causally distinct error contribution, and selects one label as the primary root cause—the label that best answers “if you could only fix one root cause.” For each assigned label a one-line evidence quote from the trajectory is recorded. 
+
+AppWorld mapping to Figure 2. The three categories reported in Figure 2 are derived from the 
+
+primary label of each trajectory: Incomplete aggregates A1 and A3—cases where the affordance, argument value, or schema required by w was not in ct at decision time; Overlooked corresponds to A2—the disambiguating information was already in ct but the agent’s write contradicted it; and 
+
+Other aggregates B, C, D, and E—failures not attributable to a grounding gap. 
+
+AppWorld annotation model and prompt. AppWorld annotations are produced by Claude Opus 4.6 conditioned on the full trajectory and per-task evaluation report. The verbatim prompt is reproduced in Box A.2. Failure-mode annotation prompt (AppWorld) You are annotating a single AppWorld failure trajectory with multi-label error categories. We want to know not only the single root cause but every causally distinct error mode the trajectory exhibits. 
+
+The 7-class rubric. A1 (No read), A2 (Read but overlooked), A3 (Schema/value assumed), B (Reasoning), C (API misuse), D (Task misinterpretation), E (Giveup / max steps), with definitions as above. 
+
+Your task. Read the trajectory and assign 1 or more labels. Assign a 2nd (or 3rd) label only when it represents a causally distinct error contribution (not just a symptom), or when removing only one of the labels would still leave the task failed. If one label fully accounts for the failure, keep it single-label. For each label, give a one-line evidence quoting or paraphrasing the trajectory step that supports it, and pick one label as primary —the one that best matches “if you could only fix one root cause.” 
+
+Inputs. The full code-and-observation trajectory ( logs/environment_io.md ) and the per-task evaluation report ( evaluation/report.md , which states what was expected vs. what the agent did and which assertions failed). 
+
+Output. A single JSON object with fields task_id , primary (one label), labels (array containing primary ), evidence (one entry per label), and optional notes .
+
+Tips. Be conservative with secondary labels—most failed trajectories are well captured by a single label. A1 and A2 are distinct: A1 means the read API was never called; A2 means it was called but the output was disregarded. Trust the trajectory: if something seems obvious from the task name but the trajectory disagrees, the trajectory wins. 13 ALFWorld rubric (rule-based). ALFWorld trajectories follow fixed surface forms (e.g., On X, you see Y , You pick up Y from X , You clean/heat/cool the Y , You put Y in/on Z ), which we exploit to annotate failures via a deterministic fact-extraction-plus-decision-tree script rather than an LLM. 
+
+ALFWorld fact extraction. For each failed trajectory we sweep the action–observation history once and extract the following variables via regular expressions on observation strings: • n_seen : the number of distinct target instances revealed in On X, you see Y messages; • target_taken_count : count of You pick up Y from X events on a target; • target_processed : whether a relevant clean/heat/cool verb was issued on a held target (boolean); • target_put_at_target_recep : count of You put Y in/on Z events whose receptacle matches the task-specified one; • last_actions[-3:] : the trailing three actions, used to detect repetition loops. Subsequent classification consults only these variables; the script does not re-read the raw text. 
+
+ALFWorld decision tree. The extracted facts are routed through a fixed decision tree to a fine-grained sub-class (the first matching branch wins). We list each branch with its high-level category in parentheses: • n_seen == 0 : target_never_seen (Incomplete) —the target class was never observed. • n_seen < n_required (e.g., a pick_two task only saw one instance): pick_two_partial 
+
+(Incomplete) .• n_seen ≥ n_required and the target was never picked up: inventory_blocked (Over-looked) —the agent saw the object but did not acquire it. • picked up but the task requires cool/clean/heat and target_processed is false: 
+
+skipped_processing (Overlooked) —the object was acquired but not treated. • picked up and processed, but target_put_at_target_recep is below the required count: 
+
+put_phase_failed (Overlooked) —the object reached the held / processed state but never landed at the target receptacle. • all three stages cleared but the environment returned no reward: edge_case (Other) —a residual case the rubric does not capture. 
+
+ALFWorld mapping to Figure 2. Incomplete aggregates target_never_seen and pick_two_partial ;
+
+Overlooked aggregates inventory_blocked , skipped_processing , and put_phase_failed ; Other con-tains edge_case .
+
+A.3 Decoding settings 
+
+For all closed- and open-weight models other than GPT-5-mini ( Claude-4.5-sonnet , Qwen3.5-27B-FP8 , and Qwen3.5-9B (non-thinking) ), we use temperature = 0 in all reported runs. GPT-5-mini 
+
+exposes a reasoning-budget parameter rather than a temperature; we set the reasoning budget to 
+
+medium for all reported runs. No other decoding hyperparameters are modified from each provider’s default. 
+
+A.4 Further Analysis 
+
+This section collects the additional behavioral and breakdown analyses referenced from §5.3: read-write dynamics across trajectory steps, performance stratified by AppWorld task difficulty, the per-task-type breakdown on ALFWorld, an evaluation on a smaller open-weight backbone (Qwen3.5-9B), and implementation details for the ACE baseline. 
+
+A.4.1 Performance by AppWorld task difficulty 
+
+Figure 5 stratifies the AppWorld results by task difficulty (GPT-5-mini), showing that A CCORD ’s gains concentrate on the medium- and high-difficulty buckets. 14 Difficulty 1 Difficulty 2 Difficulty 3   
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Task Goal Completion (%)  82%
+> 62%
+> 48%
+> 89%
+> 83%
+> 63%
+> Performance by Task Difficulty ·GPT-5-mini (test normal)
+> Baseline
+> Accord
+
+(a) test-normal. Difficulty 1 Difficulty 2 Difficulty 3    
+
+> 0
+> 20
+> 40
+> 60
+> 80
+> 100
+> Task Goal Completion (%)  75%
+> 41%
+> 31%
+> 85%
+> 63%
+> 54%
+> Performance by Task Difficulty ·GPT-5-mini (test challenge)
+> Baseline
+> Accord
+
+(b) test-challenge. 
+
+Figure 5: Task Goal Completion (%) on AppWorld stratified by task difficulty (GPT-5-mini). Gains from A CCORD concentrate on the medium- and high-difficulty buckets, where the baseline has the most headroom and grounding gaps are most costly. On the easiest bucket (Difficulty 1) the baseline is already strong (82% / 75% on normal / challenge), leaving limited headroom; A CCORD adds +7 / +10 TGC. The gains widen sharply on the harder buckets: +21 / +22 TGC on Difficulty 2 (62 →83% / 41 →63%) and substantially larger gains on Difficulty 3 of test-challenge, where the action-grounding gap is most pronounced. 
+
+A.4.2 Read–write dynamics under A CCORD 
+
+A direct test of whether A CCORD changes agent behavior in the intended direction is to track how often the agent reads from the environment as a trajectory progresses. Figure 6 plots the cumulative number of read calls issued up to (and including) the n-th write, for the ReAct baseline and A CCORD 
+
+on AppWorld test-normal and test-challenge with GPT-5-mini. 1 2 3 4 5 6 7 8 9 10   
+
+> Write Operation Ordinal (n-th write in trajectory)
+> 0
+> 5
+> 10
+> 15
+> 20
+> 25
+> 30
+> 35
+> 40
+> Cumulative Avg # Read Calls
+> Cumulative Read Calls up to n-th Write ·GPT-5-mini (test_normal)
+> Baseline
+> Accord
+
+(a) test-normal. 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15    
+
+> Write Operation Ordinal (n-th write in trajectory)
+> 0
+> 25
+> 50
+> 75
+> 100
+> 125
+> 150
+> 175
+> 200
+> Cumulative Avg # Read Calls
+> Cumulative Read Calls up to n-th Write ·GPT-5-mini (test_challenge)
+> Baseline
+> Accord
+
+(b) test-challenge. 
+
+Figure 6: Cumulative average number of read calls issued up to the n-th write action, for the ReAct baseline and A CCORD on AppWorld (GPT-5-mini). A CCORD consistently issues more reads per write across both splits, with a larger absolute gap on test-challenge. 
+
+ACCORD induces more reads per write across the trajectory. The gap opens early—by the second write on test-normal, A CCORD has issued 13.2 reads on average versus 8.0 for the baseline—and persists throughout the trajectory. By the tenth write on test-normal, A CCORD accumulates 40.2 reads versus 24.3 for the baseline ( ∼1.65 ×); on test-challenge, the corresponding 15-write totals are 203.2 versus 122.7 ( ∼1.65 ×). The ratio is stable across splits, but the absolute read count differs by roughly a factor of five between normal and challenge tasks at the same write ordinal, indicating that harder tasks demand substantially more environmental grounding—and A CCORD supplies it. 
+
+Behavioral evidence for the diagnosis. These dynamics provide direct support for the diagnosis in §2.2: baseline agents under-acquire information relative to what each write requires, and A CCORD 
+
+closes this gap by inducing additional reads at exactly the points where they are needed. The effect is largest on the tasks where the grounding gap is most costly—harder tasks with longer trajectories. 
+
+A.4.3 ALFWorld with Qwen3.5-9B (non-thinking) 
+
+To check that A CCORD ’s gains carry over to a substantially weaker open-weight backbone, we addi-tionally evaluate Qwen3.5-9B (non-thinking) on the ALFWorld unseen split. Results are summarized in Table 4. Even on this much smaller model, A CCORD adds +7 .4 points of success rate (33.0% →
+
+40.4%, 36/109 → 44/109) over the ReAct baseline. The absolute numbers are far lower than with 15 Qwen3.5-27B-FP8, but the relative improvement is consistent with the larger-model setting reported in the main text. Table 4: ALFWorld (unseen split, 109 tasks) results on Qwen3.5-9B (non-thinking). Numbers in parentheses indicate absolute improvement over the ReAct baseline. 
+
+Method Success Rate (%) Solved 
+
+ReAct 33.0 36/109 ACCORD 40.4 ↑7.4 44/109 
+
+A.4.4 ACE evaluation details 
+
+We use the publicly released ACE implementation, which currently includes only the A DD operator. Without deduplication, the playbook grows monotonically and the reflector prompt eventually exceeds the GPT-5-mini context window; both runs terminated mid-evaluation when this happened. The ACE scores reported in Table 1 are therefore computed over the tasks that completed before this point: 125/147 on test-normal and 140/417 on test-challenge. 
+
+A.5 Grounding agent prompts 
+
+We use two grounding agent prompts, one per benchmark. Both are held fixed across all reported runs of their respective benchmark. Given the main agent’s trajectory and the proposed sensitive write, the grounding agent issues read-only API observations until it has gathered sufficient evidence, then emits A PPROVE or R EJECT ; on a reject, the emitted evidence is restricted to quotes from the trajectory or from its own observations rather than subjective judgment. The full prompt is shown in Box A.5. AppWorld grounding agent prompt 
+
+USER: You are a verification agent. Before an AI assistant executes code with sensitive API calls, you must verify that the code is correct and safe to execute. ,→
+
+## Core principle: Observe, then verify, then decide Your primary tool is **observation** — executing read-only Python code to inspect the actual environment state. Do NOT reason about correctness from the code alone. Instead, query the environment to gather evidence, then use that evidence to verify or refute the agent 's approach. Only after you have gathered sufficient evidence should you make a decision. 
+
+> ,→
+> ,→
+> ,→
+> ,→
+
+## How to observe Write read-only Python code in ``` python ... ``` blocks. You have access to the same 
+
+`apis ` object and all variables from the main agent 's execution environment (e.g., access_token, results from prior steps). 
+
+> ,→
+> ,→
+
+**What you can call in observations:** - Any read-only API (write operations will be blocked) - API documentation: `apis.api_docs.show_api_descriptions(app_name=...) ` and 
+
+`apis.api_docs.show_api_doc(app_name=..., api_name=...) ` to check API specifications 
+
+> ,→
+> ,→
+
+**Leverage the trajectory before observing:** You have access to the agent 's full execution trajectory, including all intermediate print outputs and API responses. Before writing any observation code, review the trajectory carefully to identify what has already been explicitly checked or printed. If the trajectory already contains the evidence you need (e.g., the agent printed a query result, iterated through pages, or displayed entity details), you can trust that printed output as evidence — there is no need to re-query it. Only observe what is **missing or ambiguous** in the trajectory. 
+
+> ,→
+> ,→
+> ,→
+> ,→
+> ,→
+> ,→
+
+**Observation strategies (apply only to gaps not already covered by the trajectory):** 
+
+16 - **Re-query the data source**: If the agent operated on data it never actually inspected in the trajectory, re-fetch the raw data yourself to verify that the agent 's logic matches the real data structure and content. 
+
+> ,→
+> ,→
+
+- **Check API specifications**: If the agent did not consult the API docs before calling an API, use `apis.api_docs.show_api_doc() ` to verify it used correct parameter names, types, and values. 
+
+> ,→
+> ,→
+
+- **Verify entity identity**: If the trajectory does NOT show the agent confirming it resolved an ambiguous entity (e.g., which "John" or which "note"), observe the environment to verify. 
+
+> ,→
+> ,→
+
+- **Test boundary conditions**: If the trajectory does NOT show the agent handling pagination exhaustively or checking edge cases, re-query to verify completeness. ,→
+
+## Verification checklist For each verification item below, use observation to gather evidence before making a judgment. ,→
+
+### 1. Constraint satisfaction Re-read the task instruction word by word. Extract and QUOTE every explicit constraint verbatim (e.g., recipients, amounts, dates, conditions, filters, set operations like "X that are in Y"). Do NOT paraphrase — copy the exact wording. Then for each quoted constraint, **observe** the environment to verify the code satisfies it. Only REJECT if your observation confirms a constraint is violated or ignored. 
+
+> ,→
+> ,→
+> ,→
+> ,→
+> ,→
+
+### 2. Ambiguity resolution Identify any ambiguity in the agent 's actions — such as unverified entity references (e.g., which "John"? which "meeting"?), assumed IDs, or implicit choices made without evidence. Also check whether the action assumes a particular environment state (e.g., an empty cart before checkout, no existing draft before creating one) that has not been verified. For each ambiguity, **observe the environment yourself first** to check whether the agent 's assumption is actually correct. Only REJECT if your observation reveals a conflict with the agent 's action — in that case, specify the exact API calls the agent should make to resolve it. 
+
+> ,→
+> ,→
+> ,→
+> ,→
+> ,→
+> ,→
+> ,→
+
+## Workflow 1. Read the agent 's trajectory since the last reflection (including all intermediate steps, API responses, and the code it is about to execute) and the task instruction. 
+
+> ,→
+> ,→
+
+2. Identify what needs to be verified — constraint satisfaction and ambiguity resolution (including unverified environment state). ,→
+
+3. **Review the trajectory** — check which verification items already have explicit evidence in the agent 's printed outputs. Note these as "covered by trajectory". ,→
+
+4. **Observe** — for items NOT covered by the trajectory, write one code block to query the environment. Wait for the result. ,→
+
+5. Repeat step 4 as needed until you have enough evidence for all items. 6. **Decide** — if all checks pass, APPROVE with an OBSERVE summary (what you observed and what it verified). If any check fails, REJECT with an OBSERVE directive specifying the exact API calls the main agent should make before proceeding. 
+
+> ,→
+> ,→
+> ,→
+
+## Output format When observing (one code block per message): 
+
+``` python # Describe what you are checking print(...) 
+
+``` 
+
+When deciding (only after sufficient observation): DECISION: APPROVE OBSERVE: <what you observed (which APIs you called, what data you checked) and what it verified (which constraints and assumptions were confirmed)> ,→
+
+or 
+
+17 DECISION: REJECT OBSERVE: <specify the API calls the main agent should make and what information to pay attention to — do NOT include your own judgment or conclusion> ,→
+
+## Key rules - NEVER output observation code and a DECISION in the same message. Observe first, wait for results, then decide in a separate message. ,→
+
+- Write one code block per observation step. Do not combine multiple unrelated checks. - You may take multiple observation steps before deciding. - If you cannot determine correctness after observation, default to APPROVE. - Do NOT attempt to fix or rewrite the code. Only APPROVE or REJECT. ## Examples ----------------------------------------------USER: [Reflection context omitted: contains task instruction, full agent trajectory, code about to execute, and triggered sensitive APIs] ,→
+
+ASSISTANT: The agent is about to execute: 
+
+``` python message = "Here are my David Fincher movie recommendations: Fight Club, The Social Network" ,→
+
+apis.phone.send_text_message(access_token=phone_access_token, phone_number=christopher_phone, message=message) ,→
+
+``` 
+
+Task: "Christopher has asked for my movie recommendations via phone text message. Reply to them with a list of comma-separated movie titles from my Simple Note account as per their request." 
+
+> ,→
+> ,→
+
+Constraints to verify: - "Christopher has asked ... via phone text message" — need to observe the original message to confirm what Christopher asked for ,→
+
+- "movie titles from my Simple Note account" — need to observe the note content to confirm the movies match ,→
+
+- "as per their request" — need to confirm the movies satisfy Christopher 's specific request ,→
+
+Let me observe Christopher 's original message first. 
+
+``` python messages = apis.phone.search_text_messages(access_token=phone_access_token, phone_number=christopher_phone, query="movie") ,→
+
+print(messages) 
+
+``` 
+
+USER: Output: 
+
+``` 
+
+[{"text_message_id": 16794, "sender": { "name": "Christopher Burch", "phone_number": "4275730168" }, "message": "Hey, I 'm planning to watch a movie. Do you have any recommendations for a movie from David Fincher?", ,→
+
+"sent_at": "2023-05-18T10:17:40" }]
+
+``` 
+
+ASSISTANT: 
+
+18 Christopher specifically asked for "recommendations for a movie from David Fincher". The agent 's message includes "Fight Club" and "The Social Network". Now I need to observe the Simple Note content to verify these are actually David Fincher movies from the note. 
+
+> ,→
+> ,→
+> ,→
+
+``` python movie_note = apis.simple_note.show_note(access_token=simple_note_access_token, note_id=1608) ,→
+
+print(movie_note[ 'content ']) 
+
+``` 
+
+USER: Output: 
+
+``` 
+
+# Movie Recommendations Interstellar - director: Christopher Nolan - genre: Sci-Fi, Drama Fight Club - director: David Fincher - genre: Drama The Social Network - director: David Fincher - genre: Biography, Drama The Godfather - director: Francis Ford Coppola - genre: Crime, Drama 
+
+``` 
+
+ASSISTANT: DECISION: APPROVE OBSERVE: Called `phone.search_text_messages ` to read Christopher 's original request, and `simple_note.show_note ` to read the note content. Verified that (1) Christopher asked for "recommendations for a movie from David Fincher", (2) Fight Club and The Social Network are both listed as David Fincher movies in the note, (3) the reply format uses comma-separated titles as required. 
+
+> ,→
+> ,→
+> ,→
+> ,→
+
+----------------------------------------------USER: [Reflection context omitted: contains task instruction, full agent trajectory, code about to execute, and triggered sensitive APIs] ,→
+
+ASSISTANT: The agent is about to execute: 
+
+``` python apis.supervisor.complete_task(answer=23) 
+
+``` 
+
+Task: "How many playlists do I have in Spotify?" I need to independently verify the count of 23. Let me observe by re-querying the playlist library with full pagination. ,→
+
+``` python playlists = [] page_index = 0 while True: page = apis.spotify.show_playlist_library(access_token=spotify_access_token, page_index=page_index) ,→
+
+if not page: break playlists.extend(page) page_index += 1 
+
+19 print(f"Total playlists: {len(playlists)}, pages iterated: {page_index}") 
+
+``` 
+
+USER: Output: 
+
+``` 
+
+Total playlists: 23, pages iterated: 3 
+
+``` 
+
+ASSISTANT: DECISION: APPROVE OBSERVE: Called `spotify.show_playlist_library ` with pagination (page_index 0–2), collected all 23 playlists across 3 pages. Verified that the total count matches the agent 's answer of 23. 
+
+> ,→
+> ,→
+
+----------------------------------------------USER: [Reflection context omitted: contains task instruction, full agent trajectory, code about to execute, and triggered sensitive APIs] ,→
+
+ASSISTANT: The agent is about to execute: 
+
+``` python apis.venmo.send_money(access_token=venmo_access_token, recipient_id=recipient[ 'user_id '], amount=50.00, note="Dinner split") ,→
+
+``` 
+
+Task: "Split the $120 dinner bill equally among me and my 3 friends on Venmo." Constraints to verify: - "Split the $120 dinner bill equally" — need to verify the amount is correct - "among me and my 3 friends" — 4 people total, each share = $30, but agent sends $50 The amount looks wrong. Let me observe to confirm. 
+
+``` python total = 120 people = 4 # "me and my 3 friends" = 4 people share = total / people print(f"Correct share per person: ${share}") print(f"Agent is sending: $50.00") 
+
+``` 
+
+USER: Output: 
+
+``` 
+
+Correct share per person: $30.0 Agent is sending: $50.00 
+
+``` 
+
+ASSISTANT: DECISION: REJECT OBSERVE: Before sending money, call 
+
+`apis.venmo.show_profile(access_token=venmo_access_token) ` to check whether the current user should be included in the split. Pay attention to the total number of people involved and recalculate the per-person share accordingly. 
+
+> ,→
+> ,→
+> ,→
+
+----------------------------------------------USER: Now verify the following code that the agent is about to execute. {{ reflect_context }} 
+
+The ALFWorld grounding agent does not emit A PPROVE /R EJECT . ALFWorld’s per-step environment information is compact—each observation is a short text describing what is visible from the agent’s current location—so re-sampling after every proposed action is cheap in tokens, and the cost of treating 20 every action as reject-by-default stays bounded even when the grounding agent fires frequently. This lets us adopt a simpler design that drops the verdict step entirely: before each action, the grounding agent compiles an objective state report (current location, carrying state, observed objects, task-vocabulary status, and unvisited receptacles), the report is appended to the main agent’s context, and the main agent re-samples its next action from the state-augmented context. The grounding agent itself never makes a verdict; it only describes the state the main agent should be conditioning on. The full prompt is shown in Box A.5. ALFWorld grounding agent prompt 
+
+# State Reporter (Observational Grounding) You are a State Reporter for an embodied agent operating in ALFWorld. Your sole job is to compile an **objective description of the current environment state**, drawing only on: 
+
+> ,→
+> ,→
+
+1. observations already present in the main agent 's trajectory, and 2. fresh observations you yourself make via the read-only `env_read ` tool. You do not evaluate the pending action. You do not recommend any next step. You do not characterize what the agent is trying to do or what might go wrong. You only describe what has been observed. 
+
+> ,→
+> ,→
+
+## Inputs - The task instruction. - The main agent 's trajectory up to now. The trajectory is split into two segments by a marker: ,→
+
+- prior turns (already covered by previous State Reporter rounds), and - turns after `--- NEW TURNS SINCE LAST STATE BRIEFING ---` (added in the current round). ,→
+
+- The pending write action the main agent has proposed but not yet executed. This is shown to you **only so you can prioritize which state slots to populate**. It is not an object of judgment. 
+
+> ,→
+> ,→
+
+## Tools - `env_read({"action": "<look|inventory|examine X>"}) ` — read-only environment probe. Allowed actions are `look `, `inventory `, and `examine <object> `. Each call counts toward the per-round observation budget. Prefer `inventory ` when checking carry state, since it is the most direct. 
+
+> ,→
+> ,→
+> ,→
+
+- `submit_state({"report": "<...>"}) ` — emit the final state report and end the round. Call exactly once. ,→
+
+You may call `env_read ` up to **!!<<<<||||max_observation_steps||||>>>>!!** times total before submitting. ,→
+
+## Workflow 1. Walk the trajectory and extract every fact that was actually observed (in tool outputs returned by the environment). Discard anything the main agent only inferred or spoke about. When the new-turns segment contains an action that may have changed a slot established earlier (a take, put, open, close, clean, heat, cool, slice, or use), treat the earlier slot value as potentially stale. 
+
+> ,→
+> ,→
+> ,→
+> ,→
+
+2. Identify which slots are relevant to the pending action — that is, slots whose value the action 's preconditions or target reference would touch: ,→
+
+- the agent 's current location and carrying state, - the target object 's last known location and attributes, - the target receptacle 's current open/closed state and known contents. 3. For each relevant slot, check whether the trajectory 's observations still pin down the current value. If yes, record it. If the trajectory has no observation, or the latest one may be stale, call `env_read ` to refresh it. Repeat as needed within the budget. 
+
+> ,→
+> ,→
+> ,→
+
+21 4. **Extract task vocabulary from the task instruction** — both entity-class nouns AND attribute/state modifiers that the task requires the entity to have. Examples: 
+
+> ,→
+> ,→
+
+- "look at pencil under the desklamp" → entities: `pencil `, `desklamp `;attributes: (none) ,→
+
+- "put a **clean** apple on the desk" → entities: `apple `, `desk `; attributes: 
+
+`clean ` (on apple) ,→
+
+- "put a **cool** tomato in microwave" → entities: `tomato `, `microwave `;attributes: `cool ` (on tomato) ,→
+
+- "put a **cool sliced** lettuce on countertop" → entities: `lettuce `,
+
+`countertop `; attributes: `cool `, `sliced ` (both on lettuce) ,→
+
+- "examine bowl with desklamp" → entities: `bowl `, `desklamp `; attributes: (none) For each entity noun: search trajectory and grounding observations for a matching instance ID (case-insensitive, rough singular/plural matching). Record OBSERVED status with instance id and location, or NOT_OBSERVED. 
+
+> ,→
+> ,→
+
+For each attribute modifier: check whether the entity it modifies has that attribute in `objects: attributes=[...] ` of the FROM TRAJECTORY section. Record OBSERVED on `<instance> ` (if at least one matching entity instance has the attribute) or NOT_OBSERVED. 
+
+> ,→
+> ,→
+> ,→
+
+This is mechanical string presence — do not infer or guess. 5. **Extract the receptacle list from the initial room overview** — typically the first user message, of the form "you see a bed 1, a desk 2, a desk 1, ...". Compute the set of receptacles in that overview list that do NOT appear in the 
+
+`receptacles: ` block of `=== FROM TRAJECTORY === `. These are the receptacles never visited or never had their contents observed. List them as unvisited. 
+
+> ,→
+> ,→
+> ,→
+> ,→
+
+6. Call `submit_state ` once with a single string holding the report in the format below. ,→
+
+## Output format The report must be a single string with four sections, in this exact order: 
+
+``` 
+
+=== FROM TRAJECTORY === agent_self: location: <last confirmed location | unknown> [turn N] carrying: <object id | nothing | unknown> [turn N] objects: - <object id>: last_seen_at=<receptacle id | unknown>, attributes=[<clean|hot|cool|sliced|...> | none], evidence=[turn N(, turn M)] ,→
+
+- ... receptacles: - <receptacle id>: state=<open|closed|unknown>, contents=[<object id, ...> | not_observed], evidence=[turn N] ,→
+
+- ... === FROM GROUNDING OBSERVATIONS === - env_read(<action>) → <verbatim observation excerpt> - ... === TASK VOCABULARY === - <task noun>: OBSERVED as <instance id> at <location> | NOT_OBSERVED - ... === UNVISITED RECEPTACLES === - <receptacle id> - ... 
+
+``` 
+
+Conventions: - Cite trajectory turn numbers in `[turn N] `. If a fact is supported by multiple turns, list each. ,→
+
+22 - For grounding observations, quote the relevant excerpt of the env_read output verbatim; do not paraphrase. ,→
+
+- Omit the `=== FROM GROUNDING OBSERVATIONS === ` section entirely if you made no env_read calls in this round. Do not write "(none)". ,→
+
+- If a relevant slot has no observation in either source, write `unknown ` (and only that). Do not guess, do not fall back to common-sense priors. ,→
+
+- Include in the `objects ` and `receptacles ` lists only entities the trajectory or your env_read calls have actually surfaced. Do not enumerate hypothetical instances. 
+
+> ,→
+> ,→
+
+- `=== TASK VOCABULARY === ` lists every entity-class noun AND every attribute/state modifier mentioned in the task instruction. Two entry types: ,→
+
+- **Entity entries** (one per noun): `OBSERVED as <instance> at <loc> ` (when at least one matching instance has appeared in observations) or `NOT_OBSERVED `.,→
+
+- **Attribute entries** (one per modifier): `OBSERVED on <instance> ` (when at least one matching entity instance shows that attribute in the `objects: `
+
+block) or `NOT_OBSERVED on any instance `.
+
+> ,→
+> ,→
+
+Do not append any explanation or hint. If the task names multiple instances of the same class (e.g., "desk" while the room has `desk 1 ` and `desk 2 `), list each. Tag attribute entries clearly so readers don 't confuse them with entity entries — prefix with the attribute word followed by `(attribute on <noun>): `.
+
+> ,→
+> ,→
+> ,→
+> ,→
+
+- `=== UNVISITED RECEPTACLES === ` is a bare list of receptacle ids drawn from the initial room overview that are absent from the `receptacles: ` block above. Write 
+
+`(none) ` if all room receptacles have been observed. Do not annotate, sort, or comment on the list. 
+
+> ,→
+> ,→
+> ,→
+
+## Strict prohibitions The report must not contain any of the following. If a slot would require any of these to fill, leave it as `unknown `.,→
+
+- No decision tokens ( `APPROVE `, `REJECT `, `OK `, `BLOCK `, `WARN `, etc.). - No `reason `, `note `, `comment `, or free-form prose section. The schema above is exhaustive. ,→
+
+- No advice, suggestion, or imperative directed at the main agent. No "should", "next", "consider", "recommend", "instead", "before doing X". ,→
+
+- No characterization of the pending action ("the agent intends to ...", "the action would ..."). The pending action is not a topic in the report. ,→
+
+- No inference from common sense or world knowledge ("apples are usually in the fridge", "knives are typically in drawers"). Only direct observation counts. ,→
+
+- No hedged or modal language: no "possibly", "likely", "appears to", "should be", "expected", "probably". Each fact is either observed or absent. ,→
+
+- No reference to past State Reporter rounds beyond the trajectory data itself. - No interpretation of `=== TASK VOCABULARY === ` results. Do NOT write things like "agent should look elsewhere because pencil is NOT_OBSERVED" or "the apple needed for the task is here". Status entries are bare facts; the agent reads them and decides on its own. 
+
+> ,→
+> ,→
+> ,→
+
+- No annotation of `=== UNVISITED RECEPTACLES === `. The list is just receptacle ids — no priority labels, no "most likely contains X" suggestions, no commentary. ,→
+
+## Examples ### Example 1 — trajectory already covers everything Task: "Put a clean apple on the desk." Room overview (from initial user message): "you see a desk 1, a fridge 1, a sinkbasin 1, a countertop 1, a countertop 2." ,→
+
+Trajectory (excerpted): - turn 4: `inventory ` → "You are carrying: an apple 2." - turn 6: agent action `clean apple 2 with sinkbasin 1 ` → "You clean the apple 2 using the sinkbasin 1." ,→
+
+- turn 8: agent action `go to desk 1 ` → "You arrive at desk 1. On the desk 1, you see a pen 3, a keychain 2." ,→
+
+23 Pending action: `put apple 2 in/on desk 1 `
+
+Task nouns: `apple `, `desk `. Room receptacles: desk 1, fridge 1, sinkbasin 1, countertop 1, countertop 2. Visited (in trajectory): desk 1, sinkbasin 1. ,→
+
+``` 
+
+=== FROM TRAJECTORY === agent_self: location: desk 1 [turn 8] carrying: apple 2 [turn 4] objects: - apple 2: last_seen_at=in_inventory, attributes=[clean], evidence=[turn 4, turn 6] - pen 3: last_seen_at=desk 1, attributes=[none], evidence=[turn 8] - keychain 2: last_seen_at=desk 1, attributes=[none], evidence=[turn 8] receptacles: - desk 1: state=open, contents=[pen 3, keychain 2], evidence=[turn 8] - sinkbasin 1: state=open, contents=not_observed, evidence=[turn 6] === TASK VOCABULARY === - apple: OBSERVED as apple 2 at in_inventory - clean (attribute on apple): OBSERVED on apple 2 - desk: OBSERVED as desk 1 at desk 1 === UNVISITED RECEPTACLES === - fridge 1 - countertop 1 - countertop 2 
+
+``` 
+
+(No `=== FROM GROUNDING OBSERVATIONS === ` section because no env_read was called.) ### Example 2 — trajectory carry state is stale, grounding refreshes via inventory Task: "Cool a pan and put it on the countertop." Room overview: "you see a stoveburner 1, a countertop 1, a countertop 2, a fridge 1, a sinkbasin 1, a microwave 1." ,→
+
+Trajectory (excerpted): - turn 2: `inventory ` → "You are not carrying anything." - turn 5: agent action `take pan 1 from stoveburner 1 ` → "You pick up the pan 1 from the stoveburner 1." ,→
+
+- turn 7: agent action `take saltshaker 1 from countertop 2 ` → "Nothing happens." [environment rejected: already carrying] ,→
+
+- turn 8: agent action `go to fridge 1 ` → "You arrive at fridge 1. The fridge 1 is closed." ,→
+
+Pending action: `cool pan 1 with fridge 1 `
+
+Task nouns: `pan `, `countertop `. Visited: stoveburner 1, countertop 2, fridge 1. 
+
+``` 
+
+ASSISTANT (env_read call): env_read({"action": "inventory"}) TOOL: "You are carrying: a pan 1." ASSISTANT (submit_state call): submit_state({"report": "...as below..."}) === FROM TRAJECTORY === agent_self: location: fridge 1 [turn 8] carrying: unknown objects: - pan 1: last_seen_at=stoveburner 1, attributes=[none], evidence=[turn 5] - saltshaker 1: last_seen_at=countertop 2, attributes=[none], evidence=[turn 7] receptacles: 
+
+24 - stoveburner 1: state=open, contents=[pan 1 (taken at turn 5)], evidence=[turn 5] - countertop 2: state=open, contents=[saltshaker 1], evidence=[turn 7] - fridge 1: state=closed, contents=not_observed, evidence=[turn 8] === FROM GROUNDING OBSERVATIONS === - env_read(inventory) → "You are carrying: a pan 1." === TASK VOCABULARY === - pan: OBSERVED as pan 1 at in_inventory (env_read inventory) - cool (attribute on pan): NOT_OBSERVED on any instance - countertop: OBSERVED as countertop 2 at countertop 2 === UNVISITED RECEPTACLES === - countertop 1 - sinkbasin 1 - microwave 1 
+
+``` 
+
+### Example 3 — target receptacle contents not yet observed; task noun never seen Task: "Look at pencil under the desklamp." Room overview: "you see a desk 1, a desk 2, a drawer 1, a drawer 2, a shelf 1, a shelf 2, a bed 1, a garbagecan 1." ,→
+
+Trajectory (excerpted): - turn 1: agent action `go to desk 1 ` → "On the desk 1, you see a desklamp 1, a pen 2, a laptop 1." ,→
+
+- turn 2: agent action `examine desk 1 ` → "On the desk 1, you see a desklamp 1, a pen 2, a laptop 1." ,→
+
+- turn 3: agent action `use desklamp 1 ` → "You turn on the desklamp 1." - turn 5: agent action `take pen 2 from desk 1 ` → "You pick up the pen 2 from the desk 1." ,→
+
+Pending action: `examine desk 1 `
+
+Task nouns: `pencil `, `desklamp `. The trajectory never shows any `pencil ` instance — only `pen 2 `, which is a distinct entity class. Visited: desk 1. ,→
+
+``` 
+
+=== FROM TRAJECTORY === agent_self: location: desk 1 [turn 1, turn 2, turn 3] carrying: pen 2 [turn 5] objects: - desklamp 1: last_seen_at=desk 1, attributes=[none], evidence=[turn 1, turn 3] - pen 2: last_seen_at=in_inventory, attributes=[none], evidence=[turn 1, turn 5] - laptop 1: last_seen_at=desk 1, attributes=[none], evidence=[turn 1] receptacles: - desk 1: state=open, contents=[desklamp 1, pen 2 (taken at turn 5), laptop 1], evidence=[turn 1, turn 2] ,→
+
+=== TASK VOCABULARY === - pencil: NOT_OBSERVED - desklamp: OBSERVED as desklamp 1 at desk 1 === UNVISITED RECEPTACLES === - desk 2 - drawer 1 - drawer 2 - shelf 1 - shelf 2 - bed 1 - garbagecan 1 
+
+``` 
+
+25 A separate policy-level grounding prompt πgp (§3.2) is appended to each main agent’s system prompt to bias it toward inspecting environmental content before acting. The exact text differs between benchmarks, scaled to each environment’s interaction surface. AppWorld policy-level grounding prompt 
+
+(10) If the content or format of returned information is uncertain, inspect the actual raw content first (e.g., via read /show APIs) and do not guess structure or write parsing logic based on assumptions. 
+
+(11) If the content of returned information is not as expected, re-examine the API specification, your request parameters, and any assumptions you made about the response structure. Adjust your approach accordingly and verify the result is correct before proceeding to the next step. 
+
+(12) Before executing the task, you MUST call show_api_descriptions(app_name="") 
+
+to get the complete API list for ALL apps at once. Do NOT selectively check only apps you think are relevant—you must examine every app’s APIs exhaustively. ALFWorld policy-level grounding prompt Before you start to tackle the problem, explore the environment first. 26
