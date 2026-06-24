@@ -6,91 +6,109 @@
 </div>
 
 ## 每次日报
-- 最新运行日期：2026-06-22
-- 运行时间：2026-06-22 22:51:30 UTC
+- 最新运行日期：2026-06-15 ~ 2026-06-24
+- 运行时间：2026-06-24 12:08:09 UTC
 - 运行状态：成功
-- 本次总论文数：23
-- 精读区：9
-- 速读区：14
+- 本次总论文数：29
+- 精读区：18
+- 速读区：11
 
 ### 今日简报（AI）
-今日精选23篇论文，精读聚焦共享自主协作与机器口译设计两大高分领域。  
-最值得关注：VLA策略共享自主系统（SAPS）与机器口译可用性研究（均9.0/10），以及偏好学习（PAWS）和智能体口音对K-12合作学习的影响（均8.0/10）。  
-建议优先精读SAPS与机器口译论文，若时间有限，速读PAWS可快速了解偏好优化方法。
-- 详情：[/202606/22/README](/202606/22/README)
+本期日报聚焦AI在心理治疗与社交机器人的前沿突破，精读18篇，速读11篇。  
+最值得关注的是AI驱动的交互式病人化身用于心理治疗训练（10分），以及人工智能冲突中心智理论的因果模型（9分）。  
+普通读者可重点关注AI如何提升心理治疗的易得性和机器人的社会交互能力。
+- 详情：[/20260615-20260624/README](/20260615-20260624/README)
 
 ### 精读区论文标签
-1. [SAPS: Shared Autonomy for Policy Steering by Blending Teleoperation with a Pretrained VLA](/202606/22/2606.15568v1-saps-shared-autonomy-for-policy-steering-by-blending-teleoperation-with-a-pretrained-vla)  
+1. [Toward Accessible Psychotherapy Training Using AI-Driven Interactive Patient Avatars](/20260615-20260624/2606.17786v1-toward-accessible-psychotherapy-training-using-ai-driven-interactive-patient-avatars)  
+   标签：评分：10.0/10、query:ai-hci-mh
+   evidence：AI驱动的心理治疗培训
+2. [A Causal Model of Theory of Mind in Conflict for Artificial Intelligence](/20260615-20260624/2606.16944v1-a-causal-model-of-theory-of-mind-in-conflict-for-artificial-intelligence)  
    标签：评分：9.0/10、query:human-ai
-   evidence：通过融合人类遥操作与AI策略实现共享自主性，促进人机协作
-2. [Bridging the Usability Gap: Lessons from Interpreting Studies for Machine Interpreting Design](/202606/22/2606.16009v2-bridging-the-usability-gap-lessons-from-interpreting-studies-for-machine-interpreting-design)  
+   evidence：冲突情景下心智理论的因果模型，用于人机集成
+3. [Mind Companion: An Embodied Conversational Agent for Process-Based Psychotherapy](/20260615-20260624/2606.17789v1-mind-companion-an-embodied-conversational-agent-for-process-based-psychotherapy)  
+   标签：评分：9.0/10、query:ai-hci-mh
+   evidence：基于过程的心理治疗具身对话代理，集情感识别与安全监控
+4. [Fine-tuning LLMs for Passive Depression Severity Estimation from AI Mental Health Dialogue](/20260615-20260624/2606.17973v1-fine-tuning-llms-for-passive-depression-severity-estimation-from-ai-mental-health-dialogue)  
+   标签：评分：9.0/10、query:ai-hci-mh
+   evidence：微调LLM从AI心理健康对话被动评估抑郁严重程度
+5. [Reading between the Lines: Leveraging Large Language Models for Global Dementia and Depression Assessment from Clinical Interviews](/20260615-20260624/2606.18019v1-reading-between-the-lines-leveraging-large-language-models-for-global-dementia-and-depression-assessment-from-clinical-interviews)  
+   标签：评分：9.0/10、query:ai-hci-mh
+   evidence：基于LLM从临床访谈评估痴呆和抑郁
+6. [AI-based Cognitive-linguistic Features for Dementia Assessment in Picture Description](/20260615-20260624/2606.18054v1-ai-based-cognitive-linguistic-features-for-dementia-assessment-in-picture-description)  
+   标签：评分：9.0/10、query:ai-hci-mh
+   evidence：基于LLM的痴呆症认知语言特征评估
+7. [Towards Understanding and Measuring COGNITIVE ATROPHY in LLM Behaviour](/20260615-20260624/2606.18129v1-towards-understanding-and-measuring-cognitive-atrophy-in-llm-behaviour)  
+   标签：评分：9.0/10、query:ai-hci-mh
+   evidence：用于心理健康支持的LLM行为评估，测量认知萎缩
+8. [Better Adherence, Richer Context: A Field Evaluation of LLM-Powered Conversational Voice Diaries for Sleep](/20260615-20260624/2606.18596v1-better-adherence-richer-context-a-field-evaluation-of-llm-powered-conversational-voice-diaries-for-sleep)  
+   标签：评分：9.0/10、query:ai-hci-mh
+   evidence：LLM驱动的对话式语音日记用于睡眠治疗
+9. [Human-AI Agent Interaction in a Business Context](/20260615-20260624/2606.18716v1-human-ai-agent-interaction-in-a-business-context)  
    标签：评分：9.0/10、query:human-ai
-   evidence：聚焦机器口译系统的用户体验和交际有效性
-3. [HATS: A Human-Agent Teleoperation System for Multi-Arm Data Collection](/202606/22/2606.16491v1-hats-a-human-agent-teleoperation-system-for-multi-arm-data-collection)  
-   标签：评分：9.0/10、query:human-ai
-   evidence：人类-智能体协作的多臂遥操作数据收集
-4. [MapSatisfyBench: Benchmarking Satisfaction-Aware Map Agents through Behavior-Grounded Implicit Decision Factors](/202606/22/2606.17453v2-mapsatisfybench-benchmarking-satisfaction-aware-map-agents-through-behavior-grounded-implicit-decision-factors)  
-   标签：评分：9.0/10、query:human-ai
-   evidence：关注用户隐含需求的满意感知地图智能体基准
-5. [ARES: A Platform for Adaptive Role-Based Evaluation of Social Engineering Risks in Human--AI Games](/202606/22/2606.17793v1-ares-a-platform-for-adaptive-role-based-evaluation-of-social-engineering-risks-in-human--ai-games)  
-   标签：评分：9.0/10、query:social-rl
-   evidence：ARES平台评估人类AI游戏中的社会工程风险，包含囚徒困境等社会强化学习要素
-6. [Do as the Romans Do: Learning Universal Behaviors from Heterogeneous Agents](/202606/22/2606.18537v1-do-as-the-romans-do-learning-universal-behaviors-from-heterogeneous-agents)  
-   标签：评分：9.0/10、query:social-rl
-   evidence：从异构智能体进行社会学习，通过奖励分解提取通用行为
-7. [PEC-Home: Interpretation of Progressively Elliptical Commands in Smart Homes](/202606/22/2606.18636v1-pec-home-interpretation-of-progressively-elliptical-commands-in-smart-homes)  
-   标签：评分：9.0/10、query:human-ai
-   evidence：智能家居助手理解逐渐省略的指令
-8. [Generating Natural and Expressive Robot Gestures through Iterative Reinforcement Learning with Human Feedback using LLMs](/202606/22/2606.18747v1-generating-natural-and-expressive-robot-gestures-through-iterative-reinforcement-learning-with-human-feedback-using-llms)  
-   标签：评分：9.0/10、query:human-ai
-   evidence：利用人类反馈的迭代强化学习生成机器人手势
-9. ["OpenBloom": A Stigma-Sensitive LLM Design Probe for Reproductive Well-Being](/202606/22/2606.15536v1-openbloom-a-stigma-sensitive-llm-design-probe-for-reproductive-well-being)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：面向生殖健康的AI用户体验设计探针
+   evidence：人-AI代理交互用户体验原则
+10. [CDER-SME: A Cross-Device Event-RGB Micro-Expression Dataset under Multi-Level Stress Induction](/20260615-20260624/2606.20715v1-cder-sme-a-cross-device-event-rgb-micro-expression-dataset-under-multi-level-stress-induction)  
+   标签：评分：9.0/10、query:ai-hci-mh
+   evidence：用于压力诱导情绪识别的微表情数据集，支持持续心理健康监测
+11. [A Multi-Agent Audit Framework for High-Stakes Reasoning: Evaluation and Interpretability in Clinical Mental Health Screening](/20260615-20260624/2606.21123v1-a-multi-agent-audit-framework-for-high-stakes-reasoning-evaluation-and-interpretability-in-clinical-mental-health-screening)  
+   标签：评分：9.0/10、query:ai-hci-mh
+   evidence：用于可解释临床心理健康筛查的多代理审计框架
+12. [Dementia-Agents: A Multi-Modal Multi-Agent System for Dementia Staging and Phenotyping](/20260615-20260624/2606.21168v1-dementia-agents-a-multi-modal-multi-agent-system-for-dementia-staging-and-phenotyping)  
+   标签：评分：9.0/10、query:ai-hci-mh
+   evidence：多模态多代理系统用于痴呆分期
+13. [Towards Transparent Mental Health Insights: An Explainable AI Model for Career-Related Depression and Anxiety Among University Students Using Structured Data](/20260615-20260624/2606.21474v1-towards-transparent-mental-health-insights-an-explainable-ai-model-for-career-related-depression-and-anxiety-among-university-students-using-structured-data)  
+   标签：评分：9.0/10、query:ai-hci-mh
+   evidence：使用多模态数据和联邦学习的可解释AI模型，用于职业相关抑郁焦虑
+14. [Evaluating Document-Tuned Transformer Representations for Person-level Mental Health Assessment](/20260615-20260624/2606.21622v1-evaluating-document-tuned-transformer-representations-for-person-level-mental-health-assessment)  
+   标签：评分：9.0/10、query:ai-hci-mh
+   evidence：文档调优Transformer用于个体层面心理健康评估
+15. [MindTailor: Personalized Emotional Support via Post History-Grounded Case Formulation and Collaborative Refinement](/20260615-20260624/2606.21930v1-mindtailor-personalized-emotional-support-via-post-history-grounded-case-formulation-and-collaborative-refinement)  
+   标签：评分：9.0/10、query:ai-hci-mh
+   evidence：基于发帖历史与协作改进的个性化情感支持
+16. [Explainable AI for Mental Health Prediction in Drug-Affected Populations with Dragonfly Algorithm and GAN Oversampling](/20260615-20260624/2606.22780v1-explainable-ai-for-mental-health-prediction-in-drug-affected-populations-with-dragonfly-algorithm-and-gan-oversampling)  
+   标签：评分：9.0/10、query:ai-hci-mh
+   evidence：面向毒品影响人群的可解释心理健康预测
+17. [PsyBridge: A Hybrid Intelligent Framework for Multi-Dimensional Mental Health Assessment and Decision Support](/20260615-20260624/2606.23673v1-psybridge-a-hybrid-intelligent-framework-for-multi-dimensional-mental-health-assessment-and-decision-support)  
+   标签：评分：9.0/10、query:ai-hci-mh
+   evidence：多维度心理健康评估与决策支持框架
+18. [One Year Later...The Harms Persist, But So Do We!](/20260615-20260624/2606.23884v1-one-year-laterthe-harms-persist-but-so-do-we)  
+   标签：评分：9.0/10、query:ai-hci-mh
+   evidence：LLM在心理健康对话中的安全性评估
 
 ### 速读区论文标签
-1. [PAWS: Preference Learning with Advantage-Weighted Segments](/202606/22/2606.11982v1-paws-preference-learning-with-advantage-weighted-segments)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：基于人类比较的偏好学习，改进人类反馈利用
-2. [Exploring How Agent Voice Accents Shape Human-AI Collaboration in K-12 Group Learning](/202606/22/2606.12805v1-exploring-how-agent-voice-accents-shape-human-ai-collaboration-in-k-12-group-learning)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：人机协作，智能体口音，小组学习
-3. [GUITrans2Act: Understanding User Operational Behaviors from Mobile GUI Interactions with Vision-Language Models](/202606/22/2606.12817v2-guitrans2act-understanding-user-operational-behaviors-from-mobile-gui-interactions-with-vision-language-models)  
+1. [An Augmented Reality Brain-Robot Interface for Generalist Robot Arm Manipulation](/20260615-20260624/2606.16413v1-an-augmented-reality-brain-robot-interface-for-generalist-robot-arm-manipulation)  
    标签：评分：8.0/10、query:interaction
-   evidence：移动GUI交互理解
-4. [Iterating Toward Better Search: A Two-Agent Simulation Framework for Evaluating Agentic Search Architectures in E-Commerce](/202606/22/2606.12924v1-iterating-toward-better-search-a-two-agent-simulation-framework-for-evaluating-agentic-search-architectures-in-e-commerce)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：评估对话式AI代理交互设计
-5. [From Prompts to Preferences: An Open-Source Platform for Generative AI-Enhanced Conjoint Analysis](/202606/22/2606.12972v1-from-prompts-to-preferences-an-open-source-platform-for-generative-ai-enhanced-conjoint-analysis)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：使用生成式AI增强的联合分析平台评估用户体验
-6. [ToolMenuBench: Benchmarking Tool-Menu Filtering Strategies for Reliable and Efficient LLM Agents](/202606/22/2606.15508v1-toolmenubench-benchmarking-tool-menu-filtering-strategies-for-reliable-and-efficient-llm-agents)  
+   evidence：增强现实脑机接口结合注视与运动想象
+2. [Beyond Usability: A UX Case Study on Using "Withdrawal Design" to Challenge Engagement Metrics in Social Robotics](/20260615-20260624/2606.16439v1-beyond-usability-a-ux-case-study-on-using-withdrawal-design-to-challenge-engagement-metrics-in-social-robotics)  
+   标签：评分：8.0/10、query:ai-hci-mh
+   evidence：社交机器人撤出研究中的情绪识别
+3. [Steering Emotional Dynamics for Art Therapy: Controllable Narrative Script Generation through Hierarchically Guided LLM Agents](/20260615-20260624/2606.16481v1-steering-emotional-dynamics-for-art-therapy-controllable-narrative-script-generation-through-hierarchically-guided-llm-agents)  
+   标签：评分：8.0/10、query:ai-hci-mh
+   evidence：用于艺术治疗的情感动态可控叙事脚本生成
+4. [From Affect Prediction to Affect Forecasting: Evidence for Distinct Information Sources in Longitudinal Text](/20260615-20260624/2606.16687v1-from-affect-prediction-to-affect-forecasting-evidence-for-distinct-information-sources-in-longitudinal-text)  
+   标签：评分：8.0/10、query:ai-hci-mh
+   evidence：基于纵向文本的情感预测与预报
+5. [When AI Says "I have been in similar situations": Synthetic Lived Experience in Peer-Like Caregiver Support](/20260615-20260624/2606.18057v2-when-ai-says-i-have-been-in-similar-situations-synthetic-lived-experience-in-peer-like-caregiver-support)  
+   标签：评分：7.0/10、query:ai-hci-mh
+   evidence：基于LLM的同伴式照顾者支持及合成生活经验悖论
+6. [WEQA: Wearable hEalth Question Answering with Query-Adaptive Agentic Reasoning](/20260615-20260624/2606.18147v1-weqa-wearable-health-question-answering-with-query-adaptive-agentic-reasoning)  
+   标签：评分：7.0/10、query:ai-hci-mh
+   evidence：可穿戴传感器数据问答与LLM代理框架
+7. [RubricsTree: Scalable and Evolving Open-Ended Evaluation of Personal Health Agents across Health Memory and Medical Skills](/20260615-20260624/2606.18203v1-rubricstree-scalable-and-evolving-open-ended-evaluation-of-personal-health-agents-across-health-memory-and-medical-skills)  
+   标签：评分：7.0/10、query:ai-hci-mh
+   evidence：个人健康代理的可扩展评估框架，利用LLM和传感器数据
+8. [PrivacyAlign: Contextual Privacy Alignment for LLM Agents](/20260615-20260624/2606.21710v1-privacyalign-contextual-privacy-alignment-for-llm-agents)  
    标签：评分：7.0/10、query:human-ai
-   evidence：大型语言模型智能体工具菜单过滤基准
-7. [SiGnature: Explicit Motion Diffusion for Stylized Semantic Gesture](/202606/22/2606.15889v1-signature-explicit-motion-diffusion-for-stylized-semantic-gesture)  
-   标签：评分：7.0/10、query:interaction
-   evidence：语义手势生成用于多模态交互
-8. [PACT: Privileged Trace Co-Training for Multi-Turn Tool-Use Agents](/202606/22/2606.16215v1-pact-privileged-trace-co-training-for-multi-turn-tool-use-agents)  
-   标签：评分：7.0/10、query:human-ai
-   evidence：面向交互式AI的多轮工具使用智能体训练
-9. [Maximum Entropy Inverse Reinforcement Learning for Mean-Field Games with Average Reward](/202606/22/2606.16759v1-maximum-entropy-inverse-reinforcement-learning-for-mean-field-games-with-average-reward)  
-   标签：评分：7.0/10、query:social-rl
-   evidence：面向平均场博弈的逆强化学习，解决多智能体社会学习问题
-10. [MemSlides: A Hierarchical Memory Driven Agent Framework for Personalized Slide Generation with Multi-turn Local Revision](/202606/22/2606.17162v1-memslides-a-hierarchical-memory-driven-agent-framework-for-personalized-slide-generation-with-multi-turn-local-revision)  
-   标签：评分：7.0/10、query:human-ai
-   evidence：具有记忆的个性化幻灯片生成代理支持多轮用户交互
-11. [SpecAlign: Efficient Specification-Grounded Alignment of Large Language Models via Synthetic Data](/202606/22/2606.16276v1-specalign-efficient-specification-grounded-alignment-of-large-language-models-via-synthetic-data)  
+   evidence：以人为中心的LLM代理隐私对齐
+9. [SpeechDx: A Multi-Task Benchmark for Clinical Speech AI](/20260615-20260624/2606.17339v1-speechdx-a-multi-task-benchmark-for-clinical-speech-ai)  
+   标签：评分：6.0/10、query:ai-hci-mh
+   evidence：临床语音AI基准可用于心理健康评估
+10. [Treatment Response Optimized Clinical Decision Support AI System via Digital Twin Simulation](/20260615-20260624/2606.17405v1-treatment-response-optimized-clinical-decision-support-ai-system-via-digital-twin-simulation)  
+   标签：评分：6.0/10、query:ai-hci-mh
+   evidence：使用数字孪生模拟和强化学习的临床决策支持AI，通过规则安全模块提供可解释性
+11. [LLM-Mediated Human-AI Interaction in Search and Rescue: Impact of Expertise on Attentional Allocation](/20260615-20260624/2606.19514v1-llm-mediated-human-ai-interaction-in-search-and-rescue-impact-of-expertise-on-attentional-allocation)  
    标签：评分：6.0/10、query:human-ai
-   evidence：面向应用特定规范的LLM对齐框架，与AI助手交互设计相关
-12. [V2P-Manip: Learning Dexterous Manipulation from Monocular Human Videos](/202606/22/2606.16436v1-v2p-manip-learning-dexterous-manipulation-from-monocular-human-videos)  
-   标签：评分：6.0/10、query:human-ai
-   evidence：从人类视频学习灵巧操作
-13. [SING: Synthetic Intention Graph for Scalable Active Tool Discovery in LLM Agents](/202606/22/2606.16591v1-sing-synthetic-intention-graph-for-scalable-active-tool-discovery-in-llm-agents)  
-   标签：评分：6.0/10、query:human-ai
-   evidence：为交互式LLM代理提供可扩展工具发现的合成意图图
-14. [OpenClaw-Skill: Collective Skill Tree Search for Agentic Large Language Models](/202606/22/2606.16774v1-openclaw-skill-collective-skill-tree-search-for-agentic-large-language-models)  
-   标签：评分：6.0/10、query:social-rl
-   evidence：面向多智能体LLM协作的集体技能树搜索
+   evidence：LLM指导下的人类-AI协同搜索救援，研究注意力分配
 
 
 <div class="dpr-home-promo-card">
