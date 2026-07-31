@@ -1,0 +1,614 @@
+Title: TriAgent: Divergence-Aware Multi-Agent Committees for Cost-Efficient Financial Sentiment Analysis
+
+URL Source: https://arxiv.org/pdf/2607.19794v1
+
+Published Time: Thu, 23 Jul 2026 00:28:43 GMT
+
+Number of Pages: 8
+
+Markdown Content:
+# TriAgent: Divergence-Aware Multi-Agent Committees for Cost-Efficient Financial Sentiment Analysis 
+
+Isabel Xu 1,∗ , Cynthia Xu 1,∗ , Rachel Ren 2 , Cong Guo 3 , Jiacheng Ding 3,†
+
+> 1
+
+The Overlake School 
+
+> 2
+
+Edwards Vacuum Inc. 
+
+> 3
+
+The University of Memphis 
+
+{xushuyao, xuningshu }@gmail.com, rachelren@gmail.com, {cguo, jding2 }@memphis.edu 
+
+> ∗
+
+Equal contribution. †Corresponding author. 
+
+Abstract 
+
+Production LLM-based financial sentiment analy-sis faces a structural cost trap: most queries are trivially classifiable, yet expensive cloud reason-ers process them all, and the bill scales linearly with user count. We present TriAgent , a multi-agent committee stratified by contextual granular-ity — a word-level lexicon (VADER), a sentence-level domain transformer (FinBERT), and a cross-sentence reasoner (Qwen2.5, 0.5 B–14 B-4bit, with Mistral-7B and Phi-3.5-mini cross-family checks). A three-way Semantic Divergence Index (SDI) measures pairwise disagreement across granulari-ties and routes each query accordingly. Our cen-tral finding is the critic plateau : when the LLM is re-tasked as a critic over the smaller agents’ out-puts, F1 plateaus at ≈0.87 across 1.5 B–7 B Qwen (bootstrap 95% CIs overlap), while a same-size 3-persona vote drops to F1 =0.66 which is griven by granularity-stratified diversity. Three corollaries follow from the same SDI signal: (i) a Shared Con-sensus Dictionary on multilingual sentence-BERT answers 95% of Chinese queries from an English cache at F1 =0.99 — cross-border canonicalization at zero marginal cost; (ii) SDI doubles as a post-hoc LLM-hallucination detector at AUC =0.90; (iii) the SDI single-stage strategy attains the best risk-adjusted return (Sharpe =3.50) on a 20-ticker back-test, dominating both always-FinBERT (1.36) and always-LLM (0.11). At 10 M-user scale, TriA-gent saves $9.3 M/year vs. a GPT-4o-mini baseline. Code, lexicons, and the SCD are released. 
+
+1 Introduction 
+
+A mid-sized asset manager with 1 M users running 10 sen-timent queries each per trading day generates ∼3.6 B infer-ence calls per year. At the public price of GPT-4o-mini that single workload costs ∼$1.1 M/year, and at GPT-4 prices, 
+
+∼$36.5 M/year (Figure 1). The cost scales linearly with user count while the value of each LLM call falls since most do-main queries are trivially classifiable. Token efficiency is therefore the first-order operational concern. The CFP for FinLLM@IJCAI 2026 calls out exactly this regime: multi-agent cloud-edge collaboration, token economics, and cross-border fairness in deployment. 10 3 10 4 10 5 10 6 10 7  
+
+> Users (10 queries / user / day)
+> 10 0
+> 10 2
+> 10 4
+> 10 6
+> 10 8
+> Annual inference cost  (USD)
+> Inference cost vs. deployment scale
+> $363M / yr saved
+> vs. GPT-4
+> at 10M users
+> FinBERT (self-hosted)
+> Qwen-7B (self-hosted)
+> GPT-4o-mini API
+> GPT-4 API
+> TriAgent (ours)
+
+Figure 1: Annual inference cost vs. user count (10 queries/user/day). At 10 M users, default-to-cloud-LLM costs $11 M–$365 M/yr; TriAgent shaves this to $1.65 M/yr, a $9.3 M/yr saving against GPT-4o-mini. 
+
+Running example. Throughout this paper, we trace one FPB sentence: “. . . its net profit halved to 1.2 mln euro. . . from 2.2 mln euro. . . ” . VADER ( +0 .44 ) and FinBERT ( +0 .53 )are both fooled by the word profit and classify this sentence as positive, and Qwen-7B alone correctly outputs negative (−0.80 , “profit declined”); critic@1.5B and critic@7B are 
+
+anchored on V +F’s positives and stay wrong; only round-2 debate, which feeds back the LLM’s own R1 rationale, recov-ers negative. This single example threads through Sections 3– 6. 
+
+Contributions. TRI AGENT is a divergence-aware commit-tee whose three tiers correspond to three contextual gran-ularities (word → sentence → cross-sentence). We con-tribute: (C1) a three-way Semantic Divergence Index (SDI) with a four-quadrant routing interpretation; (C2) the critic plateau with critic@1.5B /3B /7B all reach F1 =0.87, while a same-size 3-persona vote regresses to F1 =0.66; (C3) aShared Consensus Dictionary (SCD) over multilingual sen-tence embeddings that doubles as a cross-lingual canoni-arXiv:2607.19794v1 [cs.CL] 22 Jul 2026 caliser (95% of Chinese queries match an English cached la-bel at F1 =0.99); (C4) a three-granularity edge predictor (XG-Boost AUC =0.85) enabling fully on-device routing; (C5) 
+
+the same SDI acts as a post-hoc LLM-hallucination flag at AUC =0.90; (C6) a 20-ticker back-test where the SDI single-stage strategy attains the best Sharpe ( 3.50 ) of all evaluated strategies, including always-FinBERT ( 1.36 ) and always-LLM ( 0.11 ). A single architectural decision hits all three Fin-LLM 2026 CFP topic buckets simultaneously. 
+
+2 Related Work 
+
+Financial NLP and Sentiment Lexicons. Loughran and McDonald [2011] established that generic sentiment lexi-cons systematically miscalibrate on financial text: words such as liability , tax , and risk carry domain-specific polarity that general-purpose tools invert. Financial PhraseBank [Malo et al. , 2014] grew out of that line and has since become the stan-dard benchmark for sentence-level financial sentiment. Our experiments on FPB surface an analogous failure mode at the phrase level: VADER reads profit as positive even when the surrounding clause encodes a decline (“net profit halved”), motivating a committee that can override the lexicon when phrase-bound polarity reversals are present. FinBERT [Araci, 2019; Yang et al. , 2020] is the de facto open-domain transformer for financial sentiment and serves as our L2 specialist. Its sentence-level attention re-solves many lexical ambiguities, yet it systematically fails on multi-clause numeric comparisons where cross-sentence context is required, precisely the gap that our L3 reasoner is designed to fill. Surveys of billion-parameter financial reasoners [Lee and others, 2024] document a recent wave of domain-adapted LLMs (BloombergGPT [Wu and others, 2023], FinGPT [Yang et al. , 2023], PIXIU [Xie and others, 2023]) that improve cross-sentence reasoning but at a pro-hibitive inference cost. We ask not which model is best in iso-lation, but how small each agent in a committee can be made while preserving the accuracy of the ensemble, a question that prior work has not addressed for the three-granularity lexi-con/specialist/reasoner stack we evaluate. 
+
+Multi-Agent LLMs and Ensemble Diversity. Query-by-committee [Settles, 2009] and ensemble disagreement [Lak-shminarayanan et al. , 2017] are the classical ancestors of our Semantic Divergence Index: both treat inter-model disagree-ment as a signal of instance difficulty or epistemic uncer-tainty. Our SDI formalises this intuition as a three-way pair-wise measure across agents that operate at genuinely different contextual granularities, which is a structural distinction ab-sent from prior ensemble work. Recent multi-agent LLM frameworks including Auto-Gen [Wu and others, 2024], MetaGPT [Hong and oth-ers, 2024], CAMEL [Li and others, 2023], multi-agent de-bate [Du et al. , 2024; Liang and others, 2024], LLM-as-a-judge [Zheng and others, 2023], and self-consistency [Wang and others, 2023] typically instantiate the same large back-bone for every agent, differing only in prompt or persona. Our same-size persona-vote ablation (three Qwen-1.5B per-sonas; F1 = 0.66) directly tests this assumption and finds it fails: a same-size panel regresses relative to the single-agent baseline (0.69), whereas our granularity-stratified critic raises F1 to 0.87. The underlying cause is identifiable from pairwise Cohen’s κ: agents of the same family and scale exhibit near-degenerate agreement ( κ = 0.81 for the per-sona panel), whereas our heterogeneous committee achieves 
+
+κ(V, F ) = 0.27 and κ(V, L ) = 0.19, yielding error-set Jaccard overlaps of only 0.13–0.15. This confirms that granularity diversity , not multi-agent voting per se, is the mechanism be-hind our critic plateau. LLM-as-a-judge [Zheng and others, 2023] evaluates model outputs using a stronger LLM as an external referee. Our critic protocol re-purposes this idea in a cost-constrained set-ting: the LLM is re-tasked not as an evaluator of response quality but as a conflict resolver over smaller agents’ pre-dictions , and the critic signal saturates at 1.5 B parameters, making the mechanism viable at the edge. 
+
+Cost-Aware Routing and Token Efficiency. Frugal-GPT [Chen et al. , 2023], RouteLLM [Ong and others, 2024], and mixture-of-models routing [Wang and others, 2022; Shnitzer and others, 2023] each address the problem of cas-cading between cheap and expensive models on a per-query basis, using confidence scores or learned routers to decide when to escalate. TriAgent sits in this family but differs in two respects: first, routing is triggered by a cross-agent diver-gence signal (SDI) rather than a single model’s self-reported confidence; second, the routing threshold sweeps out a clean Pareto frontier (Figure 7) that gives operators a single dial mapping tokens-per-query to F1, yielding a 48 × cost reduc-tion at the “Balanced” operating point relative to Always-L3 with no change in the underlying reasoner. Semantic caches reduce inference cost by returning stored answers for near-duplicate queries. Our Shared Consensus Dictionary (SCD) is architecturally similar but differs in two important ways: it caches committee decisions rather than single-model outputs, inheriting the higher accuracy of the full committee at zero additional inference cost on a cache hit; and it uses multilingual sentence embeddings [Reimers and Gurevych, 2019; Reimers and Gurevych, 2020] rather than exact-match or monolingual similarity, enabling cross-lingual retrieval (Section 5.6). The SCD thus serves a dual purpose absent from prior semantic cache work: beyond cost reduc-tion, it acts as a cross-lingual canonicaliser , letting a Chi-nese deployment inherit English cached labels at F1 = 0.99 and 95% hit rate without re-running the committee. 
+
+3 Framework 
+
+3.1 Three-Tier Committee as a Granularity Stack 
+
+Figure 2 sketches the system end-to-end. The three tiers cor-respond to three contextual granularities: L1 VADER [Hutto and Gilbert, 2014] (word-level lexicon, ≈0.03 ms); L2 Fin-BERT [Araci, 2019] (sentence-level transformer, 110 M params, ≈1.5 ms); L3 Qwen2.5-Instruct-N [Team, 2024] (cross-sentence reasoner; N ∈ { 0.5, 1.5, 3, 7, 14 -4bit } B, plus cross-family Mistral-7B [Jiang and others, 2023]). VADER fails on phrase-bound polarity reversals ( loss narrowed ); Fin-BERT fails on multi-clause numeric comparisons; the LLM over-confidently invents reasoning where lexicon neutrality is correct. The pairwise error-set Jaccard between the three is write back (populates cache)                        
+
+> Query sentence
+> SCD lookup (sentence-BERT k-NN)
+> Three-tier committee
+> L1 VADER →L2 FinBERT →L3 Qwen-N
+> SDI 3-way +4-quadrant routing
+> Interaction: vote /critic /debate
+> Final label +write back to SCD
+> Return cached label
+> miss (σ<τ)
+> SDI >θ
+> hit (σ≥τ)
+
+Figure 2: TriAgent system architecture. A query first hits the SCD; on cache miss the three-tier committee runs (VADER →FinBERT →Qwen-N ), then SDI computation, then an interaction protocol when SDI exceeds threshold. The final com-mittee label is written back into the SCD. 
+
+only 0.13 –0.15 (Section 5.1) which is common in granularity-orthogonal failures. 
+
+Deployment-style example. Consider an Apple-style news sentence routed at runtime: “services revenue grew but iPhone unit volumes declined sharply against a difficult com-parable.” VADER’s lexicon picks up grew and outputs posi-tive ( +0 .31 ); FinBERT, attending only within the sentence, returns weakly negative ( −0.18 ); Qwen-7B correctly out-puts strongly negative ( −0.62 ) by reasoning across clauses. SDI ER exceeds threshold and the SDI gate fires the critic pro-tocol, which returns the LLM’s label as final. This is the rout-ing behaviour the architecture is designed to exhibit; the same mechanism applied to the running FPB sentence in Section 1 is the empirical anchor used throughout the paper. 
+
+3.2 Three-Way Semantic Divergence Index 
+
+Let sV, s F, s L ∈ [−1, +1] denote the continuous polarity scores emitted by V, F, L respectively. We define three pair-wise Semantic Divergence Indices, one per granularity-pair: 
+
+SDI LE = |sV − sF|, SDI LR = |sV − sL|,
+
+SDI ER = |sF − sL|. (1) Each SDI ∈ [0 , 2] measures the disagreement between two agents operating at different granularities. We addi-tionally track SDI max = max(SDI LE , SDI LR , SDI ER ) and 
+
+SDI (mean). Thresholding the pair (SDI LE , SDI ER ) at 
+
+(τLE , τ ER ) = (0 .3, 0.7) partitions samples into four be-haviour quadrants :
+
+Q(x) = 
+
+
+
+consensus SDI LE ≤ 0.3 ∧ SDI ER ≤ 0.7
+
+domain shift SDI LE > 0.3 ∧ SDI ER ≤ 0.7
+
+ambiguous SDI LE ≤ 0.3 ∧ SDI ER > 0.7
+
+mixed otherwise .
+
+(2) Each quadrant carries a distinct downstream implication (Ta-ble 2): consensus skips L3, domain shift trusts F and routes 
+
+Algorithm 1 TriAgent inference (single query) 
+
+Require: query x; thresholds τ, θ LE , θ ER ; agents V, F, L ; in-teraction I; SCD cache C
+
+Ensure: label ˆy
+
+1: (˜ x, σ ) ← nearest-neighbour in C by cosine 
+
+2: if σ ≥ τ then 
+
+3: return C[˜ x] ▷ cache hit, no model call 
+
+4: end if 
+
+5: sV ← V (x); sF ← F (x)
+
+6: compute SDI LE = |sV − sF|
+
+7: if SDI LE ≤ θLE then 
+
+8: ˆy ← V (x) ▷ lexicon suffices 
+
+9: else 
+
+10: sL ← L(x)
+
+11: compute SDI ER = |sF − sL|
+
+12: if SDI ER > θ ER then 
+
+13: ˆy ← I (x; sV, s F, s L)
+
+14: else 
+
+15: ˆy ← F (x)
+
+16: end if 
+
+17: end if 
+
+18: C.PUT (x, ˆy) ▷ populate cache for future queries 
+
+19: return ˆy
+
+around V, ambiguous fires the LLM critic, and mixed esca-lates to debate. 
+
+3.3 Routing and Interaction Protocols 
+
+Routing strategies S0–S2 are the three single-agent baselines; S3–S5 escalate L1 →L2 by random / confidence / SDI LE ; S6 is a two-stage cascade adding L2 →L3 by SDI ER . Formally, the two-stage routing decision at a sentence x is 
+
+ˆy(x) = 
+
+
+
+I(x; V, F, L ) SDI ER (x) > θ ER 
+
+F (x) SDI LE (x) > θ LE 
+
+V (x) otherwise, (3) where I ∈ { vote , critic , debate } is the interaction protocol. 
+
+Vote returns the confidence-weighted majority over V/F/L; 
+
+critic feeds the LLM the original sentence plus V’s and F’s predictions and asks for a final label; debate performs a round-2 LLM call that sees all three round-1 outputs (in-cluding its own rationale) and reconciles. The thresholds 
+
+(θLE , θ ER ) sweep out the Pareto frontier of Section 5.3. Algorithm 1 summarises the end-to-end inference flow in-cluding the SCD cache. 
+
+3.4 Shared Consensus Dictionary 
+
+An optional fourth component caches committee decisions in multilingual sentence-BERT embedding space [Reimers and Gurevych, 2019; Reimers and Gurevych, 2020]. Let 
+
+ϕ(·) ∈ R384 denote the sentence-BERT encoder. Aquery x is embedded to ϕ(x), k-NN-searched against cached entries {(˜ xi, y i)} by cosine similarity σi =
+
+⟨ϕ(x), ϕ (˜ xi)⟩/(∥ϕ(x)∥∥ ϕ(˜ xi)∥), and the cached label is re-turned when 
+
+σ∗(x) = max  
+
+> i
+
+σi ≥ τ, (4) i.e. without any model call . The SCD is sentence-granularity by construction. For example, “net profit halved” matches 
+
+“net profit cut in half” which exact-match memoisation would miss. Threshold τ is a single operator knob trad-ing hit rate against accuracy (Section 5.5). Beyond cost, the SCD supplies cross-committee consistency: a new agent that joins the committee inherits the cache, mitigating the family-specific plateau gap we observe with Mistral-7B (Sec-tion 5.2). 
+
+4 Three-Granularity Edge Predictor 
+
+For routing to be deployable, the gating decision must be made before any expensive model has run. We train a lightweight classifier to predict, from features computable at the VADER stage alone, whether a sentence will produce high committee disagreement (binary target: SDI max > 0.7). The feature engineering mirrors the committee’s own granularity stratification for word, phrase, and sentence, and we report the marginal contribution of each. 
+
+Word-level. 6 VADER outputs (positive/negative/neutral fractions, compound, confidence, |compound |) and 6 sur-face indicators (number, currency, contrast word, negation, length). We mine unigram triggers via log-odds + z-score on the high-SDI subset; top words include decreased ,
+
+dropped , fell .
+
+Phrase-level. We extend the log-odds miner to n ∈ { 2, 3}
+
+and use the top-30 bigram / trigram triggers as binary presence features. Bigrams capture phrase-bound polarity that single words miss ( down from , compared profit ,and ideally context-flipping pairs like loss narrowed vs. 
+
+loss widened ). On FPB the bigram lift is small ( +0 .01 
+
+AUC over unigram), but the running example (Section 1) shows the linguistic mechanism is real. 
+
+Sentence-level. We encode each sentence with the multilin-gual MiniLM-L12 model (22 M params, ≈10 ms/sentence on CPU) and PCA-reduce the 384-dim embedding to 16 compo-nents. The same module powers the SCD (Section 3.4) and the cross-lingual pilot (Section 5.6). Table 1 reports the seven-variant ablation. Word features alone reach AUC = 0 .69 ; phrase adds +0 .01 ; sentence adds 
+
++0 .04 . XGBoost over the full feature set reaches AUC =0.85 . A non-deployable upper bound that encodes the LLM’s R1 reasoning text reaches AUC = 0 .94 , marking remaining headroom for deployable variants. 
+
+5 Experiments 
+
+Setup. We use the sentences allagree subset of Fi-nancial PhraseBank [Malo et al. , 2014; fla, 2023] (4,838 sentences: 604 negative, 2,872 neutral, 1,362 positive). LLM inference: HuggingFace Transformers [Wolf and oth-ers, 2020] in bf16 (4-bit 14 B via bitsandbytes [Dettmers 
+
+et al. , 2022]), batch 8, deterministic decoding, single RTX A5000 (24 GB). Cost is USD under GPU-rental amortisa-tion ($0.40/h A5000-class); VADER ≈ 0. Reproducible from 
+
+experiments/L*.py .
+
+5.1 Bias Diversity and Four Quadrants 
+
+Table 2 and Figure 3 report the four-quadrant decomposition and the SDI distributions. Pairwise Cohen’s κ between agent labels (Figure 4) is low and pairwise Jaccard error overlap is only 0.13 –0.15 — the committee is complementary rather than redundant. 
+
+5.2 Single-Agent Scaling and Critic Plateau 
+
+Figure 5 shows Qwen2.5-Instruct single-agent F1: FinBERT beats every Qwen variant up to 7 B and 3 B underperforms 1.5 B (over-predicts neutral). The headline (Figure 6): critic@ {1.5B, 3B, 7B} all reach 
+
+F1 ≈ 0.87 (1000-resample bootstrap 95% CIs overlap at 
+
+[0 .860 , 0.880] ); debate ramps 0.69 → 0.87 . Cross-family critic: 0.79 on Mistral-7B, 0.86 on Phi-3.5-mini — the mech-anism generalises, the height is Qwen-specific. 
+
+Same-size persona vote — a critical negative result. 
+
+Three Qwen-1.5B personas (bull/bear/neutral) majority-vote to F1 = 0 .66 (vs. single Qwen-1.5B 0.69 and critic@1.5B 
+
+0.87 ); inter-persona agreement 81%. The plateau is 
+
+granularity-driven , not multi-agent-vote-driven. 
+
+5.3 Token-Economic Pareto Frontier 
+
+Figure 7 traces the cost-vs-F1 Pareto frontier; SDI thresholds parameterise it continuously. Table 3 reports three points: 
+
+Budget runs 90% on VADER ( F1 = 0 .665 ); Balanced esca-lates 28.5% to FinBERT for a 48 × cost saving over Always-L3 at matched reasoner; Premium pushes 17.5% to L3 for 
+
+F1 = 0 .787 at 5.3× cheaper. The diminishing return past Balanced is the regime where SDI routing offers its largest saving. 
+
+5.4 Per-Class Lift on the Hard Class 
+
+Figure 8 sorts strategies by F1 on negative (604 sentences, vocabulary overlapping neutral financial language). De-bate@7B is the only setting where a committee strictly beats the specialist: F1 = 0 .893 vs. FinBERT 0.879 (+1 .4 pp), driven by precision ( +2 .1 pp) at near-equal recall. Critic@7B ties FinBERT on negative ( 0.878 ); the debate back-and-forth is needed to adjudicate the lexical distinctions separating neg-ative from neutral. 
+
+5.5 SCD: Hit-Rate vs. Accuracy 
+
+70/30 build/query split of FPB; debate@7B labels populate the cache. Figure 9: at τ = 0 .85 the SCD hits 10% of queries at −0.8 pp F1; the sweep is clean from τ = 0 .95 (3% hit, 
+
+−0.3 pp) to τ = 0 .50 (83% hit, −14 .5 pp). Scale-up: FPB + TFNS (16,769 sentences) preserves the curve (hit-set F1 =0.82 at τ = 0 .95 , 0.71 at τ = 0 .60 ). 
+
+5.6 Cross-Lingual Generalisation 
+
+Translating 1,500 FPB sentences to Mandarin: Qwen-7B reaches F1 = 0.80 (vs. 0.81 in English, nearly loss-less). finbert-tone-chinese [Yang and others, 2021] reaches 0.72 , below Qwen-7B — the specialist/LLM relation-ship inverts. Killer result (Figure 10): at τ = 0 .70 , 95% of Chinese queries hit the English SCD with cached-label F1 
+
+= 0 .99 — a new Chinese deployment inherits canonical an-swers without retraining. Table 1: Edge predictor ablation across the three feature granularities. AUC-PR = area under precision-recall; P@R x = precision at x %recall; P@top10 = precision among the 10 % riskiest predictions. Sentence-BERT features add the largest single-granularity lift. The non-deployable upper bound encodes the LLM’s R1 explanation text and is not counted toward the deployable ceiling. Model AUC-ROC AUC-PR P@R20 P@R50 P@top10 random 0.503 0.328 0.353 0.332 0.351 LR-unigram 0.694 0.566 0.788 0.479 0.773 LR-uni+bigram 0.697 0.570 0.764 0.486 0.742 LR-uni+bi+trigram 0.703 0.582 0.808 0.503 0.773 LR-sentence-only 0.688 0.583 0.944 0.472 0.814 
+
+LR-uni+bi+sent. 0.741 0.607 0.768 0.554 0.742 
+
+XGBoost (all) 0.848 0.745 0.943 0.759 0.866 
+
+XGBoost+reasoning † 0.937 0.897 0.990 0.964 0.990 
+
+> †
+
+Encodes the LLM’s R1 explanation text (non-deployable upper bound). Table 2: Four quadrants of committee behaviour. Negatives concentrate in domain shift (VADER fails); ambiguous cases are where the LLM and FinBERT disagree most. Acc V/F/L is per-agent accuracy in that quadrant. Quadrant n % %pos %neu %neg Acc V Acc F Acc L
+
+consensus 1907 39.4 10.7 88.7 0.5 74.6 96.4 96.5 mixed 1509 31.2 34.1 56.9 9.0 47.2 86.0 87.2 domain shift 651 13.5 34.6 10.1 55.3 10.3 95.5 95.5 ambiguous 771 15.9 54.2 33.1 12.7 55.6 70.8 28.1 Table 3: Three operating points on the SDI two-stage curve plus the Always-L3 reference. Cost is per 1,000 sentences; “%L x” is the fraction handled by tier x.Point $/1k F1 Lat (ms) L1/L2/L3 (%) Budget 0.0001 0.665 0.4 90.0 / 9.9 / 0.1 Balanced 0.0006 0.716 4.3 70.0 / 28.5 / 1.5 Premium 0.0054 0.787 46.5 30.0 / 52.5 / 17.5 Always-L3 (ref) 0.0288 0.809 259.4 0.0 / 0.0 / 100.0 
+
+5.7 End-to-End Backtest 
+
+Table 4 summarises 20 tickers × 2 years. SDI-routed strate-gies produce more discriminating signals than any single agent, as predicted by the bias diversity of Section 5.1. FPB is a news proxy; we do not claim real-market prediction. 
+
+Table 4: 20-ticker, 2-year backtest (2023-01 to 2024-12). Weekly signal from 20 sampled sentences; T+1 open, 5-day hold, 10 bps slippage, position = 10% capital. Strategy Return% Sharpe MaxDD% Win% Always-L1 2.0 1.51 −1.8 55.0 Always-L2 0.8 1.36 −1.0 51.6 Always-L3 0.3 0.11 −0.8 47.5 Oracle 0.5 0.60 −1.3 51.3 
+
+SDI-Single (S5) 3.4 3.50 −1.3 59.3 SDI-Two-Stage (S6) 2.8 2.90 −1.4 58.7 debate@7B 1.0 1.77 −1.1 53.6 
+
+6 Security, Bias, and Fairness as Architectural Side-Benefits 
+
+The architectural choice that makes our committee token-efficient also exposes a free trust signal and a route to cross-border fairness .
+
+SDI as a post-hoc LLM-hallucination detector. Stratify-ing FPB by “LLM-correct” vs. “LLM-wrong”, mean SDI ER 
+
+is 0.17 when the LLM is correct and 0.71 when it is wrong. Thresholding SDI ER as a binary “hallucinating” flag yields 
+
+AUC = 0 .90 on FPB. Any deployment already running Fin-BERT and an LLM in parallel can wire SDI ER as a trust score without additional models, labels, or training [Ji and others, 2023; Manakul et al. , 2023]. 
+
+Adversarial perturbation detection (partial). On 500 perturbed FPB sentences, SDI reaches AUC = 0.71 on negation flips but only ≈ 0.5 on synonym swap, numeric magnitude flip, and character dropout: a strong hallucina-tion detector but only a partial adversarial detector, not a substitute for purpose-built defences [Jin and others, 2020; Perez and Ribeiro, 2022]. 
+
+Cross-border fairness via the SCD. Section 5.6 also reads as a cross-border fairness result: 95% of Chinese queries receive the same canonical label as the English equiva-lent, eliminating a common source of cross-language drift in multinational deployments. 
+
+7 Discussion and Deployment 
+
+Distributed deployment at scale. Each tier is stateless and shardable. At 10 M users ( ∼1 B queries/day): L1 (VADER) is CPU-co-located with the API gateway ( ∼30 K queries/sec/core); L2 (FinBERT) is a stateless GPU service 0.0 0.5 1.0 1.5 2.0 
+
+SDI value 
+
+0
+
+200 
+
+400 
+
+600 
+
+800 
+
+1000 
+
+1200 
+
+1400 
+
+1600 
+
+> Sentence count
+
+(a) Three-way SDI distributions    
+
+> SDI LE (Lex--Exp)
+> SDI LR (Lex--Reas)
+> SDI ER (Exp--Reas)
+
+0.0 0.5 1.0 1.5 
+
+SDI LE (Lex--Exp) 
+
+0.00 
+
+0.25 
+
+0.50 
+
+0.75 
+
+1.00 
+
+1.25 
+
+1.50 
+
+1.75   
+
+> SDI ER  (Exp--Reas)
+> θLE = 0.3
+> θER = 0.7
+
+(b) Four-quadrant decomposition         
+
+> consensus (n= 1907 )
+> mixed (n= 1509 )
+> domain shift (n= 651 )
+> ambiguous (n= 771 )
+
+negative neutral positive 
+
+Gold sentiment class 
+
+0.00 
+
+0.25 
+
+0.50 
+
+0.75 
+
+1.00 
+
+1.25 
+
+1.50 
+
+1.75         
+
+> SDI LE
+> mean =0.95 mean =0.25 mean =0.52
+
+(c) SDI LE by gold class Figure 3: Three-way SDI on FPB. Left: the three pairwise SDIs. Centre: four-quadrant scatter. Right: SDI LE by gold class — negative has the highest mean disagreement. VADER FinBERT Qwen-7B                
+
+> VADER
+> FinBERT
+> Qwen-7B
+> 1.00 0.27 0.19
+> 0.27 1.00 0.61
+> 0.19 0.61 1.00
+> (a) Pairwise Cohen's κ
+> (lower = more diverse)
+> 0.0 0.5 1.0 1.5
+> Per-sentence disagreement entropy (bits)
+> 0
+> 500
+> 1000
+> 1500
+> 2000
+> 2500
+> Sentence count
+> all-agree
+> (0 bits)
+> 2-vs-1 split
+> (≈0.92 bits)
+> (b) Committee disagreement entropy
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Cohen's  κ
+
+Figure 4: Pairwise Cohen’s κ (left) and per-sample disagreement entropy (right). Low κ; bimodal entropy shows the committee is either fully aligned or split 2-vs-1. 0.5B 1.5B 3.0B 7.0B 
+
+Qwen parameter count (log scale)  
+
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> F1-Macro on FPB  gap that scaling cannot close
+> (7B still −7pp vs. FinBERT)
+
+Scaling Qwen alone cannot beat the specialist           
+
+> 3B dip (3B <1.5B)
+> FinBERT (specialist, F1 =0.88)
+> VADER (lexicon, F1 =0.49)
+> Qwen2.5-Instruct (single agent)
+
+Figure 5: Scaling Qwen alone cannot beat the specialist: 7 B is 
+
+−7 pp under FinBERT and the 3 B dip is non-monotone. 
+
+(≈5 K queries/sec per A5000-class card, 3–4 instances); L3 handles only 5–15 % of nominal traffic after the SDI gate and SCD cache. This is roughly 18 GPUs at 10 M users vs. 
+
+∼3,000 for an always-L3 deployment . The SCD is the only stateful component — a single FAISS index [Johnson et al. ,2021] per region with asynchronous replication; a 1 M-entry cache occupies ≈1.5 GB RAM. 
+
+Customer-language regime. On Twitter Financial News (TFNS [tfn, 2022], ∼12 K customer-style tweets) FinBERT collapses from F1 = 0 .88 to 0.66 , while Qwen-7B holds at 
+
+0.76 — the “specialist beats LLM” relationship inverts on 1.5B 3B 7B 
+
+LLM parameter count (log scale) 
+
+> 0.55
+> 0.60
+> 0.65
+> 0.70
+> 0.75
+> 0.80
+> 0.85
+> 0.90
+> F1-Macro on FPB
+
+Interaction substitutes for parameters               
+
+> FinBERT (specialist ceiling, F1 =0.88)
+> Qwen2.5 (single agent)
+> +critic protocol (plateau)
+> +debate protocol (ramp)
+> Mistral-7B critic
+> (F1 =0.79)
+> Phi-3.5-mini critic
+> (F1 =0.86)
+> critic plateau
+> F1 ≈0.87
+
+Figure 6: The paper’s central finding: interaction substitutes for pa-rameters within a model family. Critic F1 plateaus at ≈ 0.87 across Qwen-1.5B/3B/7B; debate ramps 0.69 →0.87. Mistral-7B and Phi-3.5-mini critic (hollow) confirm the mechanism generalises across families. 
+
+fragmented text, so the critic regresses on TFNS with weak V+F scaffolding. The SDI gate accommodates this via a per-domain trigger threshold. 
+
+Cross-family scaling is not universal. The critic plateau holds within Qwen2.5-Instruct but does not transfer cleanly: critic@Mistral-7B reaches only F1 = 0 .79 , while debate is more family-robust (debate@Mistral-7B = 0 .82 ). A practi-tioner should run the cheap persona-vote sanity check before committing to an LLM family for the L3 tier. 
+
+8 Conclusion 
+
+We presented T RI AGENT , a three-tier financial sentiment committee whose key insight is architectural: when each agent is small and stratified by contextual granularity, namely word (lexicon), sentence (specialist), cross-sentence (rea-soner), the same Semantic Divergence Index that gates rout-ing for cost also gates interaction for capability and detects anomaly for security . Across LLM sweeps from 0.5 B to 14 B-4bit, two families, and four protocols we showed: (i) the critic protocol plateaus at F1 ≈ 0.87 across 1.5 B–7 B Qwen, 10 −4 10 −3 10 −2 
+
+Inference cost (USD per 1000 sentences) 
+
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> F1-Macro on FPB
+
+Token-economic Pareto frontier        
+
+> Random escalation
+> Confidence escalation
+> S5 SDI single-stage (ours)
+> S6 SDI two-stage (ours)
+> Always-L1 (VADER)
+> Always-L2 (FinBERT)
+> Always-L3 (Qwen-7B)
+
+Figure 7: Pareto frontier on FPB. SDI two-stage (green diamonds) traces a clean cost–accuracy curve; the Balanced point gives a 48 ×
+
+cost reduction against Always-L3. 0.0 0.2 0.4 0.6 0.8 1.0      
+
+> F1 per class
+> VADER
+> Qwen-0.5B
+> Qwen-3B
+> debate @ 1.5B
+> Qwen-1.5B
+> critic @ Mistral-7B
+> debate @ 3B
+> debate @ Mistral-7B
+> Qwen-7B
+> critic @ 3B
+> critic @ 1.5B
+> FinBERT
+> debate @ 7B
+> Per-class F1 — sorted by F1 on the (hard) negative class
+> FinBERT alone, negative F1 =0.88
+> F1 (negative — hard class)
+> F1 (neutral)
+> F1 (positive)
+
+Figure 8: Per-class F1 sorted by F1 on the (hard) negative class. Debate@7B beats FinBERT on negative ( 0.893 vs. 0.879 ). 
+
+while a same-size 3-persona vote regresses to 0.66 . Granu-larity, not multi-agent voting per se, makes the plateau exist; (ii) a Shared Consensus Dictionary on multilingual sentence-BERT serves as a cross-lingual canonicaliser (95% of Chi-nese queries match English cached answers at F1 = 0 .99 ); (iii) the SDI signal doubles as a post-hoc LLM-hallucination detector at AUC = 0 .90 ; (iv) at the 10 M-user / 10-queries-per-day scale TriAgent saves $9.3 M/year compared to de-faulting to a cloud LLM, while running on roughly 20 ×
+
+fewer GPUs. Code, mined trigger lexicons, the SCD, and all committee predictions are released to support both academic replication and direct industrial deployment. 
+
+Code and data availability. All source code, the mined trigger lexicons, the Shared Consensus Dictionary index, per-experiment summary CSVs, and the LaTeX source of this paper are released at https://github.com/graphuofm/ TRIAGENT. 
+
+References 
+
+[Araci, 2019] Dogu Araci. FinBERT: Financial sen-timent analysis with pre-trained language models. arXiv:1908.10063, 2019. 0.5 0.6 0.7 0.8 0.9 
+
+Similarity threshold τ
+
+> 0.60
+> 0.65
+> 0.70
+> 0.75
+> 0.80
+> 0.85
+> 0.90
+> 0.95
+> F1-Macro on test set
+
+Shared Consensus Dictionary — cost / accuracy trade-off      
+
+> SCD hybrid F1 (cache + miss →committee)
+> Always-committee F1 =0.876
+> Cache hit rate
+> 0.0
+> 0.2
+> 0.4
+> 0.6
+> 0.8
+> 1.0
+> Cache hit rate
+
+Figure 9: SCD accuracy / hit-rate trade-off as τ varies. Deployable sweet spot at τ ≈ 0.85 .1.5B 3B 7B                 
+
+> Qwen-N reasoning tier
+> 0.4
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1.0
+> rate / F1
+> Naive cross-lingual committee
+> EN ↔ZH committee agreement
+> EN committee F1 vs gold
+> ZH committee F1 vs gold
+> 0.50 0.55 0.60 0.65 0.70 0.75 0.80 0.85
+> Similarity threshold τ
+> 0.5
+> 0.6
+> 0.7
+> 0.8
+> 0.9
+> 1.0
+> rate / F1
+> SCD as cross-lingual canonicalizer
+> ZH →EN cache hit rate
+> Cached-label F1 vs gold
+> τ=0.85: hit =55%, F1 =1.00
+> Cross-lingual deployment: naive committee vs SCD bridge
+
+Figure 10: Cross-lingual deployment. Left: naive committees agree 81–85% with their English counterparts. Right: the SCD as cross-lingual canonicaliser — Chinese queries find English cached an-swers at hit-rate 0.95 / F1 0.99 .
+
+[Chen et al. , 2023] Lingjiao Chen, Matei Zaharia, and James Zou. FrugalGPT: How to use large language mod-els while reducing cost and improving performance. arXiv:2305.05176, 2023. [Dettmers et al. , 2022] Tim Dettmers, Mike Lewis, Younes Belkada, and Luke Zettlemoyer. LLM.int8(): 8-bit matrix multiplication for transformers at scale. In Advances in Neural Information Processing Systems (NeurIPS) , 2022. [Du et al. , 2024] Yilun Du, Shuang Li, Antonio Torralba, Joshua B. Tenenbaum, and Igor Mordatch. Improving fac-tuality and reasoning in language models through multia-gent debate. In Proceedings of the 41st International Con-ference on Machine Learning (ICML) , 2024. [fla, 2023] FLARE-FPB: Financial phrasebank parquet mirror. https://huggingface.co/datasets/ChanceFocus/ flare-fpb, 2023. [Hong and others, 2024] Sirui Hong et al. MetaGPT: Meta programming for a multi-agent collaborative framework. In The Twelfth International Conference on Learning Rep-resentations (ICLR) , 2024. [Hutto and Gilbert, 2014] C. J. Hutto and Eric Gilbert. VADER: A parsimonious rule-based model for sentiment analysis of social media text. In ICWSM , 2014. [Ji and others, 2023] Ziwei Ji et al. Survey of hallucination in natural language generation. ACM Computing Surveys ,55(12):1–38, 2023. [Jiang and others, 2023] Albert Q. Jiang et al. Mistral 7B. arXiv:2310.06825, 2023. [Jin and others, 2020] Di Jin et al. Is BERT really robust? a strong baseline for natural language attack on text classifi-cation and entailment. In AAAI , 2020. [Johnson et al. , 2021] Jeff Johnson, Matthijs Douze, and Herv´ e J´ egou. Billion-scale similarity search with GPUs. In IEEE Trans. Big Data , 2021. [Lakshminarayanan et al. , 2017] Balaji Lakshminarayanan, Alexander Pritzel, and Charles Blundell. Simple and scal-able predictive uncertainty estimation using deep ensem-bles. In NeurIPS , 2017. [Lee and others, 2024] Jean Lee et al. A survey of large lan-guage models in finance (FinLLMs). arXiv:2402.02315, 2024. [Li and others, 2023] Guohao Li et al. CAMEL: Commu-nicative agents for “mind” exploration of large language model society. In Advances in Neural Information Pro-cessing Systems (NeurIPS) , 2023. [Liang and others, 2024] Tian Liang et al. Encouraging di-vergent thinking in large language models through multi-agent debate. In Proceedings of the 2024 Conference on Empirical Methods in Natural Language Processing (EMNLP) , 2024. [Loughran and McDonald, 2011] Tim Loughran and Bill McDonald. When is a liability not a liability? Textual analysis, dictionaries, and 10-Ks. The Journal of Finance ,66(1):35–65, 2011. [Malo et al. , 2014] Pekka Malo, Ankur Sinha, Pekka Korho-nen, Jyrki Wallenius, and Pyry Takala. Good debt or bad debt: Detecting semantic orientations in economic texts. In JASIST , 2014. [Manakul et al. , 2023] Potsawee Manakul, Adian Liusie, and F. Gales, Mark J.˙ SelfCheckGPT: Zero-resource black-box hallucination detection for generative large lan-guage models. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing (EMNLP) , 2023. [Ong and others, 2024] Isaac Ong et al. RouteLLM: Learn-ing to route llms with preference data. arXiv:2406.18665, 2024. [Perez and Ribeiro, 2022] F´ abio Perez and Ian Ribeiro. Ig-nore previous prompt: Attack techniques for language models. arXiv:2211.09527, 2022. [Reimers and Gurevych, 2019] Nils Reimers and Iryna Gurevych. Sentence-BERT: Sentence embeddings using siamese BERT-networks. In EMNLP , 2019. [Reimers and Gurevych, 2020] Nils Reimers and Iryna Gurevych. Making monolingual sentence embeddings multilingual using knowledge distillation. In EMNLP ,2020. [Settles, 2009] Burr Settles. Active learning literature sur-vey. Technical Report 1648, University of Wisconsin– Madison, 2009. [Shnitzer and others, 2023] Tal Shnitzer et al. Large language model routing with benchmark datasets. arXiv:2309.15789, 2023. [Team, 2024] Qwen Team. Qwen2.5 technical report. arXiv:2412.15115, 2024. [tfn, 2022] Twitter financial news sentiment dataset. https://huggingface.co/datasets/zeroshot/ twitter-financial-news-sentiment, 2022. [Wang and others, 2022] Hanrui Wang et al. Mixture of cheap and expensive models for cost-effective inference. In NeurIPS Workshop on Efficient Natural Language and Speech Processing , 2022. [Wang and others, 2023] Xuezhi Wang et al. Self-consistency improves chain of thought reasoning in language models. In The Eleventh International Confer-ence on Learning Representations (ICLR) , 2023. [Wolf and others, 2020] Thomas Wolf et al. HuggingFace’s transformers: State-of-the-art natural language process-ing. In Proceedings of the 2020 Conference on Empir-ical Methods in Natural Language Processing: System Demonstrations , 2020. [Wu and others, 2023] Shijie Wu et al. BloombergGPT: A large language model for finance. arXiv:2303.17564, 2023. [Wu and others, 2024] Qingyun Wu et al. AutoGen: En-abling next-gen LLM applications via multi-agent conver-sation framework. In First Conference on Language Mod-eling (COLM) , 2024. [Xie and others, 2023] Qianqian Xie et al. PIXIU: A large language model, instruction data and evaluation bench-mark for finance. In Advances in Neural Information Processing Systems (NeurIPS), Datasets and Benchmarks Track , 2023. [Yang and others, 2021] Yi Yang et al. FinBERT-tone-Chinese: Domain-specific BERT for chinese finan-cial sentiment. https://huggingface.co/yiyanghkust/ finbert-tone-chinese, 2021. [Yang et al. , 2020] Yi Yang, Mark Christopher Siy Uy, and Allen Huang. FinBERT: A pretrained language model for financial communications. arXiv:2006.08097, 2020. [Yang et al. , 2023] Hongyang Yang, Xiao-Yang Liu, and Christina Dan Wang. FinGPT: Open-source financial large language models. arXiv:2306.06031, 2023. [Zheng and others, 2023] Lianmin Zheng et al. Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena. In Advances in Neural Information Processing Systems (NeurIPS), Datasets and Benchmarks Track , 2023.

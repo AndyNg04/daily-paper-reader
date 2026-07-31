@@ -1,84 +1,108 @@
-<div class="dpr-home-notice-card">
-  <h3 class="dpr-home-notice-title">🚀 Start Here</h3>
-  <ul class="dpr-home-notice-list">
-    <li><a href="#/tutorial/README">使用教程</a></li>
-  </ul>
+<div class="dpr-home-notice-card dpr-home-panel">
+  <div class="dpr-home-notice-header dpr-home-panel-header">
+    <h3 class="dpr-home-notice-title">公告与更新</h3>
+    <a class="dpr-home-notice-tutorial" href="#/tutorial/README">使用教程 <span aria-hidden="true">›</span></a>
+  </div>
+  <div class="dpr-home-notice-entry">
+    <time class="dpr-home-notice-date" datetime="2026-07-20">07.20</time>
+    <div>
+      <strong class="dpr-home-notice-entry-title">反馈功能上线</strong>
+      <span class="dpr-home-notice-entry-summary">新增反馈功能，欢迎大家踊跃反馈各种建议，我们会第一时间查看并协调处理。</span>
+    </div>
+  </div>
+  <div class="dpr-home-notice-entry">
+    <time class="dpr-home-notice-date" datetime="2026-07-19">07.19</time>
+    <div>
+      <strong class="dpr-home-notice-entry-title">首页新增社区统计</strong>
+      <span class="dpr-home-notice-entry-summary">现在可以看到今天看论文的人数和项目加入人数。</span>
+    </div>
+  </div>
+  <div class="dpr-home-site-stats" data-dpr-site-stats hidden aria-live="polite">
+    <span>今天有 <strong class="dpr-home-site-stat-value" data-dpr-daily-readers>--</strong> 人在看论文</span>
+    <span class="dpr-home-site-stat-separator" aria-hidden="true">·</span>
+    <span>昨天有 <strong class="dpr-home-site-stat-value" data-dpr-yesterday-readers>--</strong> 人在看论文</span>
+    <span class="dpr-home-site-stat-separator" aria-hidden="true">·</span>
+    <span>已有 <strong class="dpr-home-site-stat-value" data-dpr-fork-count>--</strong> 人加入 Daily Paper Reader</span>
+    <span class="dpr-home-history">
+      <button type="button" class="dpr-home-history-trigger" data-dpr-history-trigger aria-label="查看最近 14 天阅读趋势"><span aria-hidden="true">🔍</span></button>
+      <span class="dpr-home-history-popover" data-dpr-history-popover role="tooltip">
+        <span class="dpr-home-history-header">近 14 天阅读趋势</span>
+        <span class="dpr-home-history-meta">
+          <span data-dpr-history-range>--</span>
+          <span>峰值 <strong data-dpr-history-peak>--</strong></span>
+        </span>
+        <span class="dpr-home-history-chart" data-dpr-history-chart></span>
+      </span>
+    </span>
+  </div>
 </div>
 
-## 每次日报
-- 最新运行日期：2026-06-19 ~ 2026-06-28
-- 运行时间：2026-06-28 23:36:53 UTC
-- 运行状态：成功
-- 本次总论文数：17
-- 精读区：6
-- 速读区：11
+<div class="dpr-home-dashboard-grid">
+<section class="dpr-home-dashboard-card dpr-home-report-card">
+  <div class="dpr-home-dashboard-header">
+    <div>
+      <span class="dpr-home-dashboard-kicker">2026-07-22 ~ 2026-07-31</span>
+      <h3 class="dpr-home-dashboard-title">今日汇总</h3>
+    </div>
+    <strong class="dpr-home-dashboard-count">共 54 篇</strong>
+  </div>
+  <dl class="dpr-home-dashboard-stats">
+    <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>38</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>16</dd></div>
+  </dl>
+  <p class="dpr-home-dashboard-body">最近更新：2026-07-31 12:02:43 UTC<br>状态：成功</p>
+</section>
+<section class="dpr-home-dashboard-card dpr-home-brief-card">
+  <div class="dpr-home-dashboard-header">
+    <div>
+      <span class="dpr-home-dashboard-kicker">合并后生成</span>
+      <h3 class="dpr-home-dashboard-title">今日简报</h3>
+    </div>
+    <strong class="dpr-home-dashboard-count">AI</strong>
+  </div>
+  <div class="dpr-home-dashboard-body">
+<p>本期共处理54篇论文，精读38篇、速读16篇，聚焦多智能体协作与强化学习前沿。</p>
+<p>最值得关注：9.0分《TriAgent》用差异感知委员会降低金融情感分析成本，9.0分《Dreamer-CPC》将世界模型引入去中心化多智能体学习。</p>
+<p>建议优先精读上述两篇高分工作，速读关注电压调控、推荐工具学习和Agent失败策略修复。</p>
+  </div>
+</section>
+<section class="dpr-home-dashboard-card dpr-home-deep-card">
+  <div class="dpr-home-dashboard-header">
+    <div>
+      <span class="dpr-home-dashboard-kicker">今日累计</span>
+      <h3 class="dpr-home-dashboard-title">精读推荐</h3>
+    </div>
+    <strong class="dpr-home-dashboard-count">38 篇</strong>
+  </div>
+  <div class="dpr-home-dashboard-body">
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="TriAgent: Divergence-Aware Multi-Agent Committees for Cost-Efficient Financial Sentiment Analysis">TriAgent: Divergence-Aware Multi-Agent Committees for Cost-Efficient Financial Sentiment Analysis</span></li><li><span class="dpr-home-dashboard-paper-title" title="Dreamer-CPC: Message Learning with World Models for Decentralized Multi-agent Reinforcement Learning">Dreamer-CPC: Message Learning with World Models for Decentralized Multi-agent Reinforcement Learning</span></li><li><span class="dpr-home-dashboard-paper-title" title="A Framework of User Experience Principles for Human-AI Agent Interaction in the Workplace">A Framework of User Experience Principles for Human-AI Agent Interaction in the Workplace</span></li></ul>
+  </div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>26</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>4</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>4</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>3</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span></div>
+</section>
+<section class="dpr-home-dashboard-card dpr-home-skim-card">
+  <div class="dpr-home-dashboard-header">
+    <div>
+      <span class="dpr-home-dashboard-kicker">今日累计</span>
+      <h3 class="dpr-home-dashboard-title">速读推荐</h3>
+    </div>
+    <strong class="dpr-home-dashboard-count">16 篇</strong>
+  </div>
+  <div class="dpr-home-dashboard-body">
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="A Human-AI Teaming Framework for Deep Reinforcement Learning-Based Voltage Regulation in Distribution Networks">A Human-AI Teaming Framework for Deep Reinforcement Learning-Based Voltage Regulation in Distribution Networks</span></li><li><span class="dpr-home-dashboard-paper-title" title="Personalized Recommendation Tool Learning via Autonomous Language Agents">Personalized Recommendation Tool Learning via Autonomous Language Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Agent Failures to Text Policies: What Works and What Breaks">From Agent Failures to Text Policies: What Works and What Breaks</span></li></ul>
+  </div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>12</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
+</section>
+</div>
 
-### 今日简报（AI）
-1) 本周聚焦RLHF可解释AI框架《Themis》与HCI主动系统概念，并速览AI在招聘偏见、个性化代理及编程教育辅助中的实践。
-2) 最值得关注方向：RLHF可解释性框架（Themis）与HCI+AI主动系统（Proactive Systems），两者均获9.0高分精读推荐。
-3) 下一步可深入了解AI如何影响人类决策（如简历筛选偏见）及教育中的求助行为，并关注长时记忆代理的个性化实现。
-- 详情：[/20260619-20260628/README](/20260619-20260628/README)
-
-### 精读区论文标签
-1. [Themis: An explainable AI-enabled framework for Reinforcement Learning with Human Feedback](/20260619-20260628/2606.24622v1-themis-an-explainable-ai-enabled-framework-for-reinforcement-learning-with-human-feedback)  
-   标签：评分：9.0/10、query:human-ai
-   evidence：结合可解释AI的RLHF框架，实现透明的人机对齐
-2. [Proactive Systems in HCI and AI: Concepts, Challenges, and Opportunities](/20260619-20260628/2606.25149v1-proactive-systems-in-hci-and-ai-concepts-challenges-and-opportunities)  
-   标签：评分：9.0/10、query:human-ai
-   evidence：主动系统预见用户需求，是人机交互设计的核心
-3. [Cross-Subject Predictive Validity for Learning Outcomes of Delayed Start Behavior](/20260619-20260628/2606.25308v1-cross-subject-predictive-validity-for-learning-outcomes-of-delayed-start-behavior)  
-   标签：评分：9.0/10、query:ba
-   evidence：延迟启动行为作为任务启动困难的测量
-4. [AI Coaching for Accelerating Human Skill Development with Reinforcement Learning](/20260619-20260628/2606.25337v1-ai-coaching-for-accelerating-human-skill-development-with-reinforcement-learning)  
-   标签：评分：9.0/10、query:ba
-   evidence：利用强化学习的AI教练框架加速人类技能发展，可应用于拖延和启动困难
-5. [Designing Trustworthy LLM-based Wellbeing Recommendation through Controllable Interaction](/20260619-20260628/2606.25809v1-designing-trustworthy-llm-based-wellbeing-recommendation-through-controllable-interaction)  
-   标签：评分：9.0/10、query:ai-hci-mh
-   evidence：基于LLM的健康推荐通过可控交互支持心理健康
-6. [Towards Transparent Mental Health Insights: An Explainable AI Model for Career-Related Depression and Anxiety Among University Students Using Structured Data](/20260619-20260628/2606.21474v1-towards-transparent-mental-health-insights-an-explainable-ai-model-for-career-related-depression-and-anxiety-among-university-students-using-structured-data)  
-   标签：评分：8.0/10、query:ai-hci-mh
-   evidence：可解释AI用于职业相关抑郁和焦虑的心理健康评估
-
-### 速读区论文标签
-1. [AdaMem: Learning What to Remember for Personalized Long-Horizon LLM Agents](/20260619-20260628/2606.21144v1-adamem-learning-what-to-remember-for-personalized-long-horizon-llm-agents)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：为LLM代理提供个性化记忆以增强人机交互
-2. [Resume Screening, Fast and Slow: (Biased) AI Recommendations' Influence on Human Decision Making](/20260619-20260628/2606.22213v1-resume-screening-fast-and-slow-biased-ai-recommendations-influence-on-human-decision-making)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：研究有偏见的AI推荐对人类简历筛选决策的影响
-3. [AI-Assisted Help-Seeking Trajectories in Programming Education from an SRL-Informed Perspective](/20260619-20260628/2606.22809v1-ai-assisted-help-seeking-trajectories-in-programming-education-from-an-srl-informed-perspective)  
-   标签：评分：8.0/10、query:ba
-   evidence：编程中AI辅助求助的自我调节学习分析
-4. [Managing Procedural Memory in LLM Agents: Control, Adaptation, and Evaluation](/20260619-20260628/2606.23127v1-managing-procedural-memory-in-llm-agents-control-adaptation-and-evaluation)  
-   标签：评分：8.0/10、query:human-ai
-   evidence：为LLM代理提供程序记忆基准，改善人机协作中的任务适应
-5. [What Changes When the Interlocutor Is an AI? Interactional Fluency and Linguistic Uptake in L2 Spoken Dialogue](/20260619-20260628/2606.22225v1-what-changes-when-the-interlocutor-is-an-ai-interactional-fluency-and-linguistic-uptake-in-l2-spoken-dialogue)  
-   标签：评分：7.0/10、query:human-ai
-   evidence：AI对话者对交互流畅性和语言学习的影响
-6. [Explainable AI for Mental Health Prediction in Drug-Affected Populations with Dragonfly Algorithm and GAN Oversampling](/20260619-20260628/2606.22780v1-explainable-ai-for-mental-health-prediction-in-drug-affected-populations-with-dragonfly-algorithm-and-gan-oversampling)  
-   标签：评分：7.0/10、query:ai-hci-mh
-   evidence：可解释AI用于药物影响人群的心理健康预测
-7. [DynamicMem: A Long-Horizon Memory Benchmark in Real-World Settings](/20260619-20260628/2606.22877v1-dynamicmem-a-long-horizon-memory-benchmark-in-real-world-settings)  
-   标签：评分：7.0/10、query:human-ai
-   evidence：长期记忆基准测试用于LLM个人助手的人类-AI交互
-8. [Reinforcement Learning for Computer-Use Agents with Autonomous Evaluation](/20260619-20260628/2606.24515v1-reinforcement-learning-for-computer-use-agents-with-autonomous-evaluation)  
-   标签：评分：7.0/10、query:human-ai
-   evidence：基于自主视觉-语言评估的GUI代理强化学习微调
-9. [CalVerT: Augmenting Agents with Calibrated Verifier Telemetry Improves Action and Learning in Knowledge-Intensive Tasks](/20260619-20260628/2606.21777v1-calvert-augmenting-agents-with-calibrated-verifier-telemetry-improves-action-and-learning-in-knowledge-intensive-tasks)  
-   标签：评分：6.0/10、query:human-ai
-   evidence：通过校准遥测增强LLM代理状态，改善人机协作任务中的行动与学习
-10. [Reinforcement Learning Towards Broadly and Persistently Beneficial Models](/20260619-20260628/2606.24014v1-reinforcement-learning-towards-broadly-and-persistently-beneficial-models)  
-   标签：评分：6.0/10、query:ba
-   evidence：强化学习用于广泛有益的模型，与AI行为增强一致
-11. [VisCritic: Visual State Comparison as Process Reward for GUI Agents](/20260619-20260628/2606.24525v1-viscritic-visual-state-comparison-as-process-reward-for-gui-agents)  
-   标签：评分：6.0/10、query:interaction
-   evidence：用于GUI代理验证的视觉状态比较，与交互技术相关
-
-
-<div class="dpr-home-promo-card">
-  <h3 class="dpr-home-promo-title">💬 社区与支持</h3>
-  <ul class="dpr-home-promo-list">
-    <li>欢迎 Star / Fork / Issue / PR</li>
-    <li>QQ群：583867967（欢迎交流，已有：1151人）</li>
-  </ul>
+<div class="dpr-home-promo-card dpr-home-panel">
+  <div class="dpr-home-panel-header">
+    <h3 class="dpr-home-promo-title">社区与支持</h3>
+  </div>
+  <p class="dpr-home-promo-copy">欢迎通过 Star、Fork、Issue 或 PR 一起完善 Daily Paper Reader。</p>
+  <div class="dpr-home-promo-meta">
+    <span>QQ群 <strong>583867967</strong></span>
+    <span class="dpr-home-promo-separator" aria-hidden="true">·</span>
+    <span>已有 <strong>1,491</strong> 人参与交流</span>
+  </div>
 </div>
