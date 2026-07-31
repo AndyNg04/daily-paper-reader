@@ -44,14 +44,14 @@
       <span class="dpr-home-dashboard-kicker">2026-07-22 ~ 2026-07-31</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 54 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 55 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>38</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>39</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>16</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-07-31 12:02:43 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-07-31 13:04:29 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -62,9 +62,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>本期共处理54篇论文，精读38篇、速读16篇，聚焦多智能体协作与强化学习前沿。</p>
-<p>最值得关注：9.0分《TriAgent》用差异感知委员会降低金融情感分析成本，9.0分《Dreamer-CPC》将世界模型引入去中心化多智能体学习。</p>
-<p>建议优先精读上述两篇高分工作，速读关注电压调控、推荐工具学习和Agent失败策略修复。</p>
+<p>今日完成55篇论文扫描，精读39篇，聚焦人-AI协作与智能体强化学习。</p>
+<p>最值得关注：职场人-AI交互的10分用户体验框架，以及电网电压调节中的人机协同9分方法。</p>
+<p>建议下一步优先结合具体业务场景，验证LLM在用户意图动态变化下的实际表现与容错机制。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -73,12 +73,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">38 篇</strong>
+    <strong class="dpr-home-dashboard-count">39 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="TriAgent: Divergence-Aware Multi-Agent Committees for Cost-Efficient Financial Sentiment Analysis">TriAgent: Divergence-Aware Multi-Agent Committees for Cost-Efficient Financial Sentiment Analysis</span></li><li><span class="dpr-home-dashboard-paper-title" title="Dreamer-CPC: Message Learning with World Models for Decentralized Multi-agent Reinforcement Learning">Dreamer-CPC: Message Learning with World Models for Decentralized Multi-agent Reinforcement Learning</span></li><li><span class="dpr-home-dashboard-paper-title" title="A Framework of User Experience Principles for Human-AI Agent Interaction in the Workplace">A Framework of User Experience Principles for Human-AI Agent Interaction in the Workplace</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="A Framework of User Experience Principles for Human-AI Agent Interaction in the Workplace">A Framework of User Experience Principles for Human-AI Agent Interaction in the Workplace</span></li><li><span class="dpr-home-dashboard-paper-title" title="A Human-AI Teaming Framework for Deep Reinforcement Learning-Based Voltage Regulation in Distribution Networks">A Human-AI Teaming Framework for Deep Reinforcement Learning-Based Voltage Regulation in Distribution Networks</span></li><li><span class="dpr-home-dashboard-paper-title" title="TriAgent: Divergence-Aware Multi-Agent Committees for Cost-Efficient Financial Sentiment Analysis">TriAgent: Divergence-Aware Multi-Agent Committees for Cost-Efficient Financial Sentiment Analysis</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>26</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>4</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>4</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>3</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>24</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>5</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>5</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>3</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -89,9 +89,9 @@
     <strong class="dpr-home-dashboard-count">16 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="A Human-AI Teaming Framework for Deep Reinforcement Learning-Based Voltage Regulation in Distribution Networks">A Human-AI Teaming Framework for Deep Reinforcement Learning-Based Voltage Regulation in Distribution Networks</span></li><li><span class="dpr-home-dashboard-paper-title" title="Personalized Recommendation Tool Learning via Autonomous Language Agents">Personalized Recommendation Tool Learning via Autonomous Language Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Agent Failures to Text Policies: What Works and What Breaks">From Agent Failures to Text Policies: What Works and What Breaks</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Dreamer-CPC: Message Learning with World Models for Decentralized Multi-agent Reinforcement Learning">Dreamer-CPC: Message Learning with World Models for Decentralized Multi-agent Reinforcement Learning</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Agent Failures to Text Policies: What Works and What Breaks">From Agent Failures to Text Policies: What Works and What Breaks</span></li><li><span class="dpr-home-dashboard-paper-title" title="LLMs Get Lost in Evolving User Intent">LLMs Get Lost in Evolving User Intent</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>12</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>9</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>3</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
 </section>
 </div>
 
