@@ -41,17 +41,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-07-17 ~ 2026-08-15</span>
+      <span class="dpr-home-dashboard-kicker">2026-08-15</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 49 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 15 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>33</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>16</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>5</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>10</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-08-15 09:48:28 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-08-15 19:24:49 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -62,9 +62,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>过去30天精读33篇、速读16篇，聚焦人机协作与风险议题。</p>
-<p>最值得看的两篇高分研究：人机协作社会技术风险的全生命周期分类，以及人机共事中的“非均匀性”原则。</p>
-<p>建议从速读中的可穿戴触觉腕带与政策大模型责任原则入手，拓展应用视野。</p>
+<p>今日精读聚焦多智能体连续动作协作与LLM稳定性评测，共筛选15篇论文。</p>
+<p>最值得关注两篇高分工作：自适应默认动作机制提升协作效率，以及StabilityBench系统量化大模型不稳定表现。</p>
+<p>建议优先精读这两篇，速读部分可关注多智能体策略跟随与人机交互心理模型。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -73,12 +73,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">33 篇</strong>
+    <strong class="dpr-home-dashboard-count">5 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Toward Resilient Human-AI Collaboration: A Lifecycle Taxonomy of Sociotechnical Risks and Cascading Failures">Toward Resilient Human-AI Collaboration: A Lifecycle Taxonomy of Sociotechnical Risks and Cascading Failures</span></li><li><span class="dpr-home-dashboard-paper-title" title="Nonuniformity Principle in Human-AI Coworking">Nonuniformity Principle in Human-AI Coworking</span></li><li><span class="dpr-home-dashboard-paper-title" title="Just A Rather Very Intelligent Spoken Agent">Just A Rather Very Intelligent Spoken Agent</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="A Self-Evolving Default Action for Cooperative Tasks with Continuous Action Space">A Self-Evolving Default Action for Cooperative Tasks with Continuous Action Space</span></li><li><span class="dpr-home-dashboard-paper-title" title="StabilityBench: Benchmarking Instability in LLMs">StabilityBench: Benchmarking Instability in LLMs</span></li><li><span class="dpr-home-dashboard-paper-title" title="Psychological Influences of Conversational AI: Research and Design Directions for Reducing Harm and Promoting Well-Being">Psychological Influences of Conversational AI: Research and Design Directions for Reducing Harm and Promoting Well-Being</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>17</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>6</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>5</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>3</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>2</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -86,12 +86,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">16 篇</strong>
+    <strong class="dpr-home-dashboard-count">10 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="CASAband: Easy-to-Wear Textile Wristband using Shape Memory Alloy Actuators for Spatial and Temporal Haptic Feedback">CASAband: Easy-to-Wear Textile Wristband using Shape Memory Alloy Actuators for Spatial and Temporal Haptic Feedback</span></li><li><span class="dpr-home-dashboard-paper-title" title="The CRAFT principles for the responsible use of large language models in policymaking">The CRAFT principles for the responsible use of large language models in policymaking</span></li><li><span class="dpr-home-dashboard-paper-title" title="Breakdowns for Human-Machine Creative Reflexivity">Breakdowns for Human-Machine Creative Reflexivity</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Strategy-Following Multi-Agent Deep Reinforcement Learning Considering Control Strategies Provided to Other Agents">Strategy-Following Multi-Agent Deep Reinforcement Learning Considering Control Strategies Provided to Other Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Micro-Cognition to Self-Construction: A Four-Layer Integrative Review of Psychological Theories in HCI">From Micro-Cognition to Self-Construction: A Four-Layer Integrative Review of Psychological Theories in HCI</span></li><li><span class="dpr-home-dashboard-paper-title" title="Affective Tools for Thought: Towards Shared Attention and Affective Reorienting in AI-Supported Thinking">Affective Tools for Thought: Towards Shared Attention and Affective Reorienting in AI-Supported Thinking</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>8</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>7</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>3</strong></span></div>
 </section>
 </div>
 
