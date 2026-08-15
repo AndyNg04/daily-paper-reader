@@ -1,0 +1,893 @@
+Title: LLM as Forecasting Planner: Training-Free Text Conditioning for Time-Series Foundation Models
+
+URL Source: https://arxiv.org/pdf/2607.24892v1
+
+Published Time: Wed, 29 Jul 2026 00:09:47 GMT
+
+Number of Pages: 29
+
+Markdown Content:
+# LLM as Forecasting Planner: Training-Free Text Conditioning for Time-Series Foundation Models 
+
+Huu Hiep Nguyen Dung Nguyen Minh Hoang Nguyen Dai Do Hung Le 
+
+Applied Artificial Intelligence Initiative Deakin University Geelong, Australia 
+
+Abstract 
+
+Text-conditioned time-series forecasting predicts a series from both its nu-merical history and natural-language context, allowing forecasts to account for events and constraints that the past alone cannot reveal. This requires both reliable numerical forecasting and the ability to interpret contextual information. Time-series foundation models (TSFMs) provide strong nu-merical forecasts, while large language models (LLMs) can reason over text, but combining their strengths remains challenging because asking an LLM to generate or revise forecast values directly can distort the temporal struc-ture captured by the TSFM. We instead formulate forecasting as a plan-ning problem over TSFM-generated trajectories. The frozen TSFM acts as a simulator that proposes numerical continuations, while the LLM acts as a policy and value function that guides candidate selection and evaluates completed trajectories against the context. We instantiate this as LAFP 
+
+(LLM As Forecasting Planner), a training-free framework that bridges the modality gap without retraining either model, using Monte Carlo tree search (MCTS) over the forecast horizon with a Ranker LLM as policy and a Judge LLM as value function. Experiments on Context-is-Key and Time-MMD across two TSFM backbones (Chronos and TimesFM) and four LLMs show that LAFP delivers consistent improvements across model choices, supporting sequential search as an effective training-free approach to text-conditioned forecasting. 
+
+1 Introduction 
+
+Time-series forecasting supports decision-making across domains including energy, public health, finance, and supply chains. Decades of statistical and deep learning research have improved the ability to predict a series from its numerical history [Nie et al., 2023, Ansari et al., 2024, Woo et al., 2024, Das et al., 2024]. However, numerical history alone cannot reveal many events and constraints that shape the future, such as plant shutdowns, policy changes, or heat-wave advisories, even when this information is available in text. Human analysts rarely forecast from numbers in isolation, instead interpreting them alongside news, reports, and domain knowledge. This motivates text-conditioned time-series forecasting ,which predicts a series from both its numerical history and accompanying natural-language context, allowing relevant textual information to refine forecasts beyond what the past alone can support [Williams et al., 2025, Liu et al., 2024, Ashok et al., 2025]. Text-conditioned time-series forecasting requires both reliable numerical forecasting and contextual reasoning. TSFMs provide the former. Pretrained on large and diverse time-
+
+Preprint. Under review. arXiv:2607.24892v1 [cs.LG] 27 Jul 2026 series corpora, models such as Chronos [Ansari et al., 2024], Moirai [Woo et al., 2024], and TimesFM [Das et al., 2024] can generate plausible futures while preserving temporal properties such as scale, seasonality, and uncertainty. However, most TSFMs condition only on numerical history and cannot directly incorporate textual information about future events or external constraints. LLMs provide the complementary capability of interpreting such information and reasoning about its implications for possible futures. 
+
+LLM-as-forecaster. Existing training-free approaches commonly exploit this capability by casting the LLM as a forecaster and asking it to generate or revise numerical predictions directly [Gruver et al., 2023], sometimes through chain-of-thought reasoning or multi-agent collaboration [Das et al., 2026, Ashok et al., 2025]. This role assignment is problematic because LLMs are not reliable numerical time-series models. Language pretraining does not equip them to capture temporal dependencies consistently [Tan et al., 2024], and con-trolled evaluations show that their time-series reasoning performance is only slightly above chance [Merrill et al., 2024]. The central question is therefore not whether LLMs can con-tribute, but how their contextual reasoning should be used. Existing methods give them direct control over forecast values rather than restricting them to the interpretation of tex-tual context. 
+
+LLM as forecasting planner. We propose to separate contextual reasoning from numer-ical generation. The TSFM remains responsible for proposing plausible numerical futures, while the LLM determines which of these futures are most consistent with the textual con-text. We formulate this separation as a planning problem in which a simulator generates candidate states, a policy guides the choice of actions, and a value function evaluates com-pleted trajectories [Lightman et al., 2024]. In our setting, the TSFM serves as the simulator by generating candidate numerical continuations. The LLM provides the policy by ranking these continuations at each step and the value function by evaluating completed trajectories against the context. Numerical generation therefore remains entirely with the TSFM, while the LLM influences the forecast only through selection and evaluation. This division of roles requires no additional training and can be applied across different TSFM and LLM backbones. We instantiate this framework as LAFP (LLM As Forecasting Planner). Rather than reranking a fixed pool of complete forecasts, LAFP applies MCTS over a sequence of forecast windows, with several TSFM-generated continuations considered at each step. This allows promising prefixes from different TSFM samples to be explored and combined. The LLM has two roles. The Ranker ranks candidate continuations during search and provides the policy prior. The Judge evaluates complete trajectories after rollout and provides the value signal. Each simulation consists of five stages: Selection , where PUCT chooses a path using the Ranker prior; Expansion generates new continuations with the TSFM; Ranking , where the Ranker ranks these candidates; Simulation , where the TSFM completes the selected trajectory; and Backpropagation , where the Judge scores the completed trajectory and the score is propagated through the tree. After a fixed number of simulations, the final forecast is obtained from the accumulated search state. In summary, our contributions are: • We formulate text-conditioned time-series forecasting as a planning problem over TSFM-generated trajectories. The TSFM acts as the numerical simulator, while the LLM provides policy and value signals for selecting and evaluating candidate futures. • We propose LAFP , a training-free MCTS framework that combines a frozen TSFM with a frozen LLM. A Ranker guides the search over candidate continuations, a 
+
+Judge evaluates completed trajectories, and MCTS reuses these evaluations to retain and extend promising forecast prefixes. The framework is agnostic to the choice of TSFM and LLM backbone. • We provide a comprehensive evaluation of LAFP on Context-is-Key and Time-MMD across two TSFM backbones and four Ranker/Judge LLMs. The evaluation includes comparisons with context-blind TSFMs, direct LLM forecasters, and Best-of-N reranking, together with component ablations and analyses of search budget, 2robustness, and Judge behaviour. The results show that LAFP consistently im-proves on the corresponding context-blind TSFM and generally outperforms flat reranking across model configurations. 
+
+2 Related Work 
+
+Time-series foundation models. Time-series foundation models (TSFMs) are pre-trained on large and diverse time-series datasets for zero-shot forecasting across do-mains [Ansari et al., 2024, Woo et al., 2024, Das et al., 2024, Rasul et al., 2023, Garza et al., 2023]. They use different architectures and representations. Chronos [Ansari et al., 2024] discretises scaled values and trains a T5-based autoregressive model. Moirai [Woo et al., 2024] and Moirai-MoE [Liu et al., 2025] support forecasting across different num-bers of variables and sampling frequencies. TimesFM [Das et al., 2024] uses a decoder-only architecture with patch-based inputs and quantile outputs. These models learn temporal patterns from numerical histories but generally do not incorporate textual context. LAFP 
+
+builds on their complementary strength in numerical forecasting by using a frozen TSFM as the simulator that generates candidate continuations, while delegating context-dependent selection and evaluation to the LLM. This formulation is independent of the particular TSFM architecture or representation. 
+
+Text-conditioned time-series forecasting. Text-conditioned forecasting requires a model to use both numerical history and natural-language context. Context-is-Key (CiK) [Williams et al., 2025] contains 71 tasks designed so that the context provides in-formation not available in the numerical history. Performance is measured using region-of-interest CRPS. Time-MMD [Liu et al., 2024] pairs time series from nine domains with textual reports, and TaTS [Li et al., 2026] provides a standardised evaluation protocol for this benchmark. TimesX [Liu et al., 2026b] argues that current context-enriched benchmarks remain limited in scale and in the types of context they cover, and introduces a larger, au-tomatically constructed alternative. Existing methods either train modules to fuse the two modalities [Liu et al., 2024, Nguyen et al., 2026b,a] or prompt an LLM to generate or revise forecast values [Gruver et al., 2023, Ashok et al., 2025, Das et al., 2026]. The former requires additional multimodal training, whereas the latter places numerical generation in the hands of the LLM. Closest to our setting, the concurrent PostTime [Liu et al., 2026a] post-trains an LLM with supervised fine-tuning and reinforcement learning to act as a context-guided revisor that decides whether to revise or preserve the forecast of a TSFM. This keeps a numerical backbone in the loop, but it requires a dedicated post-training stage, and the re-vised forecast values are still generated by the LLM. This leaves an unresolved gap: how to incorporate textual context without any training while retaining the numerical forecasting capabilities of a pretrained TSFM and keeping forecast values under TSFM control. LAFP 
+
+addresses this gap by using a frozen TSFM to generate candidate forecasts and an LLM to guide sequential search over them. 
+
+LLMs for time-series forecasting. Many training-free methods use an LLM as a fore-caster and ask it to generate numerical predictions from the time-series history and asso-ciated context. LLMTime [Gruver et al., 2023] represents a time series as a sequence of numerical tokens and generates future values autoregressively. NEXUS [Das et al., 2026] combines predictions from multiple LLM agents, while other work studies prompting strate-gies for text-conditioned forecasting [Ashok et al., 2025]. However, language pretraining does not provide the temporal inductive biases used by specialised forecasting models [Tan et al., 2024]. LLMs also show limited performance on controlled tests of numerical time-series reasoning [Merrill et al., 2024]. Instead of asking the LLM to generate forecasts, LAFP 
+
+uses it to rank TSFM-generated candidates and evaluate complete trajectories. 
+
+LLM-guided planning and search. MCTS combines a model of state transitions, a policy for selecting actions, and a value function for evaluating trajectories. AlphaGo and AlphaZero showed that these components can be integrated through PUCT to guide search over large decision spaces [Silver et al., 2017]. Recent methods have also used tree search for language-model reasoning and code generation. Tree of Thoughts [Yao et al., 2023] searches 3Input                       
+
+> History
+> Context
+> 1Selection
+> x → TSFM
+> c → Selector / Judge
+> Visited Node
+> Read off the tree
+> Output 2Expansion Ranking 4Simulation 5Backpropagation 3candidate trajectories
+> history
+> history
+> candidates
+> candidates
+> 3
+> 8
+> 6
+> 7
+> Judge output forecast
+> candidates: each = a TSFM sample
+> ↓ keep the most-visited select by score 213Ranker TSFM TSFM
+> now W₁ W₂ W₃ W₄ H
+> repeat B simulations
+> Active Trajectory Candidate Rollout Score Unvisited Node Backpropagation
+
+Figure 1: LAFP overview. The frozen TSFM serves as the simulator, generating candi-date numerical continuations and completing forecast trajectories. The LLM provides both the policy and value signals: the Ranker assesses the relevance of the context and ranks candidate continuations, while the Judge evaluates completed trajectories. Each of the B
+
+simulations proceeds through Selection, Expansion, Ranking, Simulation, and Backprop-agation. The final forecast is read from the accumulated search state, and all numerical values are generated through the frozen TSFM interface. over intermediate reasoning steps generated and evaluated by an LLM. RAP [Hao et al., 2023] treats reasoning as planning with the LLM acting as both the simulator and the rea-soning agent. rStar-Math [Guan et al., 2025] combines MCTS with process-level evaluation for mathematical reasoning. In these methods, both state generation and evaluation occur primarily in language space. LAFP instead separates these roles across modalities: a nu-merical time-series model generates candidate forecast transitions, while the LLM supplies context-dependent policy and value signals to guide the search. 
+
+3 Method 
+
+3.1 Problem formulation and overview 
+
+We formulate text-conditioned forecasting as a finite-horizon sequential decision problem. Given a numerical history x and textual context c, the state at step t is st = ( y<t , c ), where 
+
+y<t is the forecast prefix committed so far. An action selects one W -step continuation from a set of candidates generated by the frozen TSFM. The TSFM therefore acts as the 
+
+simulator , defining the numerical transitions available from the current prefix. The Ranker LLM acts as the policy , providing context-dependent guidance over these transitions, while the Judge LLM acts as the value function , evaluating completed forecast trajectories against the context. When the context contains information relevant to the current forecast window, the cor-responding state is treated as a decision node , and the Ranker provides a prior over its candidate continuations. When the context provides no relevant information, the state is treated as a chance node , and its outgoing transition is sampled uniformly from the TSFM candidates. For a horizon of length H divided into D = ⌈H/W ⌉ windows, with K candidates generated at each window, the resulting tree contains up to KD root-to-leaf trajectories. The objective is to identify high-value trajectories without exhaustively evaluating this space. 
+
+Pipeline overview. LAFP explores the trajectory space using B MCTS simulations (Figure 1, Algorithm 1). Each simulation follows five stages. Selection traverses the ex-isting tree to an expandable leaf. Expansion uses the TSFM to generate K continuations from the current prefix. Ranking determines whether the context is relevant to the current window and, when relevant, converts the Ranker’s ordering into policy priors. Simulation 
+
+extends the selected continuation to the end of the horizon using the TSFM. Backpropaga-tion evaluates the completed trajectory with the Judge and propagates its score through the 4visited path. Later simulations can therefore reuse earlier evaluations to direct exploration towards promising continuations. All numerical inputs to the LLM are serialized as text. Values are rounded and paired with timestamps, while long segments are summarized by their endpoints, range, and mean to limit prompt length. The LLM neither receives nor emits raw numerical arrays. 
+
+3.2 MCTS search procedure Selection. Each simulation begins at the root and traverses previously expanded nodes until it reaches an expandable leaf. The transition rule depends on whether the current node was classified as a decision node or a chance node when it was expanded. At a decision node , the next child is selected using the PUCT rule 
+
+a⋆ = arg max 
+
+> a
+
+Wsum (s, a )
+
+N (s, a ) + cpuct π(a | s)
+
+√max {1, ∑ 
+
+> b
+
+N (s, b )}
+
+1 + N (s, a ) , (1) where s is the current node, Wsum (s, a )/ N (s, a ) is the mean value backed up through action 
+
+a at s, defined as 0 when N (s, a ) = 0 , and π(a | s) is the policy prior provided by the Ranker when the node is expanded. For an action that has not yet been visited, the mean-value term therefore vanishes and selection is driven by the prior-weighted exploration term, whose numerator is floored at one so that the rule remains well-defined at a newly expanded node. Early in the search, this prior directs exploration towards candidates supported by the context. As more simulations are completed, backed-up Judge values can reinforce or override the initial ranking. At a chance node , the next child is sampled uniformly from its K TSFM-generated candi-dates rather than selected using PUCT. Neither the Ranker prior nor the backed-up Judge values influence this local transition, preventing context that is irrelevant to the current window from steering the backbone candidates. For sample-native backbones, uniform se-lection among independently drawn candidates preserves the TSFM transition distribution (App. B). Chance nodes nevertheless remain part of the search tree and receive backed-up values. This allows earlier decision nodes to account for stochastic downstream outcomes, while later windows can still become decision nodes when the context becomes relevant. If the Ranker abstains at every window, the search dynamics reduce to ordinary TSFM sampling. 
+
+Expansion. After Selection reaches an expandable leaf with committed prefix y<t , the frozen TSFM generates K candidate continuations for the next W -step window: 
+
+{(ˆ y(k), ℓ (k))}Kk=1 = TSFM (x, y <t ; K), (2) where ˆy(k) denotes the k-th candidate continuation and ℓ(k) is its scalar backbone score. This score is used only as a fallback prior in the without-Ranker ablation (§6). The generated candidates become the outgoing transitions of the newly expanded node. Each candidate commits one W -step block, so appending ˆy(k) to y<t produces the state associated with the corresponding child. 
+
+Ranking. The Ranker receives the textual context c and serialized representations of the K candidate continuations. It first returns a relevance flag relevance ∈ { Yes , No }
+
+indicating whether the context contains information relevant to the current forecast window. If relevance = Yes , the Ranker also returns an ordering rank s(·) over the candidates of the newly expanded node s. The ordering is converted into policy priors for the newly expanded node s as 
+
+π(a | s) = e−η rank s(a)
+
+∑ 
+
+> a′
+
+e−η rank s(a′) , η = 1 .0. (3) Higher-ranked candidates therefore receive larger prior probabilities, and the expanded node is stored as a decision node. If relevance = No , including cases in which the Ranker re-sponse cannot be parsed, the Ranker abstains and the node is stored as a chance node. Its outgoing transitions are subsequently sampled uniformly. The relevance prediction there-fore determines where contextual guidance enters the tree rather than whether the node participates in search. 5Simulation. The selected continuation is appended to the committed prefix and extended to the end of the forecasting horizon using the same frozen TSFM interface, producing a complete trajectory τ . Sample-native models draw trajectories directly from their predictive distributions, whereas models that provide only quantile forecasts construct trajectories from their quantile outputs (App. B). The TSFM is therefore the sole numerical generator during both Expansion and Simulation. The LLM neither generates nor modifies forecast values; it only guides the search over trajectories produced through the TSFM interface. Consequently, the method remains limited by the range of futures that the backbone can generate. 
+
+Backpropagation. The Judge LLM acts as the value function by evaluating how con-sistent the completed trajectory τ is with the textual context c. It emits a single digit 
+
+SCORE ∈ { 0, . . . , 9}. Rather than using only the greedily decoded digit, we compute the expected score under the model’s distribution over the score token: 
+
+s(τ ) = E[SCORE ] = 
+
+> 9
+
+∑
+
+> k=0
+
+k P (SCORE =k | c, τ ) ∈ [0 , 9] . (4) Here P (SCORE =k | c, τ ) is the probability that the Judge assigns to the digit token k at the output position where the score is emitted. The Judge first produces a short analysis under greedy decoding; at the score position, the next-token probabilities of the ten digit tokens {0, . . . , 9} are read and renormalized to sum to one. The distribution is therefore conditioned on the context, the serialized trajectory, and the Judge’s own analysis. Tak-ing the expectation rather than the greedily decoded digit yields a continuous value that distinguishes trajectories receiving the same discrete score. The resulting value s(τ ) is used as the MCTS reward and propagated along the committed path. For every edge (s, a ) ∈ E (τ ) visited by the simulation, 
+
+N (s, a ) += 1 , Wsum (s, a ) += s(τ ). (5) These updates allow later simulations to use previous trajectory evaluations when selecting which branches to explore. The Judge uses greedy decoding with temperature 0, so identical trajectory–context pairs can be cached without changing the result (§6.2). 
+
+3.3 Output selection 
+
+After B simulations, the search state contains two forms of information: the tree, whose edges (s, a ) store (N (s, a ), W sum (s, a )) , and a pool of B completed rollouts with their Judge scores. Both output modes are read from this accumulated state. Each rollout τi is assigned a path value equal to the mean backed-up value along its committed tree path: pathQ (τi) = 1
+
+|E (τi)|
+
+∑
+
+> (s,a )∈E (τi)
+
+Wsum (s, a )
+
+N (s, a ) , (6) where E(τi) is the set of tree edges on the path associated with τi. Because the Judge score and the mean backed-up edge values both lie on the same [0 , 9] scale, they are combined as value (τi) = s(τi) + α pathQ (τi)1 + α , α = 0 .5. (7) The mixing weight α balances the individual Judge verdict with the value accumulated across related simulations. For distributional evaluation on CiK, we sample 25 trajectories from the tree using visit-proportional sampling, with actions drawn according to N (s, a )1/ τ . This matches the base-line output format. For point forecasting on Time-MMD, we use a trust-region rule. We retain the five rollouts with the highest value and return the shortlisted trajectory nearest the geometric median of all B rollouts: 
+
+τ ⋆ = arg min 
+
+> i∈top-5
+
+∥∥τi − gmedian ({τ1, . . . , τ B })∥ ∥2 . (8) 6The shortlist incorporates contextual preference, while the geometric median limits the influ-ence of a noisy Judge score by favouring trajectories near the backbone-generated consensus. The shortlist size is fixed at five (App. D). TSFM-BoN applies the same output rules, so the comparison isolates candidate construction. All returned forecast values are generated through the frozen TSFM interface. 
+
+4 Experimental Setup 
+
+4.1 Benchmarks CiK [Williams et al., 2025] contains 71 tasks across seven domains, with five deterministic instances per task, yielding 355 instances in total. The benchmark covers history lengths of 3–287 timesteps and horizons of 6–99, with 14 tasks imposing explicit numerical con-straints. We use the official weighted region-of-interest CRPS (RCRPS; App. F), which normalizes scores per task and penalizes constraint violations. Future- and covariate-source contexts provide covariates or constraints rather than future target values and therefore do not introduce label leakage. 
+
+Time-MMD [Liu et al., 2024] contains 9 domains (Agriculture, Climate, Economy, Se-curity, SocialGood, Traffic, monthly; Energy, Health, weekly; Environment, daily), four horizons per domain (monthly 6/8/10/12 , weekly 12/24/36/48 , daily 48/96/192/336 ), 50 
+
+windows per (domain, horizon, seed), with 24 -step conditioning (following TaTS protocol [Li et al., 2026]). We score MSE and MAE in StandardScaler space and, matching the headline table (Table 1), aggregate as the geometric mean over the nine domains of the per-domain error (§5). Full dataset statistics are in App. A. 
+
+4.2 Baselines 
+
+We organize the baselines into three groups, corresponding to the row groups in Table 1. The groups are ordered by the degree of control given to the LLM over the forecast values. 
+
+LAFP forms a fourth group, LLMs as forecasting planners .• TSFM only. Zero-shot TSFM : the frozen backbone is used without textual con-text. On CiK, it produces 25 stochastic samples; on Time-MMD, it produces one sample for each forecast window. • LLMs as forecasters. These methods ask the LLM to generate the forecast values directly, without using a TSFM backbone, and are therefore backbone-independent. 
+
+DirectPrompt uses zero-shot prompting to generate forecast values from the numeri-cal history and textual context. LLM-CoT [Wei et al., 2022] adds a chain-of-thought reasoning step before producing the numerical forecast. NEXUS [Das et al., 2026] uses multi-agent synthesis and is evaluated with the same open-source LLMs. • LLMs as verifiers. These methods use the LLM only to score candidates gen-erated by the TSFM. TSFM-BoN performs flat best-of-N reranking: it samples 
+
+N candidates from the backbone, scores each candidate using the same continuous Judge as LAFP , and then applies the same output rule without tree search. On CiK, it returns the Judge’s top-25 trajectories as an ensemble. On Time-MMD, it applies the same trust-region rule as LAFP . Thus, LAFP and TSFM-BoN differ only in how their candidate pools are constructed. 
+
+4.3 Implementation Backbones. LAFP uses each TSFM as a frozen backbone without updating its parameters. The main experiments (Table 1) include two architecturally distinct models: Chronos-T5-Large [Ansari et al., 2024], an autoregressive token model that produces joint trajectory samples and serves as our default backbone; and TimesFM-1.0-200M [Das et al., 2024], a quantile-based model whose samples are reconstructed from its per-step quantile predictions (see details in App. B). 7Table 1: Main results on CiK (weighted RCRPS ↓, left) and Time-MMD (geometric-mean MSE ↓ over the nine domains, right), averaged over 3 seeds, per Ranker/Judge LLM 
+
+× TSFM ( Chr onos-T5-Large, Tim esFM-1.0-200M). Best score per column in bold ; per-domain Time-MMD tables in App. G; per-seed standard deviations in App. J.                                                                                                   
+
+> CiK weighted RCRPS ↓Time-MMD geo-mean MSE ↓
+> Qwen2.5-3B Qwen2.5-7B Llama-3.1-8B gemma-3-4B Qwen2.5-3B Qwen2.5-7B Llama-3.1-8B gemma-3-4B Method Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim.
+> TSFM only
+> Zero-shot TSFM 0.274 0.254 0.274 0.254 0.274 0.254 0.274 0.254 1.883 0.863 1.883 0.863 1.883 0.863 1.883 0.863
+> LLMs as forecaster
+> DirectPrompt 0.474 0.267 0.478 0.784 4.219 1.513 4.284 1.458 LLM-CoT 0.322 0.220 0.464 0.593 331.503 2.603 606.239 9.353 NEXUS 0.380 0.344 0.493 0.423 0.927 0.929 1.103 0.821
+> LLMs as verifier
+> TSFM-BoN 0.274 0.262 0.277 0.256 0.277 0.264 0.292 0.263 0.782 0.773 0.754 0.782 0.781 0.771 1.389 0.801
+> LLMs as forecasting planner
+> LAFP (ours) 0.262 0.250 0.260 0.245 0.258 0.251 0.264 0.245 0.768 0.769 0.744 0.772 0.738 0.772 1.387 0.787
+
+Ranker and Judge LLMs. The Ranker and Judge are served using vLLM [Kwon et al., 2023] on one V100 GPU, while the frozen TSFM runs on a second GPU (Table 3). To evaluate sensitivity to the choice of LLM, the main experiments use four instruction-tuned models: Qwen2.5-3B, Qwen2.5-7B, Llama-3.1-8B, and Gemma-3-4B. The full Ranker and Judge prompts are listed in App. K. 
+
+Hyperparameters. The default configuration samples K = 8 candidates at each expanded node, runs B = 64 MCTS simulations, and limits the search depth to D = 8 . All reported 
+
+LAFP results use this setting. To ensure a fair comparison, TSFM-BoN evaluates 64 
+
+complete trajectories, matching the simulation budget and the number of Judge calls used by LAFP , and applies the same final output rule. Thus, the comparison isolates how the evaluation budget is allocated rather than differences in Judge usage or output selection. For CiK, LAFP returns 25 trajectories for distributional evaluation, whereas for Time-MMD it returns a single trajectory using the trust-region rule described in §3.3. Complete hyperparameter settings are provided in App. D. 
+
+5 Main Results 
+
+Comparison with the context-blind anchor. Table 1 evaluates a 25-trajectory predic-tive distribution on CiK using weighted RCRPS and a single selected trajectory on Time-MMD using geometric-mean MSE. Across both benchmarks, LAFP matches or improves on the corresponding context-blind TSFM in all 16 LLM–backbone configurations, reduc-ing error by up to approximately 4% on CiK and 60 % on Time-MMD. The baselines do not exhibit the same consistency. Flat reranking remains worse than both context-blind backbones on CiK, while the LLM-as-forecaster methods underperform the corresponding backbone in most configurations. The key result is therefore the consistent improvement across benchmarks, LLMs, and TSFM backbones rather than the largest gain in any indi-vidual setting. 
+
+Comparison with LLM-as-forecaster baselines. LLMs as forecaster methods are highly sensitive to the choice of LLM. On CiK, performance for the same prompting method varies by approximately 2.7-3× across LLMs; on Time-MMD, it ranges from competitive with the context-blind anchors to errors several orders of magnitude larger. These meth-ods can nevertheless achieve strong individual results. LLM-CoT with Qwen2.5-7B obtains the best CiK score, reducing error by approximately 13 -20 % relative to the two anchors, which suggests that CiK’s curated and explicit contexts can support direct forecasting by a capable LLM. Similarly, NEXUS outperforms the Chronos anchor for every LLM on Time-MMD, although it improves on the stronger TimesFM-1 anchor in only one configuration. These gains are not stable across models or prompting strategies: LLM-CoT with the other LLMs performs 27 -134 % worse than the stronger CiK anchor, while DirectPrompt with Qwen2.5-7B is approximately 5% worse. In contrast, by separating contextual reasoning 832 48 64 96 128              
+
+> B
+> 0.260 0.265 0.270 0.275 0.280
+> weighted RCRPS (  )
+> (a) CiK
+> TSFM-BoN LAFP
+> 816 24 32 48 64
+> B
+> 0.74 0.75 0.76 0.77 0.78 0.79 0.80
+> geo-mean MSE (  )
+> (b) Time-MMD
+> TSFM-BoN LAFP
+> 0816 24 32 40 48 56 64
+> Judge queries
+> 45678
+> Best Judge Score (  )
+> (c) Score convergence
+> LAFP w/o Selector w/o MCTS TSFM-BoN
+
+Figure 2: Budget curve, Chronos-T5-Large TSFM with Qwen2.5-7B Ranker/Judge. (a) 
+
+CiK (weighted RCRPS) and (b) Time-MMD (geo-mean MSE): LAFP vs. TSFM-BoN at matched Judge-call budget B. (c) Best-so-far Judge score vs. Judge queries. from numerical generation, LAFP maintains substantially more stable performance across the same LLM choices. 
+
+Comparison with Best-of-N baseline. TSFM-BoN uses the same TSFM backbone, Judge, number of complete TSFM rollouts, and final output rule as LAFP , but evaluates a fixed pool of complete trajectories rather than searching over partial forecasts. Both meth-ods use 64 Judge calls, providing a matched terminal-evaluation budget, although LAFP 
+
+additionally invokes the Ranker to guide the search. On CiK, TSFM-BoN remains worse than both zero-shot TSFMs, whereas LAFP improves on them and reduces error by approx-imately 2–10 % relative to TSFM-BoN, depending on the backbone. On Time-MMD, TSFM-BoN improves on both zero-shot TSFMs in every configuration, showing that verification alone is effective. Nevertheless, LAFP performs better in seven of the eight LLM–backbone combinations, and its best configuration for each backbone outperforms the corresponding best TSFM-BoN configuration. The only exception is TimesFM-1 with Llama-3.1-8B, for which TSFM-BoN is marginally better. This isolated reversal is consistent with TimesFM-1’s less diverse quantile-reconstructed candidate pool and the weak relationship between Judge scores and forecast error observed in Fig. 3b. When candidates are similar and the Judge provides limited discrimination among them, sequentially reallocating simulations offers little advantage over flat reranking and may slightly amplify ranking noise. 
+
+Effect of the TSFM backbone. LAFP improves over the corresponding context-blind forecast with both backbones, although the magnitude of the gain depends on how each backbone generates candidate trajectories. On CiK, LAFP improves on the context-blind anchor by approximately 4–6% with Chronos and 1–4% with TimesFM-1. The difference is larger on Time-MMD. Chronos generates diverse joint trajectories, giving the search greater scope to identify substantially better continuations and reducing error by up to 60 %. The trust-region output rule also stabilizes its more variable samples (App. G). TimesFM-1 reconstructs trajectories from per-step quantiles and therefore produces a narrower, less diverse candidate pool. Its gains are smaller, at approximately 10 %, but more consistent across LLM configurations. These results show that LAFP benefits both backbone families, while the diversity and dependence structure of their samples determine how much sequential search can improve the forecast. 
+
+Effect of the LLM. On CiK, LAFP is relatively robust to the choice of Ranker and Judge. Changing the LLM alters the score by approximately 2% with either backbone, substantially less than the variation observed for the LLM-as-forecaster baselines. Even Qwen2.5-3B captures most of the improvement, suggesting that ranking and evaluating TSFM-generated trajectories is less demanding than generating forecast values directly. The choice of LLM has a larger effect on Time-MMD, where the method must select a single trajectory. With Chronos, the strongest configurations reduce error by approximately 60 %, whereas the weakest-performing LLM, Gemma-3-4B, achieves a reduction of about 26 % and is the only LAFP configuration outperformed by NEXUS. This result indicates that using a weaker LLM can limit the benefit of planning, particularly when selecting a single forecast from a diverse candidate pool. Nevertheless, every LLM-backbone configuration matches or improves on its corresponding context-blind TSFM. 9Table 2: Component ablations with Qwen2.5-7B as Ranker/Judge. w/o Ranker replaces the context-based prior with the TSFM score, so the search receives no contextual guidance; w/o MCTS scores independently sampled complete trajectories at the same Judge-call budget, without selection or value backup. Best per backbone and column in bold .Configuration CiK RCRPS ↓ Time-MMD geo.MSE ↓
+
+Chronos-T5-Large 
+
+Full LAFP 0.260 0.744 
+
+w/o Ranker 0.284 0.946 w/o MCTS 0.269 0.764 
+
+TimesFM-1.0-200M 
+
+Full LAFP 0.245 0.772 w/o Ranker 0.260 0.751 
+
+w/o MCTS 0.251 0.782 LAFP DirectPrompt LLM-CoT 0.20 0.25 0.30 0.35            
+
+> Weighted RCRPS
+> +2% +20% +29%
+> (a)
+> 0.260 0.264 0.261
+> 0.312
+> 0.224
+> 0.289
+> true context cross-task noise context-blind anchor
+> 12345678
+> Judge score
+> 0.475 0.500 0.525 0.550 0.575 0.600
+> Normalized error
+> (b)
+> Time-MMD, Chronos Time-MMD, TimesFM-1 CiK, Chronos CiK, TimesFM-1
+> 20 020 40
+> Time step
+> 34567
+> Value
+> (c)
+> history ground truth LAFP TSFM-BoN DirectPrompt TSFM zero-shot
+
+Figure 3: (a) CiK weighted RCRPS, true vs. cross-instance shuffled context; dashed line: context-blind anchor. (b) Mean within-window error percentile vs. Judge score. (c) Fore-cast comparison of LAFP and baselines. 
+
+Failure modes of direct numerical generation. The per-domain results in App. G reveal several extreme failures in Security, Health, and Environment, primarily for weaker LLM-as-forecaster configurations. As detailed in App. I, these failures arise mainly from incorrect scale or unit assumptions rather than incorrect trends. For example, Security targets can reach hundreds of millions despite the text providing no numerical scale, while Health and Environment reports may leave LLMs to confuse percentages, such as 0-8%, with absolute counts. LAFP avoids this failure mode because the TSFM generates all numerical values and the LLM only evaluates their contextual consistency; ambiguity in the text therefore cannot directly determine the forecast scale. 
+
+6 Ablations and Analysis 
+
+6.1 Ablations 
+
+On CiK, both the Ranker and MCTS contribute consistently, with the full method achiev-ing the best result for both backbones. Removing the Ranker increases RCRPS by approx-imately 6-7%, while replacing MCTS with flat sampling at the same budget increases it by about 2%. On Time-MMD, MCTS also improves both backbones, reducing error by approximately 2% for Chronos and 1% for TimesFM-1. The effect of the Ranker is less stable. Removing it increases the Chronos error by about 27 % but improves TimesFM-1 by approximately 3%. This difference may arise from the interaction between the benchmark and the backbone. CiK provides curated contexts with explicit information for distinguish-ing among candidate futures and evaluates a predictive distribution. Time-MMD instead provides shorter reports and evaluates a single selected trajectory, making the result more sensitive to ranking noise. This is particularly relevant for TimesFM-1, whose relatively homogeneous candidate pool provides limited separation for the Ranker. We therefore do not claim that the Ranker consistently improves point-forecast accuracy on Time-MMD. 10 6.2 Analysis Budget curves. Fig. 2a,b traces both methods over the simulation budget B under matched TSFM rollouts, Judge calls, and output rules. The two benchmarks show dif-ferent regimes. On Time-MMD, both methods improve as the budget grows, and most of the improvement is realized within the first third of the default budget; LAFP stays at or below TSFM-BoN at every evaluated budget, by up to approximately 2% (Fig. 2b). On CiK, LAFP is essentially flat across the full budget range, whereas TSFM-BoN degrades as the pool grows, so the gap widens from approximately 6% at the default budget to 8%at twice the default (Fig. 2a). Because the two methods score the same rollout pool, this divergence isolates how the pool is read out. Returning the Judge’s top-scored trajectories becomes more error-prone as a larger pool contains more over-scored outliers, whereas the visit-based read-off of LAFP concentrates on branches whose backed-up values remain high across many simulations, and is therefore stable as the pool grows. Curves for all eight Ranker/Judge LLM × TSFM pairs are shown in App. H. 
+
+Judge score convergence. Figure 2c illustrates this behaviour on a CiK instance in which the relevant information is embedded among distractor text. LAFP reaches the highest Judge score in the candidate pool using nearly 5× fewer queries than TSFM-BoN. The flat reranker allocates the same number of Judge calls without using previous scores to guide subsequent sampling. Neither ablation reaches the same score. Without the Ranker, the search rarely explores the relevant branch; without value backup, it cannot allocate additional simulations to that branch after it is found. The Judge score is an internal search objective rather than a direct measure of forecast accuracy. However, the result shows how selection and backup reuse earlier evaluations to guide later queries, which explains the average gains in Fig. 2a,b. 
+
+Text robustness. In Fig. 3a, each CiK context is augmented with real sentences drawn from other tasks, while the time series and original context remain unchanged. The methods therefore receive relevant information mixed with fluent but misleading cross-task content. DirectPrompt degrades by approximately 20 % and LLM-CoT by about 29 %, leaving both methods 6-14 % worse than the context-blind anchor. In contrast, LAFP changes by only about 2% and remains better than the anchor. This robustness follows from the restricted role of the LLM. In the forecaster baselines, corrupted text directly affects the generated nu-merical values. In LAFP , the LLM only ranks and evaluates TSFM-generated trajectories, so misleading context can steer the search towards weaker candidates but cannot directly alter the forecast values. Its effect is therefore bounded by the candidate support of the backbone. 
+
+Judge analysis. Figure 3b groups rollouts by Judge score and reports their forecasting errors as rank percentiles within the corresponding candidate set. For Chronos, error per-centiles decrease as Judge scores increase on both benchmarks, indicating that the Judge reliably assigns lower scores to poorer trajectories. For TimesFM-1, the curves remain near 
+
+0.5, suggesting a weaker association between Judge score and forecasting error. This differ-ence is consistent with the backbones’ sampling behaviour. Chronos generates diverse joint trajectories that include more extreme failures, whereas TimesFM-1 reconstructs trajecto-ries from per-step quantiles and produces a narrower candidate pool. Most of the separation occurs at low Judge scores, while trajectories receiving high scores remain difficult to distin-guish. The Judge is therefore more effective at filtering poor trajectories than at precisely ranking the strongest ones. This behaviour aligns with LAFP , which uses backed-up Judge values to reduce further exploration of weak branches and derives the final forecast from the accumulated search state rather than selecting solely by the highest Judge score. It also helps explain why replacing MCTS with flat sampling has a larger effect for Chronos than for TimesFM-1 in Table 2. 
+
+Prediction visualization. Figure 3c compares LAFP with the baselines on a Time-MMD Energy window with horizon H = 48 . The context-blind forecast deviates substantially from this trajectory, while DirectPrompt fails to recover the lower post-reversal level. TSFM-BoN captures part of the reversal but remains systematically above the ground truth across most of the horizon. In contrast, LAFP most closely matches both the magnitude of the decline and the subsequent level, yielding a squared error several times lower than the best baseline 11 Table 3: Per-instance LLM calls, TSFM full-trajectory generations, and median wall-clock (Qwen2.5-7B Ranker/Judge, K=8 , B=64 ; one two-GPU V100 node, sequential). Italic latencies are amortized over a batched vLLM run.                                
+
+> Method LLM calls TSFM traj. calls s / inst.
+> CiK (355 instances)
+> LAFP (Chronos) 104.5 64 121
+> LAFP (TimesFM-1) 104.9 64 89
+> Time-MMD (1,793 windows)
+> LAFP (Chronos) 110.9 64 98
+> LAFP (TimesFM-1) 110.9 64 81 TSFM-BoN 64 64 21.8 NEXUS 76 0223 DirectPrompt 100.5
+> LLM-CoT 101.1
+
+on this instance. This example shows that guided sequential search can identify TSFM-generated trajectories that better align with the realised future than direct forecasting or flat reranking. Aggregate results are reported in Table 1 and Fig. 2. 
+
+Cost and latency. For each instance, LAFP makes one Ranker call per expanded node, approximately two-thirds as many calls as the search budget B, exactly B Judge calls, and one full-horizon TSFM rollout per simulation (Table 3). We report call counts because they are independent of hardware, batching, and serving configuration; wall-clock latency addi-tionally depends on the number of sequential inference rounds and the generation length of each call. TSFM-BoN evaluates its entire candidate pool in a single batched round, whereas 
+
+LAFP distributes its Judge calls across sequential search iterations. TSFM-BoN is therefore several times faster than LAFP , by more than its lower call count alone would suggest, but this efficiency comes with the accuracy gap reported in Table 1. In our reimplementation, NEXUS makes approximately 30 % fewer LLM calls than LAFP , one context-structuring call followed by sampled generations from the macro, micro, and synthesizer agents, yet is more than twice as slow when using the same LLM. Its calls generate long, free-form reasoning and numerical forecasts, whereas the Ranker and Judge return short verdicts over TSFM-generated candidates. Because the Judge uses greedy decoding, repeated trajectory– context pairs could in principle be cached (§3.2); however, judged trajectories are almost always distinct in our experiments, so all reported counts are uncached. When lower cost or latency is required, halving the search budget increases error by approximately 3% (Fig. 2). 
+
+7 Conclusion 
+
+We formulate text-conditioned time-series forecasting as a planning problem in which each model is assigned a role aligned with its strengths. Rather than generating or revising fore-cast values, the LLM serves as a Ranker and Judge over trajectories produced by a frozen TSFM. LAFP implements this formulation through Monte Carlo tree search. The Ranker determines when the context is relevant and guides the exploration of candidate continua-tions, while the Judge evaluates completed trajectories and provides values for subsequent search. Across two benchmarks, two TSFM backbones, and four LLMs, LAFP matches or improves on the corresponding context-blind TSFM in every configuration and generally outperforms flat Best-of-N reranking under matched Judge-call and rollout budgets. These results show that sequentially reusing earlier evaluations is more effective than indepen-dently scoring a fixed pool of complete trajectories. Direct LLM forecasting can achieve strong results in selected settings, but is substantially more sensitive to the choice of model and to corrupted context. LAFP remains limited by the futures that its backbone can gen-erate and by the quality of the LLM guidance. More broadly, the framework demonstrates how heterogeneous foundation models can be composed without training by restricting each model to decisions supported by its native capabilities. 12 References 
+
+Sam Allen, David Ginsbourger, and Johanna Ziegel. Evaluating forecasts for high-impact events using transformed kernel scores. SIAM/ASA Journal on Uncertainty Quantifica-tion , 11:906–940, 08 2023. doi: 10.1137/22M1532184. Abdul Fatir Ansari, Lorenzo Stella, Ali Caner Turkmen, Xiyuan Zhang, Pedro Mercado, Huibin Shen, Oleksandr Shchur, Syama Sundar Rangapuram, Sebastian Pineda Arango, Shubham Kapoor, Jasper Zschiegner, Danielle C. Maddix, Hao Wang, Michael W. Ma-honey, Kari Torkkola, Andrew Gordon Wilson, Michael Bohlke-Schneider, and Bernie Wang. Chronos: Learning the language of time series. Transactions on Machine Learning Research , 2024. ISSN 2835-8856. URL https://openreview.net/forum?id=gerNCVqqtR .Expert Certification. Arjun Ashok, Andrew Robert Williams, Vincent Zhihao Zheng, Irina Rish, Nicolas Cha-pados, Étienne Marcotte, Valentina Zantedeschi, and Alexandre Drouin. Beyond naïve prompting: Strategies for improved zero-shot context-aided forecasting with LLMs. In 
+
+Recent Advances in Time Series Foundation Models Have We Reached the ’BERT Mo-ment’? , 2025. URL https://openreview.net/forum?id=fgcNDgZVfW .Abhimanyu Das, Weihao Kong, Rajat Sen, and Yichen Zhou. A decoder-only founda-tion model for time-series forecasting. In Ruslan Salakhutdinov, Zico Kolter, Katherine Heller, Adrian Weller, Nuria Oliver, Jonathan Scarlett, and Felix Berkenkamp, editors, 
+
+Proceedings of the 41st International Conference on Machine Learning , volume 235 of 
+
+Proceedings of Machine Learning Research , pages 10148–10167. PMLR, 21–27 Jul 2024. URL https://proceedings.mlr.press/v235/das24c.html .Sarkar Snigdha Sarathi Das, Palash Goyal, Mihir Parmar, Nanyun Peng, Vishy Tiru-malashetty, Chun-Liang Li, Rui Zhang, Jinsung Yoon, and Tomas Pfister. Nexus : An agentic framework for time series forecasting. CoRR , abs/2605.14389, 2026. Azul Garza, Cristian Challu, and Max Mergenthaler-Canseco. TimeGPT-1. arXiv preprint arXiv:2310.03589 , 2023. Tilmann Gneiting and Adrian E. Raftery. Strictly proper scoring rules, prediction, and estimation. Journal of the American Statistical Association , 102(477):359–378, 2007. Nate Gruver, Marc Anton Finzi, Shikai Qiu, and Andrew Gordon Wilson. Large language models are zero-shot time series forecasters. In Thirty-seventh Conference on Neural Infor-mation Processing Systems , 2023. URL https://openreview.net/forum?id=md68e8iZK1 .Xinyu Guan, Li Lyna Zhang, Yifei Liu, Ning Shang, Youran Sun, Yi Zhu, Fan Yang, and Mao Yang. rStar-math: Small LLMs can master math reasoning with self-evolved deep thinking. In Aarti Singh, Maryam Fazel, Daniel Hsu, Simon Lacoste-Julien, Fe-lix Berkenkamp, Tegan Maharaj, Kiri Wagstaff, and Jerry Zhu, editors, Proceedings of the 42nd International Conference on Machine Learning , volume 267 of Proceed-ings of Machine Learning Research , pages 20640–20661. PMLR, 13–19 Jul 2025. URL 
+
+https://proceedings.mlr.press/v267/guan25f.html .Shibo Hao, Yi Gu, Haodi Ma, Joshua Hong, Zhen Wang, Daisy Wang, and Zhiting Hu. Reasoning with language model is planning with world model. In Houda Bouamor, Juan Pino, and Kalika Bali, editors, Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing , pages 8154–8173, Singapore, December 2023. Association for Computational Linguistics. doi: 10.18653/v1/2023.emnlp-main.507. URL https: //aclanthology.org/2023.emnlp-main.507/ .Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph Gonzalez, Hao Zhang, and Ion Stoica. Efficient memory management for large language model serving with pagedattention. In Proceedings of the 29th Symposium on Operating Systems Principles , SOSP ’23, page 611–626, New York, NY, USA, 2023. Asso-ciation for Computing Machinery. ISBN 9798400702297. doi: 10.1145/3600006.3613165. URL https://doi.org/10.1145/3600006.3613165 .13 Zihao Li, Xiao Lin, Zhining Liu, Jiaru Zou, Ziwei Wu, Lecheng Zheng, Dongqi Fu, Yada Zhu, Hendrik Hamann, Hanghang Tong, and Jingrui He. Language in the flow of time: Time-series-paired texts weaved into a unified temporal narrative. In The Fourteenth International Conference on Learning Representations , 2026. URL https://openreview. net/forum?id=a1zBg9cBvt .Hunter Lightman, Vineet Kosaraju, Yuri Burda, Harrison Edwards, Bowen Baker, Teddy Lee, Jan Leike, John Schulman, Ilya Sutskever, and Karl Cobbe. Let’s verify step by step. In The Twelfth International Conference on Learning Representations , 2024. URL 
+
+https://openreview.net/forum?id=v8L0pN6EOi .Haoxin Liu, Shangqing Xu, Zhiyuan Zhao, Lingkai Kong, Harshavardhan Kamarthi, Aditya B. Sasanur, Megha Sharma, Jiaming Cui, Qingsong Wen, Chao Zhang, and B. Aditya Prakash. Time-MMD: Multi-domain multimodal dataset for time series analy-sis. In The Thirty-eight Conference on Neural Information Processing Systems Datasets and Benchmarks Track , 2024. URL https://openreview.net/forum?id=fuD0h4R1IL .Haoxin Liu, Yichen Zhou, Rajat Sen, B. Aditya Prakash, and Abhimanyu Das. Rethink-ing post-training recipes for multimodal time-series forecasting. CoRR , abs/2605.29401, 2026a. Haoxin Liu, Yichen Zhou, Rajat Sen, B. Aditya Prakash, and Abhimanyu Das. Rethinking multimodal time-series forecasting evaluation. In Proceedings of the 43rd International Conference on Machine Learning , 2026b. Xu Liu, Juncheng Liu, Gerald Woo, Taha Aksu, Yuxuan Liang, Roger Zimmermann, Cheng-hao Liu, Junnan Li, Silvio Savarese, Caiming Xiong, and Doyen Sahoo. Moirai-MoE: Em-powering time series foundation models with sparse mixture of experts. In Aarti Singh, Maryam Fazel, Daniel Hsu, Simon Lacoste-Julien, Felix Berkenkamp, Tegan Maharaj, Kiri Wagstaff, and Jerry Zhu, editors, Proceedings of the 42nd International Conference on Machine Learning , volume 267 of Proceedings of Machine Learning Research , pages 38940– 38962. PMLR, 13–19 Jul 2025. URL https://proceedings.mlr.press/v267/liu25an. html .James E. Matheson and Robert L. Winkler. Scoring rules for continuous probability distri-butions. Management Science , 22(10):1087–1096, 1976. ISSN 00251909, 15265501. URL 
+
+http://www.jstor.org/stable/2629907 .Mike A Merrill, Mingtian Tan, Vinayak Gupta, Thomas Hartvigsen, and Tim Althoff. Lan-guage models still struggle to zero-shot reason about time series. In Yaser Al-Onaizan, Mo-hit Bansal, and Yun-Nung Chen, editors, Findings of the Association for Computational Linguistics: EMNLP 2024 , pages 3512–3533, Miami, Florida, USA, November 2024. As-sociation for Computational Linguistics. doi: 10.18653/v1/2024.findings-emnlp.201. URL 
+
+https://aclanthology.org/2024.findings-emnlp.201/ .Huu Hiep Nguyen, Minh Hoang Nguyen, Dung Nguyen, and Hung Le. Does text actually help? uncovering and resolving text collapse in multimodal time series forecasting, 2026a. URL https://arxiv.org/abs/2606.19413 .Huu Hiep Nguyen, Minh Hoang Nguyen, Dung Nguyen, and Hung Le. Spectral text fusion: A frequency-aware approach to multimodal time-series forecasting. In The 29th International Conference on Artificial Intelligence and Statistics , 2026b. URL 
+
+https://openreview.net/forum?id=w4yjJc06zt .Yuqi Nie, Nam H Nguyen, Phanwadee Sinthong, and Jayant Kalagnanam. A time series is worth 64 words: Long-term forecasting with transformers. In The Eleventh International Conference on Learning Representations , 2023. URL https://openreview.net/forum? id=Jbdc0vTOcol .Kashif Rasul, Arjun Ashok, Andrew Robert Williams, Hena Ghonia, Rishika Bhagwatkar, Arian Khorasani, Mohammad Javad Darvishi Bayazi, George Adamopoulos, Roland Ri-achi, Nadhir Hassen, Marin Bilos, Sahil Garg, Anderson Schneider, Nicolas Chapados, 14 Alexandre Drouin, Valentina Zantedeschi, Yuriy Nevmyvaka, and Irina Rish. Lag-llama: Towards foundation models for probabilistic time series forecasting. arXiv preprint arXiv:2310.08278 , 2023. David Silver, Thomas Hubert, Julian Schrittwieser, Ioannis Antonoglou, Matthew Lai, Arthur Guez, Marc Lanctot, Laurent Sifre, Dharshan Kumaran, Thore Graepel, Tim-othy P. Lillicrap, Karen Simonyan, and Demis Hassabis. Mastering chess and shogi by self-play with a general reinforcement learning algorithm. CoRR , abs/1712.01815, 2017. Mingtian Tan, Mike A Merrill, Vinayak Gupta, Tim Althoff, and Thomas Hartvigsen. Are language models actually useful for time series forecasting? In The Thirty-eighth Annual Conference on Neural Information Processing Systems , 2024. URL https://openreview. net/forum?id=DV15UbHCY1 .Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten Bosma, brian ichter, Fei Xia, Ed H. Chi, Quoc V Le, and Denny Zhou. Chain of thought prompting elicits reasoning in large language models. In Alice H. Oh, Alekh Agarwal, Danielle Belgrave, and Kyunghyun Cho, editors, Advances in Neural Information Processing Systems , 2022. URL https: //openreview.net/forum?id=_VjQlMeSB_J .Andrew Robert Williams, Arjun Ashok, Étienne Marcotte, Valentina Zantedeschi, Jithen-daraa Subramanian, Roland Riachi, James Requeima, Alexandre Lacoste, Irina Rish, Nicolas Chapados, and Alexandre Drouin. Context is key: A benchmark for forecasting with essential textual information. In Forty-second International Conference on Machine Learning , 2025. URL https://openreview.net/forum?id=ih2WuBT1Fn .Gerald Woo, Chenghao Liu, Akshat Kumar, Caiming Xiong, Silvio Savarese, and Doyen Sa-hoo. Unified training of universal time series forecasting transformers. In Ruslan Salakhut-dinov, Zico Kolter, Katherine Heller, Adrian Weller, Nuria Oliver, Jonathan Scarlett, and Felix Berkenkamp, editors, Proceedings of the 41st International Conference on Machine Learning , volume 235 of Proceedings of Machine Learning Research , pages 53140–53164. PMLR, 21–27 Jul 2024. URL https://proceedings.mlr.press/v235/woo24a.html .Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran, Thomas L. Griffiths, Yuan Cao, and Karthik R Narasimhan. Tree of thoughts: Deliberate problem solving with large language models. In Thirty-seventh Conference on Neural Information Processing Systems , 2023. URL https://openreview.net/forum?id=5Xc1ecxO1h .Michaël Zamo and Philippe Naveau. Estimation of the continuous ranked probability score with limited information and applications to ensemble weather forecasts. Mathematical Geosciences , 50:209–234, 11 2017. doi: 10.1007/s11004-017-9709-7. 15 Appendix A Dataset Statistics 
+
+A.1 CiK 
+
+CiK Williams et al. [2025] comprises 71 tasks across seven application domains; 95% of the tasks use real-world data, and the three simulated SVAR tasks are grouped under Mechanics alongside the causal-chamber tasks. We follow the benchmark’s deterministic 5-instance selection (355 instances) and its per-task weighting ( TASK_NAME_TO_WEIGHT ), which rebalances the aggregate away from raw task counts (e.g., Public Safety contributes 26/71 tasks but only 3/21 of the total weight). Table 4 is computed directly from the 355 eval-uation instances. History lengths span 3–287 steps and horizons 6–99: the Public Safety and Economics tasks are deliberately history-starved (3–6 observations), making the textual context the dominant information source, whereas Transportation, Retail, and Energy pro-vide 96–168-step histories with strong daily/weekly cycles. Sampling frequencies range from seconds (Mechanics) through 10-minute/hourly (Climatology, Transportation, Energy) and daily (Retail) to monthly (Public Safety, Economics). Table 4: CiK domain summary, computed from the benchmark’s 355 evaluation instances. Hist. / H = history and horizon length ranges (timesteps). Context sources Williams et al. [2025]: i = intemporal, h = historical, f = future, cov = covariate, ca = causal. Constr. = tasks with an explicit numerical constraint (RCRPS adds a violation penalty). Wt. = the domain’s share of the benchmark’s task weighting.                                                       
+
+> Domain #Tasks Hist. HCtx. sources Constr. Wt. Public Safety 26 3–6 6–7 i,h,cov,ca 03/21 Climatology 12 45–79 24–99 i,h,cov 94/21 Transportation 11 168 24–72 i,f,cov 24/21 Energy 796–144 24 f,cov 03/21 Retail 6112–168 56 i,f,cov 03/21 Mechanics 654–287 15–93 i,cov,ca 33/21 Economics 366cov 01/21 Total 71 3–287 6–99 –14 21/21
+
+A.2 Time-MMD 
+
+Our Time-MMD forecasting protocol uses the Time-MMD dataset Liu et al. [2024], which contains nine domains and four forecast horizons per domain. Each domain consists of a single univariate target series paired with timestep-level textual reports. Following TaTS Li et al. [2026], we adopt a chronological 70/10/20 train/validation/test split, fit the evaluation 
+
+StandardScaler using only the training split, and construct stride-1 test windows from the final 0.2n+24 timesteps, using a conditioning length of 24. We evaluate 50 windows for each domain-horizon pair and seed. When fewer than 50 valid windows exist, we use the full available set; for example, Security provides 48 windows at H=12 . We also exclude five SocialGood windows that have missing ground-truth values across all methods, resulting in 1,793 evaluated windows per seed. Table 5 reports the statistics for each domain. Text coverage denotes the proportion of timesteps with a non-empty report after applying the benchmark’s fact–prediction split; only the factual component is provided as conditioning context. 
+
+B TSFM Backbones 
+
+LAFP wraps two architecturally distinct frozen backbones through a common interface. The framework requires only: (i) sampling K candidate blocks of width W , each with a scalar log-likelihood score, and (ii) a predict -style rollout to the full horizon H. How these candidates are generated determines whether uniform selection corresponds to an unbiased sample from the backbone distribution pθ .16 Table 5: Time-MMD domain summary. Length = series length and Test = test-split length (timesteps); Text = fraction of timesteps with a non-empty textual report.                                                             
+
+> Domain Freq. Length Span Test Horizons Text Agriculture monthly 496 1983–2024 99 6/8/10/12 80.8% Climate monthly 496 1983–2024 99 6/8/10/12 100% Economy monthly 423 1989–2024 84 6/8/10/12 100% Security monthly 297 1999–2024 59 6/8/10/12 100% SocialGood monthly 900 1950–2024 180 6/8/10/12 59.2% Traffic monthly 531 1980–2024 106 6/8/10/12 100% Energy weekly 1479 1996–2024 295 12/24/36/48 99.3% Health weekly 1389 1997–2024 277 12/24/36/48 99.9% Environment daily 15248 1982–2023 3049 48/96/192/336 96.9%
+
+Chronos-T5-Large (token-based, sample-native). Autoregressive token decoding produces K i.i.d. samples at temperature T , together with their joint log-probabilities. Chronos is the only backbone for which we claim the exact property that abstention recovers sampling from pθ . Accordingly, the context-blind reference on the uninformative-context slice is sampled using the same EXPAND procedure with T =1 .5, rather than the native 
+
+predict() configuration with T =1 .0.
+
+TimesFM-1.0-200M (patch decoder, decile interface). TimesFM is a decoder-only patch model that outputs nine marginal deciles, {q0.1, . . . , q 0.9}, at each forecast step rather than joint sample paths. Following DEFT, we synthesize candidates through per-step inverse-CDF interpolation. Specifically, for each sample and forecast step, we draw 
+
+uh ∼ U (0 .1, 0.9) and compute ̂
+
+yh = interp (uh; {q0.1,h , . . . , q 0.9,h }) .
+
+Because the draws are independent across forecast steps, the resulting trajectories do not preserve temporal correlation. For use as a PUCT prior, we assign each candidate a Gaussian proxy log-likelihood derived from the predicted quantiles: 
+
+μh = q0.5,h , σh = q0.9,h − q0.1,h 
+
+2z0.9
+
+, ℓ(̂ y) = ∑
+
+> h
+
+log N (̂ yh; μh, σ 2
+
+> h
+
+) ,
+
+where z0.9 is the 0.9 quantile of the standard normal distribution. This score should be interpreted as a typicality proxy rather than an exact joint likelihood. Uniform candidate selection therefore produces a product-of-marginals sample, not an unbiased draw from a joint pθ . TimesFM-1 is consequently included as evidence of accuracy and backbone generality, but we do not claim the exact abstention-recovers-pθ property for this backbone. Table 6: Backbone checkpoints used in the experiments.       
+
+> Backbone Checkpoint Draw Chronos-T5-Large amazon/chronos-t5-large token TimesFM-1.0-200M google/timesfm-1.0-200m-pytorch decile
+
+C Baseline Details 
+
+• Zero-shot TSFM : the frozen backbone run context-blind; CiK uses 25 stochastic samples, Time-MMD one sample per window. Each backbone is compared against its own anchor. • DirectPrompt : zero-shot prompting that generates forecast values directly from the context and numeric history, with constrained numeric decoding and no TSFM backbone; run with all four open LLMs. 17 • LLM-CoT : the same prompting augmented with a chain-of-thought reasoning step before the numeric output; same LLMs and parsing rules. • NEXUS Das et al. [2026]: multi-agent synthesis; our matched-LLM reimplemen-tation, run with the same four open LLMs on both benchmarks. • TSFM-BoN : flat best-of-N reranking of TSFM samples by the same continuous Judge, with the matched output rule: the Judge’s top-25 ensemble on CiK and the same trust-region pick as LAFP on Time-MMD. This is the matched-Judge, matched-backbone, matched-output control that isolates the search structure from flat reranking. The full DirectPrompt and LLM-CoT prompts are listed in App. K. 
+
+D Notation and Hyperparameters 
+
+Table 7 collects the symbols used in §3 and throughout the paper. Table 7: Notation. 
+
+Symbol Meaning 
+
+x numeric history 
+
+c textual context 
+
+H forecast horizon (prediction length) 
+
+y future values to forecast 
+
+pθ frozen TSFM predictive distribution (backbone) 
+
+ϕ frozen LLM (Ranker + Judge) 
+
+K branching factor: candidate continuations per node 
+
+B Monte-Carlo simulation budget 
+
+D, W number of forecast blocks ( D = ⌈H/W ⌉) and block width 
+
+s search node: committed prefix and context, s = ( y<t , c )
+
+a, N (s, a ), W sum (s, a ) action; visit count and backed-up value sum of edge (s, a )
+
+Q(s, a ) Wsum (s, a )/ N (s, a ); pathQ averages Q over a path 
+
+cpuct , η PUCT constant; rank →prior temperature ( prior_temp )
+
+T backbone (Chronos) sampling temperature ( = 1 .5)
+
+s(τ ) continuous Judge value in [0 , 9] ; τ is a trajectory (Eq. (4)) 
+
+Tvis visit-sampling temperature (CiK read-off) 
+
+β time-attribution credit weight ( attr_beta )
+
+α pick-best blend weight (Eq. (7)) 
+
+k shortlist width of the trust-region pick rule (§3.3) 
+
+Table 8 lists the reference LAFP configuration; these are the actual settings from the method source, not placeholders. Table 8: LAFP hyperparameters (reference configuration). 
+
+Param Value Param Value 
+
+K (branching) 8 β (attr) 1.0 
+
+B (simulations) 64 Judge continuous 0–9 
+
+mcts_P (parallel exp.) 8 α 0.5 
+
+Etarget (max depth) 8 nsamples (CiK) 25 
+
+Wmin (block width) 1 pick (Time-MMD) trust-region 
+
+cpuct 1.25 Judge temp 0.0 
+
+Tvis (visit temp) 1.0 Ranker temp 0.7 
+
+T (Chronos sampling temp) 1.5 η (prior_temp ) 1.0 
+
+Configuration guardrails. TCS disabled on CiK; β=1 .0 (standard uniform backup; the 
+
+WORST_SEGMENT attribution is dormant at β=1 ); the same continuous-Judge and Ranker prompts on both benchmarks. The cached Judge de-duplicates identical greedy prompts and memoizes verdicts across simulations; because the Judge decodes at temperature 0,cached results are bit-identical. 18 Algorithm 1 LAFP : MCTS-based planning over TSFM-generated candidates for one in-stance (x, c, H ). Default configuration: D=8 , W =H/D, K=8 , and B=64 .
+
+Require: history x, context c, horizon H; frozen TSFM; Ranker and Judge; window size 
+
+W , candidate pool K, budget B
+
+Ensure: distributional or point forecast read from the search state  
+
+> 1:
+
+root ← node (s0), s0 = ( ∅, c ), N (·, ·), W sum (·, ·) ← 0 
+
+> 2:
+
+for b = 1 to B do  
+
+> 3:
+
+Selection: descend through expanded nodes to an expandable leaf with prefix y<t 
+
+decision node s:
+
+a⋆ ← arg max a
+
+[
+
+Wsum (s, a )
+
+N (s, a ) + cpuct π(a | s)
+
+√max {1, ∑ 
+
+> a′
+
+N (s, a ′)}
+
+1 + N (s, a )
+
+]
+
+chance node: a⋆ ∼ U{ 1, . . . , K } 
+
+> 4:
+
+Expansion: {(ˆ y(k), ℓ (k))}Kk=1 ← TSFM (x, y <t ; K) 
+
+> 5:
+
+Ranking: (relevance , rank s) ← Ranker (c, {ˆy(k)}Kk=1 
+
+)
+
+if relevance = Yes : π(a | s) ← e−η rank s(a)
+
+∑ 
+
+> a′
+
+e−η rank s(a′)
+
+else : chance node, a⋆ ∼ U{ 1, . . . , K } 
+
+> 6:
+
+Simulation: τ ← TSFM (x, [y<t ; ˆ y(a⋆)]; H) 
+
+> 7:
+
+Backpropagation: s(τ ) ← ∑9 
+
+> k=0
+
+k P (SCORE =k | c, τ )
+
+N (s, a ) += 1 , Wsum (s, a ) += s(τ ), ∀(s, a ) ∈ E (τ ) 
+
+> 8:
+
+end for  
+
+> 9:
+
+Output: read a distributional or point forecast from the accumulated search state 
+
+Trust-region pick rule (Time-MMD). We rank all B completed rollouts by value (τi)
+
+from Eq. (7) and retain the top k = 5. We then select τ ⋆ = arg min i∈top-5 ∥τi −
+
+gmedian ({τ1, . . . , τ B })∥2, where the geometric median of all rollouts is computed using 25 iterations of Weiszfeld’s algorithm. The geometric median represents the centre of the backbone-generated candidate pool, while the value-based shortlist restricts the choice to trajectories supported by the textual context. Selecting the shortlisted trajectory nearest this centre therefore acts as an implicit trust region, preventing a single high but noisy Judge score from selecting an unrepresentative forecast. In the w/o-MCTS ablation, where visit statistics are unavailable, value (τi) reduces to the Judge score. Setting k = 1 recovers direct Judge argmax selection, whereas k = B selects the rollout nearest the geometric median of the full pool. 
+
+E LAFP Algorithm 
+
+Algorithm 1 summarizes the complete LAFP search procedure of §3.2, with the default configuration of App. D. 
+
+F Metric Definitions 
+
+CRPS For a univariate predictive distribution with CDF F and an observation z, the continuous ranked probability score is CRPS (F, z ) = 
+
+∫
+
+> R
+
+(F (u) − 1{u ≥ z})2 du, 
+
+a strictly proper scoring rule Matheson and Winkler [1976], Gneiting and Raftery [2007]: its expectation is minimized exactly when F coincides with the distribution of z, so it rewards both calibration and sharpness. Every method on CiK is evaluated from an ensemble of 
+
+n=25 trajectories. Given samples x1, . . . , x n from F , we use the unbiased ensemble estimator ̂
+
+CRPS (x1: n, z ) = 1
+
+n
+
+> n
+
+∑
+
+> i=1
+
+|xi − z| − 12n(n − 1) 
+
+> n
+
+∑
+
+> i=1
+> n
+
+∑
+
+> j=1
+
+|xi − xj |,
+
+19 computed in its probability-weighted-moment form Zamo and Naveau [2017]. Multi-step forecasts are scored per timestep and averaged. 
+
+RCRPS CiK’s region-of-interest CRPS Williams et al. [2025] is a scaled variant of the threshold-weighted CRPS Allen et al. [2023] with three components. (i) Region weighting. 
+
+When a task designates a region of interest I ⊂ { 1, . . . , H }, the timesteps that the textual context actually constrains, the CRPS term is CRPS w = 12 CRPS t∈I + 12 CRPS t /∈I , where CRPS denotes the mean per-timestep CRPS over the indicated set; tasks without a region of interest use the mean over all H timesteps. (ii) Constraint penalty. For tasks with an explicit numerical constraint (a maximum, minimum, or mean value), each sample trajectory 
+
+s receives a violation amount vs ≥ 0: the amount by which it breaches the constraint, averaged over the forecast timesteps and expressed in the scaled units below ( vs=0 when the constraint is satisfied). The penalty is the CRPS of the ensemble {10 vs}ns=1 against a target of zero, which is well-defined because the ground truth satisfies the constraints by construction. (iii) Scaling. Both terms are expressed in units of the task’s typical target variation through the factor S = 1/∆ , where ∆ is the ground-truth range max (y) − min (y)
+
+of the forecast window averaged over the task’s instances. The final score of one instance is RCRPS = S · CRPS w +̂ CRPS ({10 vs}, 0),
+
+which is invariant to the overall scale of the series and comparable across tasks. Following the official evaluation, per-instance scores are capped at 5 so that isolated catastrophic failures cannot dominate, the per-task score is the mean over the task’s five instances, and the benchmark aggregate is the weighted average of per-task scores under the official task weighting ( TASK_NAME_TO_WEIGHT ; the resulting per-domain weights are listed in Table 4), which prevents families of near-duplicate tasks from dominating the average. We use the official implementation throughout; lower is better. 
+
+Time-MMD metrics. For each domain d, a StandardScaler (μd, σ d) is fit on the training split only (App. A), and all forecasts and ground truths are transformed as ˜y = ( y − μd)/ σd
+
+before scoring, so that errors are comparable across domains whose raw scales differ by orders of magnitude. For a test window with horizon H, point forecast ˆy, and ground truth 
+
+y,MSE = 1
+
+H
+
+> H
+
+∑
+
+> h=1
+
+(˜ˆyh − ˜yh)2, MAE = 1
+
+H
+
+> H
+
+∑
+
+> h=1
+
+|˜ˆyh − ˜yh|.
+
+Time-MMD aggregation. The per-domain error is the mean over the domain’s evalu-ated windows, pooled across its four horizons; the headline aggregate is the geometric mean of the nine per-domain errors, computed per seed and averaged over the three evaluation seeds (Table 1). The geometric mean is used because the per-domain errors span different magnitudes even after normalization: it responds equally to relative improvements in every domain, whereas an arithmetic mean would be dominated by the hardest domains. The nominal count is 9 × 4 × 50 = 1 ,800 windows per seed; 1,793 are evaluated, with the exclu-sions (the short Security pool at H=12 and the SocialGood windows with missing ground truth, App. A) applied identically to every method. The blend weight α and the shortlist width k of the trust-region output rule were fixed on offline re-judged development trees before the final runs. 
+
+G Per-Domain Time-MMD Results 
+
+Tables 11 (Agriculture), 12 (Climate), 13 (Economy), 14 (Energy), 15 (Environment), 16 (Health), 17 (Security), 18 (SocialGood), and 19 (Traffic) break the headline aggregate of Table 1 down by domain under the same row convention. 20 H Budget Curves Across LLM–TSFM Pairs 
+
+Figs. 4 and 5 extend the budget analysis of §6.2 to all eight Ranker/Judge LLM × TSFM pairs on CiK and Time-MMD, respectively. On CiK, LAFP improves on TSFM-BoN at every evaluated budget for every pair. 
+
+I LLM-as-Forecaster Divergence: Security and Health 
+
+Table 9 summarises the domain properties that predict LLM-CoT divergence. Three factors compound to produce the X cells (MSE > 10 3). Table 9: Time-MMD domain statistics relevant to LLM-CoT divergence. CV = coefficient of variation of the raw series (std/mean). Context = mean context length per timestep in characters. Zero-shot MSE = context-blind Chronos MSE in StandardScaler space. LLM-CoT MSE = Qwen2.5-7B zero-shot CoT (the strongest LLM-CoT configuration).                                         
+
+> Domain CV Context (chars) Zero-shot MSE LLM-CoT MSE Economy 0.29 645 0.035 0.059 SocialGood 0.29 1244 0.975 0.720 Traffic 0.22 730 0.294 0.411 Agriculture 0.13 442 34.999 0.915 Climate 0.21 548 1.621 2.103 Energy 0.41 139 1.804 33.344 Environment 0.49 152 0.476 4.362 Health 0.77 205 3.554 9.283 Security 0.97 828 169.41 120.79
+
+Factor 1: Unit-ambiguous raw scale (Security). Security tracks food-aid beneficiary counts; raw values span 18 million to 20 billion. The context text discusses food crises and droughts but never states the numeric magnitude. An LLM reading this context plausibly infers counts in the thousands or millions, 100 to 10,000 × smaller than the actual values. Even Qwen2.5-7B reaches MSE = 121, because any systematic scale error is squared and accumulated over all forecast steps. The weakest model diverges entirely (Qwen2.5-3B: 
+
+∼6 × 10 11 ), while Llama-3.1-8B and gemma-3-4B land at 347 and 166. Compounding this, Security’s test set lies +4 .0σ above the training distribution (a large surge in beneficiary counts), so even the context-blind Chronos reaches MSE = 169, the LLM-as-forecaster error stacks on top of an already broken extrapolation regime. 
+
+Factor 2: Short context with no numeric anchor (Health, Environment). Health context averages only ≈205 characters of clinical text (e.g., “Zanamivir has been shown effective against influenza”) with no numeric values. The target series is % influenza-like illness (ILI), ranging 0–8%. Without a scale anchor, Llama-3.1-8B outputs values in absolute patient-count units, reaching MSE = 3 × 10 14 (Qwen2.5-3B: 1 × 10 10 ). Environment (152 chars, regulatory text) shows the same failure (Llama-3.1-8B: 2.8 × 10 4; gemma-3-4B: 2.0 ×
+
+10 3). By contrast, Economy (645 chars with explicit dollar references) and SocialGood (1,244 chars with quantitative unemployment discussion) supply clear numeric anchors, keeping LLM-CoT MSE near or below 1. 
+
+Factor 3: High series volatility amplifies scale error. Security (CV = 0.97) and Health (CV = 0.77) are the two most volatile domains. High CV means even a small fractional scale error translates to large absolute deviations, which are then squared. Low-CV domains (Agriculture CV = 0.13, Traffic CV = 0.22) remain bounded even when the LLM’s inferred scale is imperfect. 
+
+Why LAFP is unaffected. The TSFM generates all numeric candidates; the LLM only evaluates which candidate is most consistent with the context linguistically. Scale ambiguity in the text degrades ranking quality at most, not the magnitude of the output values. This 21 is the structural advantage of the planning role over the forecaster role, and it is most visible precisely on the domains where LLM-as-forecaster diverges. 
+
+J Standard deviation of results across seeds 
+
+Table 10 reports the per-cell standard deviation (over the three random seeds {42 , 123 , 456 })of the main results (CiK weighted RCRPS; Time-MMD geometric-mean MSE over the nine domains). Standard deviations are computed at three seeds throughout. 22 K Prompts 
+
+K.1 Ranker 
+
+SYSTEM: You are a forecasting assistant. A numerical time series model has proposed {K} candidate continuations ("windows") for the next {W} steps of a series. Every candidate is numerically plausible according to that model. Your job is to rank ALL {K} candidates from most to least consistent with the context, the series' recent behaviour, and the forecast built so far. - You never invent numbers. You only rank the given options. - First assess RELEVANT: does the context directly affect the forecasted quantity? If NO, prefer options closest to the series' typical recent behaviour. - If the context states an explicit constraint (e.g. a maximum, minimum, or fixed value), rank options that would violate it last. - Output exactly five lines and nothing else: RELEVANT: YES / NO DIRECTION: UP / DOWN / FLAT / UNCLEAR CONFIDENCE: HIGH / MEDIUM / LOW RANKING: e.g. 3 > 1 > 4 > 2 (option numbers, each used once) WHY: <one sentence> [definitions of DIRECTION and CONFIDENCE and five calibration examples omitted] USER: SERIES: <description> | CONTEXT: <text, up to 2000 chars> | RECENT HISTORY: <last 20 steps as % changes, volatility, trend> | FORECAST SO FAR: <committed segments, or none> | CANDIDATE WINDOWS for steps <a>-<b>: Option i = <step-wise % changes -- pattern label> | Rank all {K} options. 
+
+K.2 Judge 
+
+SYSTEM: You are a forecast verifier. You see a CONTEXT and ONE candidate FORECAST for a time series, plus the series' RECENT HISTORY as raw values. Score the forecast 0-9. Reason briefly in this order, then score: 1. CLAIM -- does the context state or imply anything specific and testable about the forecast window? Derive the expected values. 2. CLAIM CHECK -- compare the forecast's values at the affected steps to the target; steps outside the claim's window are never evidence for or against it. 3. SHAPE CHECK -- are the remaining segments a believable continuation of the history? With no testable claim, score by how closely the forecast matches the history's level, trend, and cycle amplitude. Scoring (0-9): 9-8 = claimed effect clearly present with the right direction, size, and timing; 7-6 = effect present but size or timing somewhat off; 5-4 = mixed; 3-2 = effect absent or a clear shape problem; 1-0 = opposite to the stated event, violates an explicit bound, or numerically absurd. Use the FULL scale. Output exactly two lines and nothing else: ANALYSIS: <2-3 short sentences following steps 1-3> SCORE: <single digit 0-9> USER: <series description> | CONTEXT: <text, up to 2000 chars> | RECENT HISTORY: <last <n> raw values; mean, volatility, trend> | FORECAST: <H steps as segments with values; long segments summarized by endpoints, range, and mean> | Judge the forecast. 
+
+23 K.3 DirectPrompt 
+
+The DirectPrompt template follows the official CiK baseline prompt Williams et al. [2025] and is reproduced here in full; on Time-MMD the window’s paired report fills the context block. Angle brackets mark the per-instance fields. 
+
+SYSTEM: You are a useful forecasting assistant. USER: I have a time series forecasting task for you. Here is some context about the task. Make sure to factor in any background knowledge, satisfy any constraints, and respect any scenarios. <context> <benchmark context> </context> Here is a historical time series in (timestamp, value) format: <history> (<timestamp 1>, <value 1>) ... (<timestamp n>, <value n>) </history> Now please predict the value at the following timestamps: <forecast timestamps>. Return the forecast in (timestamp, value) format in between <forecast> and </forecast> tags. Do not include any other information (e.g., comments) in the forecast. Example: <example> 
+
+24 32 48 64 96 128 0.260 0.265 0.270 0.275 0.280                              
+
+> weighted RCRPS (  )
+> Chronos × Qwen2.5-7B
+> 32 48 64 96 128 0.260 0.265 0.270 0.275 0.280
+> Chronos × Qwen2.5-3B
+> 32 48 64 96 128 0.255 0.260 0.265 0.270 0.275 0.280
+> Chronos × Llama-3.1-8B
+> 32 48 64 96 128 0.26 0.27 0.28 0.29
+> Chronos × gemma-3-4B
+> 32 48 64 96 128
+> B
+> 0.248 0.250 0.252 0.254 0.256
+> weighted RCRPS (  )
+> TimesFM-1 × Qwen2.5-7B
+> 32 48 64 96 128
+> B
+> 0.2500 0.2525 0.2550 0.2575 0.2600 0.2625
+> TimesFM-1 × Qwen2.5-3B
+> 32 48 64 96 128
+> B
+> 0.2500 0.2525 0.2550 0.2575 0.2600 0.2625 0.2650
+> TimesFM-1 × Llama-3.1-8B
+> 32 48 64 96 128
+> B
+> 0.245 0.250 0.255 0.260 0.265
+> TimesFM-1 × gemma-3-4B
+> TSFM-BoN LAFP
+
+Figure 4: CiK budget curves per Ranker/Judge LLM × TSFM pair: weighted RCRPS ( ↓)vs. Judge-call budget B, LAFP vs. TSFM-BoN at matched budget, averaged over three seeds. 
+
+K.4 LLM-CoT 
+
+LLM-CoT shares DirectPrompt’s template and differs only in the output instruction, which asks for explicit reasoning before the forecast; the full prompt is: 
+
+SYSTEM: You are a useful forecasting assistant. USER: I have a time series forecasting task for you. Here is some context about the task. Make sure to factor in any background knowledge, satisfy any constraints, and respect any scenarios. <context> <benchmark context> </context> Here is a historical time series in (timestamp, value) format: <history> (<timestamp 1>, <value 1>) ... (<timestamp n>, <value n>) </history> Now please predict the value at the following timestamps: <forecast timestamps>. Think step by step before answering. Write your brief reasoning between <thinking> and </thinking> tags. Then return the forecast in (timestamp, value) format in between <forecast> and </forecast> tags. Do not include any other information (e.g., comments) in the forecast. Example: <example> 
+
+25 8 16 24 32 48 64 0.74 0.75 0.76 0.77 0.78 0.79 0.80                                     
+
+> geo-mean MSE (  )
+> Chronos × Qwen2.5-7B
+> 816 24 32 48 64 0.760 0.765 0.770 0.775 0.780 0.785 0.790
+> Chronos × Qwen2.5-3B
+> 816 24 32 48 64 0.75 0.80 0.85 0.90 0.95
+> Chronos × Llama-3.1-8B
+> 816 24 32 48 64 1.0 1.1 1.2 1.3 1.4
+> Chronos × gemma-3-4B
+> 816 24 32 48 64
+> B
+> 0.77 0.78 0.79 0.80 0.81
+> geo-mean MSE (  )
+> TimesFM-1 × Qwen2.5-7B
+> 816 24 32 48 64
+> B
+> 0.770 0.775 0.780 0.785 0.790
+> TimesFM-1 × Qwen2.5-3B
+> 816 24 32 48 64
+> B
+> 0.770 0.775 0.780 0.785 0.790 0.795
+> TimesFM-1 × Llama-3.1-8B
+> 816 24 32 48 64
+> B
+> 0.790 0.795 0.800 0.805 0.810
+> TimesFM-1 × gemma-3-4B
+> TSFM-BoN LAFP
+
+Figure 5: Time-MMD budget curves per Ranker/Judge LLM × TSFM pair: geometric-mean MSE ( ↓) over the nine domains vs. Judge-call budget B, LAFP vs. TSFM-BoN at matched budget. Table 10: Standard deviation of the main results across three seeds. CiK weighted RCRPS 
+
+↓ (left); Time-MMD geo-mean MSE ↓ (right). 
+
+CiK Time-MMD Qwen2.5-3B Qwen2.5-7B Llama-3.1-8B gemma-3-4B Qwen2.5-3B Qwen2.5-7B Llama-3.1-8B gemma-3-4B Method Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim. Zero-shot TSFM 0.005 0.004 0.005 0.004 0.005 0.004 0.005 0.004 0.392 0.040 0.392 0.040 0.392 0.040 0.392 0.040 DirectPrompt 0.010 0.003 0.022 0.028 1.501 0.071 0.831 0.053 LLM-CoT 0.007 0.005 0.021 0.025 2398.2 0.323 2.759 3.926 NEXUS 0.017 0.006 0.011 0.035 0.040 0.020 0.025 0.068 TSFM-BoN 0.004 0.004 0.007 0.003 0.007 0.003 0.006 0.003 0.034 0.033 0.034 0.033 0.034 0.033 0.034 0.033 
+
+LAFP (ours) 0.006 0.002 0.006 0.001 0.010 0.003 0.014 0.002 0.067 0.045 0.029 0.029 0.037 0.039 0.313 0.040 
+
+Table 11: Time-MMD Agriculture (monthly) raw mean MSE ( ↓, StandardScaler space; averaged over 3 seeds), the per-domain breakdown of Table 1 under the same convention. Best score per column in bold . The Zero-shot Chronos mean is dominated by documented deterministic wild single draws (verified bit-identical across re-runs). 
+
+Qwen2.5-3B Qwen2.5-7B Llama-3.1-8B gemma-3-4B Method Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim. 
+
+TSFM only 
+
+Zero-shot TSFM 34.999 0.382 34.999 0.382 34.999 0.382 34.999 0.382 
+
+LLM as forecaster 
+
+DirectPrompt 1.224 0.717 1.253 0.823 LLM-CoT 4.358 0.915 470.328 3.115 NEXUS 0.687 0.355 0.306 0.726 
+
+LLM as verifier 
+
+TSFM-BoN (best K) 0.290 0.326 0.306 0.334 0.271 0.348 0.959 0.359 
+
+LAFP (ours) 0.268 0.326 0.308 0.327 0.268 0.348 0.959 0.336 
+
+26 Table 12: Time-MMD Climate (monthly) raw mean MSE ( ↓, StandardScaler space; aver-aged over 3 seeds), the per-domain breakdown of Table 1 under the same convention. Best score per column in bold .
+
+Qwen2.5-3B Qwen2.5-7B Llama-3.1-8B gemma-3-4B Method Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim. 
+
+TSFM only 
+
+Zero-shot TSFM 1.621 1.652 1.621 1.652 1.621 1.652 1.621 1.652 
+
+LLM as forecaster 
+
+DirectPrompt 1.788 1.717 1.857 1.914 LLM-CoT 1.791 2.103 1.542 2.122 NEXUS 1.535 1.991 2.982 1.153 
+
+LLM as verifier 
+
+TSFM-BoN (best K) 1.519 1.307 1.354 1.293 1.446 1.317 1.404 1.320 
+
+LAFP (ours) 1.498 1.307 1.303 1.307 1.446 1.324 1.404 1.333 
+
+Table 13: Time-MMD Economy (monthly) raw mean MSE ( ↓, StandardScaler space; averaged over 3 seeds), the per-domain breakdown of Table 1 under the same convention. Best score per column in bold .
+
+Qwen2.5-3B Qwen2.5-7B Llama-3.1-8B gemma-3-4B Method Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim. 
+
+TSFM only 
+
+Zero-shot TSFM 0.035 0.042 0.035 0.042 0.035 0.042 0.035 0.042 
+
+LLM as forecaster 
+
+DirectPrompt 0.048 0.035 0.059 0.039 LLM-CoT 0.070 0.059 0.103 0.105 NEXUS 0.039 0.056 0.064 0.038 
+
+LLM as verifier 
+
+TSFM-BoN (best K) 0.028 0.034 0.029 0.035 0.028 0.035 0.029 0.035 LAFP (ours) 0.028 0.034 0.028 0.034 0.028 0.034 0.029 0.035 
+
+Table 14: Time-MMD Energy (weekly) raw mean MSE ( ↓, StandardScaler space; averaged over 3 seeds), the per-domain breakdown of Table 1 under the same convention. Best score per column in bold .
+
+Qwen2.5-3B Qwen2.5-7B Llama-3.1-8B gemma-3-4B Method Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim. 
+
+TSFM only 
+
+Zero-shot TSFM 1.804 0.318 1.804 0.318 1.804 0.318 1.804 0.318 
+
+LLM as forecaster 
+
+DirectPrompt 0.414 1.010 289.892 0.834 LLM-CoT 0.978 33.344 175.008 4.974 NEXUS 0.323 0.292 0.430 0.320 
+
+LLM as verifier 
+
+TSFM-BoN (best K) 0.620 0.315 0.488 0.315 0.781 0.315 6.494 0.321 
+
+LAFP (ours) 0.625 0.309 0.502 0.313 0.516 0.313 6.494 0.323 
+
+27 Table 15: Time-MMD Environment (daily) raw mean MSE ( ↓, StandardScaler space; averaged over 3 seeds), the per-domain breakdown of Table 1 under the same convention. Best score per column in bold . Cells exceeding 10 3 (divergent LLM-as-forecaster outputs) are shown as X. 
+
+Qwen2.5-3B Qwen2.5-7B Llama-3.1-8B gemma-3-4B Method Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim. 
+
+TSFM only 
+
+Zero-shot TSFM 0.476 0.415 0.476 0.415 0.476 0.415 0.476 0.415 
+
+LLM as forecaster 
+
+DirectPrompt 4.392 4.801 1.023 8.143 LLM-CoT 8.082 4.362 X XNEXUS 0.344 0.345 0.338 0.338 
+
+LLM as verifier 
+
+TSFM-BoN (best K) 0.419 0.382 0.394 0.390 0.386 0.373 0.426 0.389 
+
+LAFP (ours) 0.409 0.379 0.392 0.385 0.385 0.374 0.426 0.388 
+
+Table 16: Time-MMD Health (weekly) raw mean MSE ( ↓, StandardScaler space; averaged over 3 seeds), the per-domain breakdown of Table 1 under the same convention. Best score per column in bold . Cells exceeding 10 3 (divergent LLM-as-forecaster outputs) are shown as X. 
+
+Qwen2.5-3B Qwen2.5-7B Llama-3.1-8B gemma-3-4B Method Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim. 
+
+TSFM only 
+
+Zero-shot TSFM 3.554 3.124 3.554 3.124 3.554 3.124 3.554 3.124 
+
+LLM as forecaster 
+
+DirectPrompt X 6.132 142.514 4.284 LLM-CoT X 9.283 X 287.707 NEXUS 5.358 2.852 4.408 2.785 
+
+LLM as verifier 
+
+TSFM-BoN (best K) 2.824 3.109 2.936 3.112 2.974 3.143 5.621 3.075 
+
+LAFP (ours) 2.824 3.109 3.012 3.112 2.775 3.143 5.621 3.075 
+
+Table 17: Time-MMD Security (monthly) raw mean MSE ( ↓, StandardScaler space; aver-aged over 3 seeds), the per-domain breakdown of Table 1 under the same convention. Best score per column in bold . Cells exceeding 10 3 (divergent LLM-as-forecaster outputs) are shown as X. Qwen2.5-3B Qwen2.5-7B Llama-3.1-8B gemma-3-4B Method Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim.                                      
+
+> TSFM only
+> Zero-shot TSFM 169.407 75.376 169.407 75.376 169.407 75.376 169.407 75.376
+> LLM as forecaster
+> DirectPrompt 163.218 128.036 121.772 111.304 LLM-CoT X120.790 347.472 166.429 NEXUS 72.025 78.223 76.991 70.971
+> LLM as verifier
+> TSFM-BoN (best K)80.566 71.673 74.189 71.386 73.990 71.622 127.436 71.221
+> LAFP (ours) 77.763 71.802 74.189 71.275 73.703 71.549 127.436 71.328
+
+28 Table 18: Time-MMD SocialGood (monthly) raw mean MSE ( ↓, StandardScaler space; averaged over 3 seeds), the per-domain breakdown of Table 1 under the same convention. Best score per column in bold .
+
+Qwen2.5-3B Qwen2.5-7B Llama-3.1-8B gemma-3-4B Method Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim. 
+
+TSFM only 
+
+Zero-shot TSFM 0.975 1.221 0.975 1.221 0.975 1.221 0.975 1.221 
+
+LLM as forecaster 
+
+DirectPrompt 2.422 1.052 2.423 0.803 LLM-CoT 0.730 0.720 0.765 0.708 
+
+NEXUS 1.178 1.492 1.494 1.042 
+
+LLM as verifier 
+
+TSFM-BoN (best K) 0.738 1.098 0.814 1.141 0.693 1.066 0.788 1.056 
+
+LAFP (ours) 0.729 1.083 0.761 1.132 0.693 1.088 0.788 1.056 
+
+Table 19: Time-MMD Traffic (monthly) raw mean MSE ( ↓, StandardScaler space; aver-aged over 3 seeds), the per-domain breakdown of Table 1 under the same convention. Best score per column in bold .
+
+Qwen2.5-3B Qwen2.5-7B Llama-3.1-8B gemma-3-4B Method Chr. Tim. Chr. Tim. Chr. Tim. Chr. Tim. 
+
+TSFM only 
+
+Zero-shot TSFM 0.294 0.266 0.294 0.266 0.294 0.266 0.294 0.266 
+
+LLM as forecaster 
+
+DirectPrompt 0.401 0.238 0.284 0.187 
+
+LLM-CoT 2.154 0.411 0.350 2.390 NEXUS 0.241 0.391 0.562 0.238 
+
+LLM as verifier 
+
+TSFM-BoN (best K) 0.204 0.231 0.194 0.231 0.215 0.215 0.311 0.288 
+
+LAFP (ours) 0.204 0.229 0.189 0.220 0.215 0.215 0.311 0.259 
+
+29
