@@ -41,17 +41,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-08-15</span>
+      <span class="dpr-home-dashboard-kicker">2026-08-16</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 15 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 14 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>5</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>10</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>9</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-08-15 19:24:49 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-08-16 19:12:28 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -62,9 +62,7 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日精读聚焦多智能体连续动作协作与LLM稳定性评测，共筛选15篇论文。</p>
-<p>最值得关注两篇高分工作：自适应默认动作机制提升协作效率，以及StabilityBench系统量化大模型不稳定表现。</p>
-<p>建议优先精读这两篇，速读部分可关注多智能体策略跟随与人机交互心理模型。</p>
+<p>今日精读5篇、速读9篇，共处理14篇论文，重点覆盖社会困境中的意图推断与可穿戴触觉设备。最值得关注：两类不确定性分离方法提升意图推断鲁棒性；蜂窝堵塞机制实现轻量力反馈触觉。下一步可深入多智能体协作与AI提示公平性方向。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -76,9 +74,9 @@
     <strong class="dpr-home-dashboard-count">5 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="A Self-Evolving Default Action for Cooperative Tasks with Continuous Action Space">A Self-Evolving Default Action for Cooperative Tasks with Continuous Action Space</span></li><li><span class="dpr-home-dashboard-paper-title" title="StabilityBench: Benchmarking Instability in LLMs">StabilityBench: Benchmarking Instability in LLMs</span></li><li><span class="dpr-home-dashboard-paper-title" title="Psychological Influences of Conversational AI: Research and Design Directions for Reducing Harm and Promoting Well-Being">Psychological Influences of Conversational AI: Research and Design Directions for Reducing Harm and Promoting Well-Being</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Intention Inference Under Execution Noise: Separating Aleatoric and Epistemic Uncertainty in Social Dilemmas">Intention Inference Under Execution Noise: Separating Aleatoric and Epistemic Uncertainty in Social Dilemmas</span></li><li><span class="dpr-home-dashboard-paper-title" title="A Wearable Stiffness-Rendering Haptic Device with a Honeycomb Jamming Mechanism for Bilateral Teleoperation">A Wearable Stiffness-Rendering Haptic Device with a Honeycomb Jamming Mechanism for Bilateral Teleoperation</span></li><li><span class="dpr-home-dashboard-paper-title" title="LEGOUI: Designing with UI-DSL Bricks to Balance Transparency and Controllability">LEGOUI: Designing with UI-DSL Bricks to Balance Transparency and Controllability</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -86,12 +84,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">10 篇</strong>
+    <strong class="dpr-home-dashboard-count">9 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Strategy-Following Multi-Agent Deep Reinforcement Learning Considering Control Strategies Provided to Other Agents">Strategy-Following Multi-Agent Deep Reinforcement Learning Considering Control Strategies Provided to Other Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Micro-Cognition to Self-Construction: A Four-Layer Integrative Review of Psychological Theories in HCI">From Micro-Cognition to Self-Construction: A Four-Layer Integrative Review of Psychological Theories in HCI</span></li><li><span class="dpr-home-dashboard-paper-title" title="Affective Tools for Thought: Towards Shared Attention and Affective Reorienting in AI-Supported Thinking">Affective Tools for Thought: Towards Shared Attention and Affective Reorienting in AI-Supported Thinking</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="History Matters: Meta-policy Delegation with Heterogeneous Multi-agent Reinforcement Learning">History Matters: Meta-policy Delegation with Heterogeneous Multi-agent Reinforcement Learning</span></li><li><span class="dpr-home-dashboard-paper-title" title="Investigating Multimodal Informativity under Different Partner Visibility Conditions in Video-Mediated Dialogue">Investigating Multimodal Informativity under Different Partner Visibility Conditions in Video-Mediated Dialogue</span></li><li><span class="dpr-home-dashboard-paper-title" title="Same Question, Different Answer? Measuring and Mitigating Prompt Privilege for Equitable AI Access">Same Question, Different Answer? Measuring and Mitigating Prompt Privilege for Equitable AI Access</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>7</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>3</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>7</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
 </section>
 </div>
 
