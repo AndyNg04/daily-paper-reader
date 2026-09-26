@@ -6,7 +6,7 @@
  *
  * UI：
  *   - 顶部工具条：[全部 / 未读] segmented control + 搜索框（debounce 200ms）
- *   - 主体：会议论文 + 日报两个一级面板，面板内第三级目录默认收起
+ *   - 主体：会议论文 + 专题回溯 + 日报，复用同一套论文行与阅读交互
  *   - 阅读状态接入 window.DPRReadStateSync（Supabase）或 localStorage 回退
  *   - hashchange → syncActive() 高亮 + 滚动居中
  */
@@ -117,6 +117,36 @@
   }
   function isDailyRangeKey(dateKey) {
     return /^\d{8}-\d{8}$/.test(String(dateKey || ''));
+  }
+  // 只拆展示归属，保留旧区间 route、论文 ID 和阅读状态。
+  function isBacktrackDateKey(dateKey) {
+    if (!isDailyRangeKey(dateKey)) return false;
+    var parts = String(dateKey).split('-');
+    function utcDate(value) {
+      return Date.UTC(Number(value.slice(0, 4)), Number(value.slice(4, 6)) - 1, Number(value.slice(6, 8)));
+    }
+    return (utcDate(parts[1]) - utcDate(parts[0])) / 86400000 + 1 > 30;
+  }
+  function modelForDailyPanel(model, group) {
+    var indexedRuns = new Set((model && model.starterPacks || []).map(function (pack) { return pack.run_id; }));
+    return Object.assign({}, model || {}, { daily: (model && model.daily || []).filter(function (day) {
+      return isBacktrackDateKey(day.dateKey) === (group === 'backtrack');
+    }).map(function (day) {
+      if (group !== 'backtrack') return day;
+      // 新任务文档有明确归属才隐藏投影；未标记旧页、索引加载失败均保持可读。
+      return Object.assign({}, day, {papers: (day.papers || []).filter(function (paper) {
+        return !paper.research_run_id || !indexedRuns.has(paper.research_run_id);
+      })});
+    }).filter(function (day) { return (day.papers || []).length; }) });
+  }
+  function dailyPanelField(group, suffix) {
+    return 'active' + (group === 'backtrack' ? 'Backtrack' : 'Daily') + suffix;
+  }
+  function buildDailyPanelView(model, group, viewState, readMap) {
+    var vs = viewState || state;
+    return buildDailyCalendarTagView(modelForDailyPanel(model, group),
+      vs[dailyPanelField(group, 'Date')], vs[dailyPanelField(group, 'Tag')], readMap,
+      vs[dailyPanelField(group, 'Month')], group === 'backtrack');
   }
   function isDailySingleDateKey(dateKey) {
     return /^\d{8}$/.test(String(dateKey || ''));
@@ -233,6 +263,7 @@
         });
       });
     });
+    taskPapers(m).forEach(function (paper) { out.push(paper.href); });
     return out.filter(Boolean);
   }
   function collectReportHrefsFromModel(model) {
@@ -242,7 +273,100 @@
       var href = day && (day.reportHref || dayReportHrefFromKey(day.dateKey));
       if (href) out.push(normalizeRouteHref(href));
     });
+    (m.starterPacks || []).forEach(function (pack) { if (pack.href) out.push(normalizeRouteHref(pack.href)); });
     return out.filter(Boolean);
+  }
+  function parseStarterPackIndex(index) {
+    if (!index || index.version !== 1 || !Array.isArray(index.packs)) return [];
+    var seen = {};
+    return index.packs.filter(function (pack) {
+      if (!pack || !/^\d{8}-[a-f0-9]{12}$/.test(String(pack.run_id || '')) || seen[pack.run_id]) return false;
+      seen[pack.run_id] = true;
+      return true;
+    }).map(function (pack) {
+      return {
+        run_id: pack.run_id,
+        tag: String(pack.tag || '未命名专题'),
+        scope: {
+          description: typeof (pack.scope || {}).description === 'string' ? pack.scope.description : '',
+          refinement: typeof (pack.scope || {}).refinement === 'string' ? pack.scope.refinement : '',
+          as_of: /^\d{4}-\d{2}-\d{2}$/.test(String((pack.scope || {}).as_of || '')) ? pack.scope.as_of : '',
+        },
+        status: pack.status === 'complete' ? 'complete' : pack.status === 'failed' ? 'failed' : 'needs_resume',
+        paper_count: Number.isSafeInteger(pack.paper_count) && pack.paper_count >= 0 ? pack.paper_count : 0,
+        mode: ['90', '365', '90d', '365d', '90-day', '365-day'].indexOf(String(pack.mode)) >= 0 ? String(pack.mode) : 'starter-pack',
+        result_count: Number(pack.result_count) || 0,
+        content_done: Number(pack.content_done) || 0,
+        content_pending: Number(pack.content_pending) || 0,
+        export_path: pack.export_path === 'docs/starter-pack/' + pack.run_id + '/papers.md' ? pack.export_path : '',
+        papers: (Array.isArray(pack.selected_records) ? pack.selected_records : []).slice(0, 100).map(function (record, index) {
+          var route = String(record.route || '').replace(/^#\//, '').replace(/\.md$/, '');
+          // 只接受站内论文路径；不得将外部原文链接当作 docsify route。
+          if (!route || /[\\?#:\s]/.test(route) || route.split('/').some(function (part) { return !part || part === '.' || part === '..'; })) return null;
+          return { id: route, href: '#/' + route, title: String(record.title || ''),
+            selection_rank: index,
+            score: Number(record.score) || 0, published: String(record.published || ''),
+            evidence: String(record.summary || (record.reading_status !== 'complete' ? '阅读内容待生成' : record.zh_title) || ''),
+            publication_date: String(record.publication_date || record.published || ''),
+            publication_date_precision: String(record.publication_date_precision || 'unknown'),
+            publication_date_source: String(record.publication_date_source || ''),
+            publication_date_kind: String(record.publication_date_kind || ''),
+            tags: (Array.isArray(record.tags) ? record.tags : []).map(function (tag) { return typeof tag === 'string' ? {kind: 'query', label: tag} : tag; }),
+            section: 'backtrack' };
+        }).filter(Boolean),
+        updated_at: Date.parse(pack.updated_at) || 0,
+        // 仅由受限ID构造站内docsify路由，绝不信任JSON中的任意href。
+        href: '#/starter-pack/' + pack.run_id + '/README',
+      };
+    }).sort(function (a, b) { return b.updated_at - a.updated_at || b.run_id.localeCompare(a.run_id); });
+  }
+  function taskPapers(model) {
+    return (model && model.starterPacks || []).reduce(function (papers, pack) { return papers.concat(pack.papers || []); }, []);
+  }
+  function sortedTaskPapers(papers, order) {
+    return (papers || []).slice().sort(function (a, b) {
+      var delta = order === 'date' ? taskPublicationSortKey(b).localeCompare(taskPublicationSortKey(a)) : b.score - a.score;
+      return delta || b.score - a.score || (a.selection_rank || 0) - (b.selection_rank || 0);
+    });
+  }
+  function taskPublicationSortKey(paper) {
+    // 年/月粒度只作为粗粒度排序，绝不补造具体日并展示。
+    var date = String(paper.publication_date || paper.published || '');
+    return /^\d{4}(?:-\d{2}(?:-\d{2})?)?$/.test(date) ? date : '';
+  }
+  function uniquePapersByRoute(papers) {
+    var seen = new Set();
+    return papers.filter(function (paper) {
+      var key = normalizeRouteHref(paper.href) || paperIdentity(paper);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+  function renderStarterPackGuides(packs, opts) {
+    if (!packs || !packs.length) return '';
+    opts = opts || {};
+    return '<div class="dpr-sidebar-starter-guides" aria-label="专题研究任务">' + packs.map(function (pack) {
+      var status = pack.status === 'complete' ? '已完成 · ' + pack.paper_count + '篇' : pack.status === 'failed' ? '生成失败 · 可续跑' : '待续跑';
+      var label = pack.tag + ' · ' + (pack.mode === 'starter-pack' ? '大礼包' : (pack.mode.indexOf('365') === 0 ? '365天' : '90天'));
+      var scope = pack.scope || {};
+      var refinement = String(scope.refinement || '').trim();
+      var fullLabel = label + (refinement ? ' · ' + refinement : scope.as_of ? ' · 截止 ' + scope.as_of + '（不含当天）' : '');
+      label += refinement ? ' · ' + (refinement.length > 28 ? refinement.slice(0, 28) + '…' : refinement) : scope.as_of ? ' · 截止 ' + scope.as_of : '';
+      var papers = sortedTaskPapers(pack.papers, opts.taskSort).filter(function (paper) { return paperMatchesResult(paper, opts.resultOptions); });
+      if (opts.resultOptions && opts.resultOptions.keyword && !papers.length && label.toLowerCase().indexOf(opts.resultOptions.keyword.toLowerCase()) === -1) return '';
+      var primaryLabel = pack.export_path
+        ? (pack.mode === 'starter-pack' ? '方向导读／导出清单' : '结果总览／导出清单')
+        : '原有导读';
+      var navigation = '<a class="dpr-sidebar-axis-tab dpr-sidebar-starter-guide" href="' + safeAttr(pack.href) + '">' + primaryLabel + '</a>';
+      if (pack.export_path) navigation += ' <a class="dpr-sidebar-axis-tab" href="#/starter-pack/' + pack.run_id + '/catalog">论文列表</a> <a class="dpr-sidebar-axis-tab" href="' + safeAttr(pack.export_path) + '" download data-no-router>下载 Markdown</a>';
+      if (scope.description) navigation += '<div class="dpr-sidebar-paper-evidence">研究方向：' + safeText(scope.description) + '</div>';
+      if (refinement) navigation += '<div class="dpr-sidebar-paper-evidence">本次细化：' + safeText(refinement) + '</div>';
+      if (scope.as_of) navigation += '<div class="dpr-sidebar-paper-meta">截止日期（不含当天）：' + safeText(scope.as_of) + '</div>';
+      var view = {groups: [{key: 'task-' + pack.run_id, label: label, labelTitle: fullLabel, papers: papers, unreadCount: countUnreadPapers(papers, opts.readMap || {}),
+        taskNavigation: navigation + '<span class="dpr-sidebar-paper-meta">' + safeText(pack.papers.length ? '内容 ' + pack.content_done + ' 已完成 / ' + pack.content_pending + ' 待生成' : status) + '</span>'}]};
+      return renderAxisContent('backtrack', 'tasks', view, opts.expandedAxisSections, opts.readMap, opts.currentPaperId);
+    }).join('') + '</div>';
   }
   function findCurrentPaperHrefFromModel(model, href) {
     var current = normalizeRouteHref(href || currentRouteHref());
@@ -310,7 +434,76 @@
   }
   function conferenceSortTimestamp(conf) {
     if (!conf) return 0;
-    return timestampFromYearText([conf.years, conf.label, conf.name].join(' '));
+    return publicationSortTimestamp(conf);
+  }
+  function normalizedPublication(value, fallbackYear) {
+    var p = value || {};
+    var date = String(p.publication_date || '');
+    var precision = String(p.publication_date_precision || 'unknown');
+    var source = String(p.publication_date_source || '');
+    var kind = String(p.publication_date_kind || '');
+    var pattern = precision === 'day' ? /^\d{4}-\d{2}-\d{2}$/ : precision === 'month' ? /^\d{4}-\d{2}$/ : /^\d{4}$/;
+    var stamp = Date.parse(date + (precision === 'day' ? 'T00:00:00Z' : precision === 'month' ? '-01T00:00:00Z' : '-01-01T00:00:00Z'));
+    if (['day', 'month', 'year'].indexOf(precision) >= 0 && pattern.test(date) && isFinite(stamp) &&
+        new Date(stamp).toISOString().slice(0, date.length) === date &&
+        (precision === 'year' || (source.trim() && ['proceedings', 'accepted_notice'].indexOf(kind) >= 0))) {
+      return { publication_date: date, publication_date_precision: precision, publication_date_source: source, publication_date_kind: kind };
+    }
+    var years = String(fallbackYear || '').match(/\b(?:19|20)\d{2}\b/g) || [];
+    return { publication_date: years.length ? String(Math.max.apply(null, years.map(Number))) : '', publication_date_precision: years.length ? 'year' : 'unknown', publication_date_source: '', publication_date_kind: '' };
+  }
+  function publicationSortTimestamp(value) {
+    var p = value || {};
+    var date = p.publication_date || '';
+    // 未知月/日仅以年份起点粗排，绝不伪装成该年的最后一天。
+    return Date.parse(date + (p.publication_date_precision === 'day' ? 'T00:00:00Z' : p.publication_date_precision === 'month' ? '-01T00:00:00Z' : '-01-01T00:00:00Z')) || 0;
+  }
+  function publicationDateLabel(value) {
+    var p = value || {};
+    if (p.publication_date_precision === 'day' || p.publication_date_precision === 'month') {
+      return p.publication_date + (p.publication_date_kind === 'accepted_notice' ? ' · 录用预告' : ' · 论文集公布');
+    }
+    return (p.publication_date ? p.publication_date + ' · ' : '') +
+      (p.publication_date_kind === 'accepted_notice' ? '录用预告 · ' : '') + '具体日期待确认';
+  }
+  function applyConferencePublicationDates(model, registry) {
+    var entries = registry && Array.isArray(registry.items) ? registry.items : [];
+    (model.conferences || []).forEach(function (conf) {
+      var yearText = [conf.years, conf.label, conf.name].join(' ');
+      var candidates = entries.filter(function (entry) {
+        return String(entry.conference || '').toLowerCase() === String(conf.name || '').toLowerCase() &&
+          (yearText.match(/\b(?:19|20)\d{2}\b/g) || []).indexOf(String(entry.year)) >= 0;
+      }).map(function (entry) { return normalizedPublication(entry, entry.year); });
+      candidates.sort(function (a, b) { return publicationSortTimestamp(b) - publicationSortTimestamp(a); });
+      var groupDate = candidates[0] || normalizedPublication(conf, yearText);
+      Object.assign(conf, groupDate);
+      (conf.topics || []).forEach(function (topic) {
+        (topic.papers || []).forEach(function (paper) {
+          var ownDate = normalizedPublication(paper, '');
+          var routeSegment = String(paper.href || '').match(/\/conference\/([^/]+)\//);
+          var routeYears = routeSegment ? routeSegment[1].match(/\b(?:19|20)\d{2}\b/g) || [] : [];
+          var groupYears = (yearText.match(/\b(?:19|20)\d{2}\b/g) || []).filter(function (year, index, years) { return years.indexOf(year) === index; });
+          // 显式日期优先；合并年份route不提供单篇年份证据，不能猜首年或末年。
+          var paperYear = ownDate.publication_date.slice(0, 4) || (/^(?:19|20)\d{2}$/.test(String(paper.conference_year || '')) ? String(paper.conference_year) : '') ||
+            (routeYears.length === 1 ? routeYears[0] : '') || (groupYears.length === 1 ? groupYears[0] : '');
+          var paperEntry = entries.filter(function (entry) {
+            return String(entry.conference || '').toLowerCase() === String(conf.name || '').toLowerCase() && String(entry.year) === String(paperYear);
+          })[0];
+          var fallbackDate = paperEntry ? normalizedPublication(paperEntry, paperYear) : normalizedPublication(null, paperYear);
+          // 多年份合并组的旧论文只继承所属年份，不能全被抬到最新一届。
+          Object.assign(paper, ownDate.publication_date_precision === 'day' || ownDate.publication_date_precision === 'month' ? ownDate : fallbackDate);
+          if (publicationSortTimestamp(paper) > publicationSortTimestamp(conf)) {
+            Object.assign(conf, normalizedPublication(paper, paperYear));
+          }
+        });
+        topic.papers = (topic.papers || []).slice().sort(function (a, b) {
+          return publicationSortTimestamp(b) - publicationSortTimestamp(a) || (Number(b.score) || 0) - (Number(a.score) || 0) ||
+            String(a.title || '').localeCompare(String(b.title || '')) || String(a.id || '').localeCompare(String(b.id || ''));
+        });
+      });
+    });
+    model.conferences = sortByTimestampDesc(model.conferences, conferenceSortTimestamp);
+    return model;
   }
   function paperSortTimestamp(paper, fallback) {
     var p = paper || {};
@@ -534,8 +727,15 @@
         score: payload && payload.score,
         evidence: (payload && payload.evidence) || '',
         published: payload && (payload.published || payload.published_at || payload.publishedAt || payload.date || payload.updated || payload.updated_at || payload.submitted || payload.created_at) || '',
+        publication_date: payload && payload.publication_date || '',
+        publication_date_precision: payload && payload.publication_date_precision || 'unknown',
+        publication_date_source: payload && payload.publication_date_source || '',
+        publication_date_kind: payload && payload.publication_date_kind || '',
+        conference_year: payload && payload.conference_year || '',
         tags: (payload && Array.isArray(payload.tags) ? payload.tags : []),
         selectionSource: payload && payload.selection_source,
+        research_run_id: payload && payload.research_run_id || '',
+        research_mode: payload && payload.research_mode || '',
       };
       return node;
     }
@@ -696,12 +896,7 @@
     model.daily.forEach(function (day) {
       day.papers = sortPapersByTimeDesc(day.papers || [], day.dateKey);
     });
-    model.conferences.forEach(function (conf) {
-      (conf.topics || []).forEach(function (topic) {
-        topic.papers = sortPapersByTimeDesc(topic.papers || [], conferenceSortTimestamp(conf));
-      });
-    });
-    model.conferences = sortByTimestampDesc(model.conferences, conferenceSortTimestamp);
+    applyConferencePublicationDates(model, {});
     // 日报按日期倒序；区间日报按结束日期归位，保证最近的区间报告不会从日历里“消失”。
     model.daily.sort(function (a, b) {
       var at = timestampFromDateLike(a && a.dateKey);
@@ -792,6 +987,7 @@
 
   function collectUnreadPaperIdsForSnapshot(model, readMap) {
     var ids = new Set();
+    taskPapers(model).forEach(function (paper) { if (!paperReadStatus(paper, readMap || {})) ids.add(paperIdentity(paper)); });
     flattenDailyPapers(model).forEach(function (record) {
       var id = paperIdentity(record.paper);
       if (id && !paperReadStatus(record.paper, readMap || {})) ids.add(id);
@@ -826,7 +1022,8 @@
     var opts = resolveResultOptions(options);
     var id = paperIdentity(paper);
     if (opts.keyword && paperSearchText(paper).indexOf(opts.keyword) === -1) return false;
-    if (opts.unreadOnly && opts.unreadResultPaperIds) return id && opts.unreadResultPaperIds.has(id);
+    // 首次进入未读时当前页可能已经标记已读，不在快照中；仍需保留当前阅读项。
+    if (opts.unreadOnly && opts.unreadResultPaperIds) return !!id && (id === opts.currentPaperId || opts.unreadResultPaperIds.has(id));
     if (opts.unreadOnly && paperReadStatus(paper, opts.readMap) && paperIdentity(paper) !== opts.currentPaperId) return false;
     return true;
   }
@@ -838,6 +1035,7 @@
     var filtered = {
       home: source.home || null,
       tutorial: source.tutorial || null,
+      starterPacks: source.starterPacks || [],
       daily: [],
       conferences: [],
     };
@@ -980,9 +1178,10 @@
   }
 
   function computeModelReadSummary(model, readMap) {
-    var dailyPapers = flattenDailyPapers(model).map(function (record) { return record.paper; });
+    var dailyPapers = flattenDailyPapers(modelForDailyPanel(model, 'daily')).map(function (record) { return record.paper; });
+    var backtrackPapers = flattenDailyPapers(modelForDailyPanel(model, 'backtrack')).map(function (record) { return record.paper; });
     var conferencePapers = flattenConferencePapers(model).map(function (record) { return record.paper; });
-    var allPapers = dailyPapers.concat(conferencePapers);
+    var allPapers = uniquePapersByRoute(dailyPapers.concat(backtrackPapers, conferencePapers, taskPapers(model)));
     var map = readMap || {};
     return {
       total: {
@@ -992,6 +1191,10 @@
       daily: {
         papers: dailyPapers.length,
         unread: countUnreadPapers(dailyPapers, map),
+      },
+      backtrack: {
+        papers: uniquePapersByRoute(backtrackPapers.concat(taskPapers(model))).length,
+        unread: countUnreadPapers(uniquePapersByRoute(backtrackPapers.concat(taskPapers(model))), map),
       },
       conference: {
         papers: conferencePapers.length,
@@ -1019,16 +1222,19 @@
   }
 
   function syncAxisStateToHref(href) {
+    var taskMatch = taskPapers(state.model).some(function (paper) { return paper.href === normalizeRouteHref(href); });
+    if (taskMatch) { state.expandedGroups.backtrack = true; return 'backtrack'; }
     var daily = findDailyRecordByHref(state.model, href);
     if (daily) {
-      state.expandedGroups.daily = true;
-      state.activeDailyDate = daily.dateKey;
-      state.activeDailyMonth = monthKeyFromDateKey(daily.dateKey) || state.activeDailyMonth;
+      var panel = isBacktrackDateKey(daily.dateKey) ? 'backtrack' : 'daily';
+      state.expandedGroups[panel] = true;
+      state[dailyPanelField(panel, 'Date')] = daily.dateKey;
+      state[dailyPanelField(panel, 'Month')] = monthKeyFromDateKey(daily.dateKey);
       var dailyTags = paperTagLabels(daily.paper);
-      if (!state.activeDailyTag || state.activeDailyTag === '__all__' || dailyTags.indexOf(state.activeDailyTag) === -1) {
-        state.activeDailyTag = '__all__';
+      if (dailyTags.indexOf(state[dailyPanelField(panel, 'Tag')]) === -1) {
+        state[dailyPanelField(panel, 'Tag')] = '__all__';
       }
-      return 'daily';
+      return panel;
     }
     var conf = findConferenceRecordByHref(state.model, href);
     if (conf) {
@@ -1109,14 +1315,24 @@
     var requestedMonth = normalizeMonthKey(activeMonthKey);
     var tabs = [];
     var seen = {};
+    // 日历格与状态里的 activeDailyDate 都是"锚定日"（区间日报取结束日），
+    // 与 model.daily 的原始 dateKey 不同形；这里建锚定日 → 原始 dateKey 的反查表。
+    var rawKeyByAnchor = {};
     (model && model.daily || []).forEach(function (day) {
       addTab(tabs, seen, day.dateKey, day.dateLabel || formatDateLabel(day.dateKey));
       seen[day.dateKey].count = (day.papers || []).length;
       seen[day.dateKey].unreadCount = countUnreadPapers(day.papers || [], map);
+      var dayAnchor = dailyCalendarAnchorDateKey(day.dateKey);
+      if (dayAnchor && !rawKeyByAnchor[dayAnchor]) rawKeyByAnchor[dayAnchor] = day.dateKey;
     });
+    // 把锚定日形态的 activeKey 还原成原始 dateKey；单日日报两者同形，等价于原样返回。
+    var requestedKey = String(activeKey || '');
+    if (requestedKey && !seen[requestedKey]) {
+      requestedKey = rawKeyByAnchor[dailyCalendarAnchorDateKey(requestedKey) || requestedKey] || requestedKey;
+    }
     var active = '';
-    if (activeKey && seen[activeKey] && (!requestedMonth || monthKeyFromDateKey(activeKey) === requestedMonth)) {
-      active = activeKey;
+    if (requestedKey && seen[requestedKey] && (!requestedMonth || monthKeyFromDateKey(requestedKey) === requestedMonth)) {
+      active = requestedKey;
     }
     if (!active && requestedMonth) {
       for (var tabIndex = 0; tabIndex < tabs.length; tabIndex += 1) {
@@ -1126,10 +1342,13 @@
         }
       }
     }
-    if (!active) active = activeKey && seen[activeKey] ? activeKey : (tabs[0] && tabs[0].key) || '';
+    if (!active) active = requestedKey && seen[requestedKey] ? requestedKey : (tabs[0] && tabs[0].key) || '';
     var groups = [];
+    // 同一锚定日可能对应多条记录（当天既有单日日报又有区间日报），按锚定日聚合，
+    // 与 buildDailyCalendarView 的日历计数口径保持一致。
+    var activeAnchor = dailyCalendarAnchorDateKey(active) || active;
     (model && model.daily || []).forEach(function (day) {
-      if (day.dateKey !== active) return;
+      if ((dailyCalendarAnchorDateKey(day.dateKey) || day.dateKey) !== activeAnchor) return;
       groups.push({
         key: day.dateKey,
         label: day.dateLabel || formatDateLabel(day.dateKey),
@@ -1201,14 +1420,14 @@
     return filtered;
   }
 
-  function buildDailyCalendarTagView(model, activeDateKey, activeTagKey, readMap, activeMonthKey) {
+  function buildDailyCalendarTagView(model, activeDateKey, activeTagKey, readMap, activeMonthKey, allDates) {
     var map = readMap || {};
     var allKey = '__all__';
     var dateView = buildDailyDateView(model, activeDateKey, map, activeMonthKey);
     var activeDate = dailyCalendarAnchorDateKey(dateView.activeKey) || dateView.activeKey || '';
     var activeRecords = [];
     (model && model.daily || []).forEach(function (day) {
-      if (day && dailyCalendarAnchorDateKey(day.dateKey) === activeDate) {
+      if (day && (allDates || dailyCalendarAnchorDateKey(day.dateKey) === activeDate)) {
         activeRecords.push(day);
       }
     });
@@ -1332,13 +1551,14 @@
     return new Set();
   }
   function defaultExpandedGroups() {
-    return { conference: true, daily: true };
+    return { conference: true, daily: true, backtrack: true };
   }
   function normalizeExpandedGroups(groups) {
     if (!groups || typeof groups !== 'object') return defaultExpandedGroups();
     return {
       conference: groups.conference !== false,
       daily: groups.daily !== false,
+      backtrack: groups.backtrack !== false,
     };
   }
   function collapseAxisSectionsForGroup(group) {
@@ -1358,6 +1578,7 @@
     unreadCountEl: null,
     filter: 'all', // 'all' | 'unread'
     search: '',
+    taskSort: 'score',
     unreadResultPaperIds: null,
     pendingPaperHref: '',
     lastFetchAt: 0,
@@ -1365,6 +1586,9 @@
     expandedAxisSections: new Set(),
     dailyViewMode: 'date',
     dailyCalendarPlacement: 'top',
+    activeBacktrackDate: '',
+    activeBacktrackMonth: '',
+    activeBacktrackTag: '',
     conferenceViewMode: 'conf',
     activeDailyDate: '',
     activeDailyMonth: '',
@@ -1586,6 +1810,9 @@
       expandedGroups: normalizeExpandedGroups(vs.expandedGroups),
       dailyViewMode: vs.dailyViewMode === 'tag' ? 'tag' : 'date',
       dailyCalendarPlacement: vs.dailyCalendarPlacement === 'bottom' ? 'bottom' : 'top',
+      activeBacktrackDate: vs.activeBacktrackDate || '',
+      activeBacktrackMonth: normalizeMonthKey(vs.activeBacktrackMonth) || '',
+      activeBacktrackTag: vs.activeBacktrackTag || '',
       conferenceViewMode: vs.conferenceViewMode === 'tag' ? 'tag' : 'conf',
       activeDailyDate: vs.activeDailyDate || '',
       activeDailyMonth: normalizeMonthKey(vs.activeDailyMonth) || '',
@@ -1593,6 +1820,7 @@
       activeConference: vs.activeConference || '',
       activeConferenceTag: vs.activeConferenceTag || '',
       search: String(vs.search || ''),
+      taskSort: vs.taskSort === 'date' ? 'date' : 'score',
       filter: vs.filter === 'unread' ? 'unread' : 'all',
       readMap: vs.readMap || {},
       expandedAxisSections: normalizeSet(vs.expandedAxisSections),
@@ -1623,8 +1851,8 @@
         ? buildConferenceTagView(viewModel, vs.activeConferenceTag, map)
         : buildConferenceConfView(viewModel, vs.activeConference, map);
     }
-    if (resultMode) return buildDailyResultView(model, resultOptions);
-    return buildDailyCalendarTagView(viewModel, vs.activeDailyDate, vs.activeDailyTag, map, vs.activeDailyMonth);
+    if (resultMode) return buildDailyResultView(modelForDailyPanel(model, group), resultOptions);
+    return buildDailyPanelView(viewModel, group, vs, map);
   }
 
   function renderBodyHtml(model, viewState) {
@@ -1670,23 +1898,34 @@
         }));
       }
     }
-    if (viewModel && viewModel.daily && viewModel.daily.length) {
+    ['backtrack', 'daily'].forEach(function (panel) {
+      var panelModel = modelForDailyPanel(viewModel, panel);
+      var guides = panel === 'backtrack' ? (model.starterPacks || []) : [];
+      if (!panelModel.daily.length && !guides.length) return;
+      var placement = vs.dailyCalendarPlacement;
       var dailyView = resultMode
-        ? buildDailyResultView(model, resultOptions)
-        : buildDailyCalendarTagView(viewModel, vs.activeDailyDate, vs.activeDailyTag, vs.readMap, vs.activeDailyMonth);
+        ? buildDailyResultView(modelForDailyPanel(model, panel), resultOptions)
+        : buildDailyPanelView(viewModel, panel, vs, vs.readMap);
       var dailyTotal = countPapersInView(dailyView);
       var dailyUnread = countUnreadInView(dailyView, vs.readMap);
-      if (!resultMode || dailyTotal > 0) {
+      var visibleTasks = taskPapers({starterPacks: guides}).filter(function (paper) { return paperMatchesResult(paper, resultOptions); });
+      var panelPapers = uniquePapersByRoute((dailyView.groups || []).reduce(function (papers, item) { return papers.concat(item.papers || []); }, []).concat(visibleTasks));
+      dailyTotal = panelPapers.length;
+      dailyUnread = countUnreadPapers(panelPapers, vs.readMap);
+      if (!resultMode || dailyTotal > 0 || guides.length) {
         renderedGroups += 1;
         html.push(renderAxisGroup({
-          group: 'daily',
-          title: '日报',
-          icon: '📅',
+          group: panel,
+          starterPacks: guides,
+          taskSort: vs.taskSort,
+          resultOptions: resultOptions,
+          title: panel === 'backtrack' ? '专题回溯' : '日报',
+          icon: panel === 'backtrack' ? '🗂' : '📅',
           mode: resultMode ? vs.dailyViewMode : 'tag',
-          dailyCalendarPlacement: vs.dailyCalendarPlacement,
-          expanded: vs.expandedGroups.daily !== false,
+          dailyCalendarPlacement: placement,
+          expanded: vs.expandedGroups[panel] !== false,
           view: dailyView,
-          toggleLabel: vs.dailyCalendarPlacement === 'top' ? '标签上置' : '日历上置',
+          toggleLabel: placement === 'top' ? '标签上置' : '日历上置',
           totalCount: dailyTotal,
           unreadCount: dailyUnread,
           expandedAxisSections: vs.expandedAxisSections,
@@ -1694,7 +1933,7 @@
           currentPaperId: resultOptions.currentPaperId,
         }));
       }
-    }
+    });
     if ((resultMode || normalUnreadFilterMode) && renderedGroups === 0) {
       html.push('<div class="dpr-sidebar-empty">没有匹配的论文</div>');
     }
@@ -1707,6 +1946,9 @@
       expandedGroups: state.expandedGroups,
       dailyViewMode: state.dailyViewMode,
       dailyCalendarPlacement: state.dailyCalendarPlacement,
+      activeBacktrackDate: state.activeBacktrackDate,
+      activeBacktrackMonth: state.activeBacktrackMonth,
+      activeBacktrackTag: state.activeBacktrackTag,
       conferenceViewMode: state.conferenceViewMode,
       activeDailyDate: state.activeDailyDate,
       activeDailyMonth: state.activeDailyMonth,
@@ -1714,6 +1956,7 @@
       activeConference: state.activeConference,
       activeConferenceTag: state.activeConferenceTag,
       search: state.search,
+      taskSort: state.taskSort,
       filter: state.filter,
       readMap: readMap,
       unreadResultPaperIds: state.filter === 'unread' ? ensureUnreadSessionPaperIds(state.model, readMap) : state.unreadResultPaperIds,
@@ -1783,33 +2026,36 @@
     if (!state.bodyEl) return;
     var map = readMap || {};
     var calendarModel = modelForUnreadNormalFilter(state.model, map);
-    var view = buildDailyCalendarTagView(calendarModel, state.activeDailyDate, state.activeDailyTag, map, state.activeDailyMonth);
-    var daysByKey = {};
-    (view.calendar && view.calendar.days || []).forEach(function (day) {
-      if (day && day.dateKey) daysByKey[day.dateKey] = day;
-    });
-    $$('.dpr-sidebar-calendar-day[data-calendar-date]', state.bodyEl).forEach(function (dayEl) {
-      var key = dayEl.getAttribute('data-calendar-date') || '';
-      var day = daysByKey[key];
-      if (!day) return;
-      var unread = typeof day.unreadCount === 'number' ? day.unreadCount : 0;
-      var total = typeof day.totalCount === 'number' ? day.totalCount : 0;
-      dayEl.setAttribute('data-unread', unread > 0 ? '1' : '0');
-      dayEl.classList.toggle('has-unread', unread > 0);
-      dayEl.classList.toggle('is-active', key === view.activeDateKey);
-      var unreadEl = $('.dpr-sidebar-calendar-day-unread', dayEl);
-      var totalEl = $('.dpr-sidebar-calendar-day-total', dayEl);
-      if (unreadEl) unreadEl.textContent = String(unread);
-      if (totalEl) totalEl.textContent = String(total);
+    ['daily', 'backtrack'].forEach(function (panel) {
+      var view = buildDailyPanelView(calendarModel, panel, state, map);
+      var daysByKey = {};
+      (view.calendar && view.calendar.days || []).forEach(function (day) {
+        if (day && day.dateKey) daysByKey[day.dateKey] = day;
+      });
+      $$('[data-panel="' + panel + '"] .dpr-sidebar-calendar-day[data-calendar-date]', state.bodyEl).forEach(function (dayEl) {
+        var key = dayEl.getAttribute('data-calendar-date') || '';
+        var day = daysByKey[key];
+        if (!day) return;
+        var unread = typeof day.unreadCount === 'number' ? day.unreadCount : 0;
+        var total = typeof day.totalCount === 'number' ? day.totalCount : 0;
+        dayEl.setAttribute('data-unread', unread > 0 ? '1' : '0');
+        dayEl.classList.toggle('has-unread', unread > 0);
+        dayEl.classList.toggle('is-active', key === view.activeDateKey);
+        var unreadEl = $('.dpr-sidebar-calendar-day-unread', dayEl);
+        var totalEl = $('.dpr-sidebar-calendar-day-total', dayEl);
+        if (unreadEl) unreadEl.textContent = String(unread);
+        if (totalEl) totalEl.textContent = String(total);
+      });
     });
   }
 
-  function resolveDailyAxisSectionStateKey(model, viewState, readMap) {
+  function resolveDailyAxisSectionStateKey(model, viewState, readMap, panel) {
+    panel = panel || 'daily';
     var vs = resolveViewState(viewState || state);
     var map = readMap || vs.readMap || {};
     var axisModel = modelForUnreadNormalFilter(model, map);
-    var dailyView = buildDailyCalendarTagView(axisModel, vs.activeDailyDate, vs.activeDailyTag, map, vs.activeDailyMonth);
-    var preferredDateKey = String(vs.activeDailyDate || '');
+    var dailyView = buildDailyPanelView(axisModel, panel, vs, map);
+    var preferredDateKey = String(vs[dailyPanelField(panel, 'Date')] || '');
     var group = null;
     (dailyView.groups || []).some(function (item) {
       if (preferredDateKey && String(item.key || '').indexOf(preferredDateKey + ':') === 0) {
@@ -1819,25 +2065,28 @@
       return false;
     });
     if (!group) group = dailyView.groups && dailyView.groups[0];
-    return group ? axisSectionStateKey('daily', 'tag', group.key) : '';
+    return group ? axisSectionStateKey(panel, 'tag', group.key) : '';
   }
 
-  function expandCurrentDailyAxisSection(readMap) {
+  function expandCurrentDailyAxisSection(readMap, panel) {
+    panel = panel || 'daily';
     if (!state.expandedAxisSections) state.expandedAxisSections = new Set();
-    collapseAxisSectionsForGroup('daily');
-    var sectionKey = resolveDailyAxisSectionStateKey(state.model, state, readMap || ReadState.getAll());
+    collapseAxisSectionsForGroup(panel);
+    var sectionKey = resolveDailyAxisSectionStateKey(state.model, state, readMap || ReadState.getAll(), panel);
     if (sectionKey) state.expandedAxisSections.add(sectionKey);
   }
 
   function syncResolvedAxisState() {
     var readMap = ReadState.getAll();
     var axisModel = modelForUnreadNormalFilter(state.model, readMap);
-    var dailyView = buildDailyCalendarTagView(axisModel, state.activeDailyDate, state.activeDailyTag, readMap, state.activeDailyMonth);
+    ['daily', 'backtrack'].forEach(function (panel) {
+      var dailyView = buildDailyPanelView(axisModel, panel, state, readMap);
+      state[dailyPanelField(panel, 'Date')] = dailyView.activeDateKey || '';
+      state[dailyPanelField(panel, 'Month')] = dailyView.calendar && dailyView.calendar.monthKey || monthKeyFromDateKey(dailyView.activeDateKey) || '';
+      state[dailyPanelField(panel, 'Tag')] = dailyView.activeKey;
+    });
     var confView = buildConferenceConfView(axisModel, state.activeConference, readMap);
     var confTag = buildConferenceTagView(axisModel, state.activeConferenceTag, readMap);
-    state.activeDailyDate = dailyView.activeDateKey || '';
-    state.activeDailyMonth = dailyView.calendar && dailyView.calendar.monthKey || monthKeyFromDateKey(dailyView.activeDateKey) || '';
-    state.activeDailyTag = dailyView.activeKey;
     state.activeConference = confView.activeKey;
     state.activeConferenceTag = confTag.activeKey;
   }
@@ -1849,7 +2098,7 @@
     var resultClass = opts.view && opts.view.resultMode ? ' is-result-mode' : '';
     var axisMode = opts.view && opts.view.resultMode ? 'results' : opts.mode;
     var isDailyNormal = opts.group === 'daily' && !(opts.view && opts.view.resultMode);
-    var hasHeaderAxisToggle = !(opts.view && opts.view.resultMode) && (opts.group === 'daily' || opts.group === 'conference');
+    var hasHeaderAxisToggle = !(opts.view && opts.view.resultMode) && (isDailyNormal || opts.group === 'conference');
     var calendarPlacement = opts.dailyCalendarPlacement === 'bottom' ? 'bottom' : 'top';
     var totalCount = typeof opts.totalCount === 'number' ? opts.totalCount : countPapersInView(opts.view);
     var unreadCount = typeof opts.unreadCount === 'number' ? opts.unreadCount : 0;
@@ -1871,14 +2120,21 @@
       html.push('  </button>');
     }
     html.push('  <div class="dpr-sidebar-panel-content">');
+    if (opts.group === 'backtrack' && opts.starterPacks && opts.starterPacks.length) {
+      html.push('<div class="dpr-sidebar-axis-row"><label>排序 <select data-topic-task-sort><option value="score"' + (opts.taskSort !== 'date' ? ' selected' : '') + '>相关性降序</option><option value="date"' + (opts.taskSort === 'date' ? ' selected' : '') + '>公布日期降序</option></select></label></div>');
+      html.push(renderStarterPackGuides(opts.starterPacks, opts));
+    }
     if (isDailyNormal) {
       if (calendarPlacement === 'top') {
         html.push(renderDailyCalendar(opts.view && opts.view.calendar, calendarPlacement));
-        html.push(renderAxisTabs('daily', 'tag', opts.view, opts.toggleLabel, { hideToggle: true, rowClass: 'dpr-sidebar-daily-tabs-row' }));
+        html.push(renderAxisTabs(opts.group, 'tag', opts.view, opts.toggleLabel, { hideToggle: true, rowClass: 'dpr-sidebar-daily-tabs-row' }));
       } else {
-        html.push(renderAxisTabs('daily', 'tag', opts.view, opts.toggleLabel, { hideToggle: true, rowClass: 'dpr-sidebar-daily-tabs-row' }));
+        html.push(renderAxisTabs(opts.group, 'tag', opts.view, opts.toggleLabel, { hideToggle: true, rowClass: 'dpr-sidebar-daily-tabs-row' }));
         html.push(renderDailyCalendar(opts.view && opts.view.calendar, calendarPlacement));
       }
+    } else if (opts.group === 'backtrack') {
+      // 回溯按标签展示所有区间分组，不使用日历，也不保留无用途的日历换位按钮。
+      html.push(renderAxisTabs(opts.group, opts.mode, opts.view, '', { hideToggle: true, rowClass: 'dpr-sidebar-daily-tabs-row' }));
     } else if (hasHeaderAxisToggle) {
       html.push(renderAxisTabs(opts.group, opts.mode, opts.view, opts.toggleLabel, { hideToggle: true }));
     } else {
@@ -1971,9 +2227,10 @@
       html.push('<section class="dpr-sidebar-axis-section' + sectionClass + expandedClass + activeSectionClass + '" data-axis-section="' + safeAttr(item.key) + '" data-axis-section-key="' + safeAttr(stateKey) + '">');
       html.push('  <button type="button" class="dpr-sidebar-axis-section-header" data-axis-section-toggle="' + safeAttr(stateKey) + '" aria-expanded="' + (isExpanded ? 'true' : 'false') + '" data-unread="' + unreadFlag + '">');
       html.push('    <span class="dpr-sidebar-day-arrow" aria-hidden="true">▸</span>');
-      html.push('    <span class="dpr-sidebar-axis-section-label">' + safeText(item.label) + ' <span class="dpr-sidebar-day-counts"><span class="dpr-sidebar-day-unread">' + safeText(unread) + '</span>/<span class="dpr-sidebar-day-total">' + safeText((item.papers || []).length) + '</span></span></span>');
+      html.push('    <span class="dpr-sidebar-axis-section-label"' + (item.labelTitle ? ' title="' + safeAttr(item.labelTitle) + '"' : '') + '>' + safeText(item.label) + ' <span class="dpr-sidebar-day-counts"><span class="dpr-sidebar-day-unread">' + safeText(unread) + '</span>/<span class="dpr-sidebar-day-total">' + safeText((item.papers || []).length) + '</span></span></span>');
       html.push('  </button>');
       html.push('  <ul class="dpr-sidebar-axis-papers">');
+      if (item.taskNavigation) html.push('<li class="dpr-topic-task-navigation">' + item.taskNavigation + '</li>');
       (item.papers || []).forEach(function (paper) {
         html.push(renderPaper(paper, readMap, currentPaperId));
       });
@@ -1999,6 +2256,8 @@
     ].join(' ');
     var stars = starHtmlFromScore(p.score);
     var tagBits = tagsHtml(p.tags);
+    var publication = p.section === 'conference' || p.section === 'backtrack'
+      ? '<span class="dpr-sidebar-paper-publication" title="' + safeAttr(p.publication_date_source || '无可靠的具体公布日期') + '">' + safeText(publicationDateLabel(p)) + '</span>' : '';
     var evidence = p.evidence
       ? '<div class="dpr-sidebar-paper-evidence">' + safeText(p.evidence) + '</div>'
       : '';
@@ -2016,7 +2275,7 @@
       '    <a class="dpr-sidebar-paper-link" href="' + safeAttr(p.href) + '">' +
       '      <span class="dpr-sidebar-paper-title">' + safeText(p.title) + '</span>' +
       evidence +
-      '      <span class="dpr-sidebar-paper-meta">' + stars + (tagBits ? '<span class="dpr-sidebar-paper-tags">' + tagBits + '</span>' : '') + '</span>' +
+      '      <span class="dpr-sidebar-paper-meta">' + stars + publication + (tagBits ? '<span class="dpr-sidebar-paper-tags">' + tagBits + '</span>' : '') + '</span>' +
       '    </a>' +
       '    <div class="dpr-sidebar-paper-actions" aria-label="论文标记">' + actions + '</div>' +
       '  </div>' +
@@ -2044,10 +2303,14 @@
       var unreadEl = header && $('.dpr-sidebar-day-unread', header);
       var papers = $$('.dpr-sidebar-paper', panel);
       var unread = 0;
+      var panelRoutes = new Set();
       papers.forEach(function (li) {
+        var route = li.getAttribute('data-href') || li.getAttribute('data-paper-id');
+        if (panelRoutes.has(route)) return;
+        panelRoutes.add(route);
         if (li.getAttribute('data-read') === '0') unread += 1;
       });
-      var counts = { papers: papers.length, unread: unread };
+      var counts = { papers: panelRoutes.size, unread: unread };
       if (totalEl) totalEl.textContent = String(counts.papers);
       if (unreadEl) unreadEl.textContent = String(counts.unread);
       if (counts.unread === 0) {
@@ -2265,6 +2528,11 @@
 
   // ---------- 事件 ----------
   function bindEvents(root) {
+    root.addEventListener('change', function (e) {
+      if (!e.target.matches || !e.target.matches('[data-topic-task-sort]')) return;
+      state.taskSort = e.target.value === 'date' ? 'date' : 'score';
+      rerenderSidebarBody(rerenderOptionsForAxisControlClick());
+    });
     // 工具栏：筛选
     root.addEventListener('click', function (e) {
       var fbtn = e.target.closest('.dpr-sidebar-filter-btn');
@@ -2336,8 +2604,8 @@
       if (calendarNav) {
         var navMonth = normalizeMonthKey(calendarNav.getAttribute('data-calendar-nav') || '');
         if (navMonth) {
-          state.dailyViewMode = 'date';
-          state.activeDailyMonth = navMonth;
+          var navPanel = calendarNav.closest('[data-panel]').getAttribute('data-panel');
+          state[dailyPanelField(navPanel, 'Month')] = navMonth;
           rerenderSidebarBody(rerenderOptionsForAxisControlClick());
         }
         return;
@@ -2347,10 +2615,10 @@
         if (calendarDay.disabled || calendarDay.getAttribute('aria-disabled') === 'true') return;
         var calendarDate = calendarDay.getAttribute('data-calendar-date') || '';
         if (calendarDate) {
-          state.dailyViewMode = 'date';
-          state.activeDailyDate = calendarDate;
-          state.activeDailyMonth = monthKeyFromDateKey(calendarDate) || state.activeDailyMonth;
-          expandCurrentDailyAxisSection(ReadState.getAll());
+          var datePanel = calendarDay.closest('[data-panel]').getAttribute('data-panel');
+          state[dailyPanelField(datePanel, 'Date')] = calendarDate;
+          state[dailyPanelField(datePanel, 'Month')] = monthKeyFromDateKey(calendarDate);
+          expandCurrentDailyAxisSection(ReadState.getAll(), datePanel);
           persistCollapse();
           rerenderSidebarBody(rerenderOptionsForAxisControlClick());
         }
@@ -2360,15 +2628,15 @@
       if (axisTab) {
         var tabGroup = axisTab.getAttribute('data-axis-tab');
         var tabKey = axisTab.getAttribute('data-axis-key') || '';
-        if (tabGroup === 'daily') {
+        if (tabGroup === 'daily' || tabGroup === 'backtrack') {
           var dailyAxisRow = axisTab.closest('.dpr-sidebar-axis-row');
           var dailyAxisMode = dailyAxisRow && dailyAxisRow.getAttribute('data-axis-mode') || '';
-          if (dailyAxisMode === 'tag') state.activeDailyTag = tabKey;
+          if (dailyAxisMode === 'tag') state[dailyPanelField(tabGroup, 'Tag')] = tabKey;
           else {
-            state.activeDailyDate = tabKey;
-            state.activeDailyMonth = monthKeyFromDateKey(tabKey) || state.activeDailyMonth;
+            state[dailyPanelField(tabGroup, 'Date')] = tabKey;
+            state[dailyPanelField(tabGroup, 'Month')] = monthKeyFromDateKey(tabKey);
           }
-          expandCurrentDailyAxisSection(ReadState.getAll());
+          expandCurrentDailyAxisSection(ReadState.getAll(), tabGroup);
           persistCollapse();
         } else if (tabGroup === 'conference') {
           if (state.conferenceViewMode === 'tag') state.activeConferenceTag = tabKey;
@@ -2506,13 +2774,25 @@
   }
 
   function loadAndRender() {
+    // 静态日期表故障不能拖住既有侧栏；超时后保持明确标注的年份级回退。
+    function optionalIndex(url) {
+      return new Promise(function (resolve) {
+        var timeout = setTimeout(function () { resolve({}); }, 4000);
+        fetch(url, { cache: 'no-cache' })
+          .then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; })
+          .then(function (data) { clearTimeout(timeout); resolve(data); });
+      });
+    }
+    var releaseDates = optionalIndex('app/conference-release-dates.json');
+    var starterPacks = optionalIndex('docs/starter-pack/index.json');
     return fetch(SIDEBAR_URL, { cache: 'no-store' })
       .then(function (r) {
         if (!r.ok) throw new Error('sidebar HTTP ' + r.status);
-        return r.text();
+        return Promise.all([r.text(), releaseDates, starterPacks]);
       })
-      .then(function (text) {
-        state.model = parseSidebar(text);
+      .then(function (values) {
+        state.model = applyConferencePublicationDates(parseSidebar(values[0]), values[1]);
+        state.model.starterPacks = parseStarterPackIndex(values[2]);
         state.lastFetchAt = Date.now();
         determineInitialExpansion();
         if (!state.rootEl) {
@@ -2586,6 +2866,11 @@
       api: DPRSidebarApi,
       __test: {
         parseSidebar: parseSidebar,
+        parseStarterPackIndex: parseStarterPackIndex,
+        sortedTaskPapers: sortedTaskPapers,
+        applyConferencePublicationDates: applyConferencePublicationDates,
+        publicationDateLabel: publicationDateLabel,
+        isBacktrackDateKey: isBacktrackDateKey,
         collectPaperHrefsFromModel: collectPaperHrefsFromModel,
         collectReportHrefsFromModel: collectReportHrefsFromModel,
         findCurrentPaperHrefFromModel: findCurrentPaperHrefFromModel,

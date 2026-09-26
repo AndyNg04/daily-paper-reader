@@ -624,6 +624,7 @@ def generate_glance_overview(
     abstract: str,
     max_retries: int = 3,
     client: DeepSeekClient | None = None,
+    sidebar_context: List[str] | None = None,
 ) -> str | None:
     """
     生成论文速览（包含 TLDR、Motivation、Method、Result、Conclusion）。
@@ -659,6 +660,15 @@ def generate_glance_overview(
         "required": ["tldr", "motivation", "method", "result", "conclusion"],
         "additionalProperties": False,
     }
+    if sidebar_context is not None:
+        payload['topics'] = sidebar_context
+        user_text = json.dumps(payload, ensure_ascii=False)
+        user_prompt += (
+            '\n同时输出 evidence 字段：参照日常论文列表，用15–40字的中文短语概括论文内容与专题的联系，'
+            '不写“标题摘要表明”“所以给几分”等评审过程，不重新评分；邻近或待复核论文不得说成直接解决专题。'
+        )
+        schema['properties']['evidence'] = {'type': 'string'}
+        schema['required'].append('evidence')
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -686,6 +696,9 @@ def generate_glance_overview(
             conclusion = str(obj.get("conclusion") or "").strip()
             if not (tldr and motivation and method and result and conclusion):
                 continue
+            evidence = str(obj.get('evidence') or '').strip()
+            if sidebar_context is not None and not evidence:
+                continue
             return "\n".join(
                 [
                     f"**TLDR**：{ensure_single_sentence_end(tldr)} \\",
@@ -693,7 +706,7 @@ def generate_glance_overview(
                     f"**Method**：{ensure_single_sentence_end(method)} \\",
                     f"**Result**：{ensure_single_sentence_end(result)} \\",
                     f"**Conclusion**：{ensure_single_sentence_end(conclusion)}",
-                ]
+                ] + ([f'**Evidence**：{evidence}'] if evidence else [])
             )
         except Exception as e:
             # 额度不足等“硬失败”不必重试，直接降级
@@ -1430,22 +1443,59 @@ def merge_daily_run_results(
     return state, merged_deep, merged_quick, merged_evidence, state_file
 
 
+class PaperFulltextUnavailable(ValueError):
+    """官方已撤回且无法下载的版本，不是可重试的转换故障。"""
+
+
+def is_usable_paper_text(text: str) -> bool:
+    """基本质量门：拒绝空缓存、短错误提示和代理返回的HTML/JSON错误页。"""
+    value = str(text or "").strip()
+    if len(value) < 1200:
+        return False
+    head = value[:1000].lower()
+    if re.search(r"warning: target url returned error|has been withdrawn and is unavailable", head):
+        return False
+    if re.search(r"<!doctype\s+html|<html\b|<body\b", head):
+        return False
+    if value.startswith(("{", "[")) and re.search(r'"(?:error|message|status)"\s*:', head):
+        return False
+    if re.match(r"(?:error|access denied|service unavailable|rate limit|upstream error)\b", head):
+        return False
+    return True
+
+
 def ensure_text_content(pdf_url: str, txt_path: str) -> str:
     if os.path.exists(txt_path):
         with open(txt_path, "r", encoding="utf-8") as f:
-            return f.read()
+            cached = f.read()
+        if is_usable_paper_text(cached):
+            return cached
     text_content = fetch_paper_markdown_via_jina(pdf_url)
-    if text_content is None and pdf_url:
+    if not is_usable_paper_text(text_content) and pdf_url:
         resp = requests.get(pdf_url, timeout=60)
+        if resp.status_code == 404 and 'has been withdrawn and is unavailable' in str(text_content or '').lower():
+            raise PaperFulltextUnavailable("该arXiv版本已撤回，官方PDF不可下载")
         resp.raise_for_status()
+        if not resp.content.lstrip().startswith(b"%PDF-"):
+            raise ValueError("全文下载未返回有效PDF，拒绝将错误页保存为论文全文")
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=True) as tmp_pdf:
             tmp_pdf.write(resp.content)
             tmp_pdf.flush()
             text_content = extract_pdf_text(tmp_pdf.name)
-    os.makedirs(os.path.dirname(txt_path), exist_ok=True)
-    with open(txt_path, "w", encoding="utf-8") as f:
-        f.write(text_content or "")
-    return text_content or ""
+    if not is_usable_paper_text(text_content):
+        raise ValueError("论文全文抽取为空或不完整，未发布全文文件")
+    directory = os.path.dirname(txt_path) or "."
+    os.makedirs(directory, exist_ok=True)
+    temporary = ""
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=directory, delete=False) as f:
+            temporary = f.name
+            f.write(text_content)
+        os.replace(temporary, txt_path)
+    finally:
+        if temporary and os.path.exists(temporary):
+            os.unlink(temporary)
+    return text_content
 
 
 def yaml_escape_value(s: str) -> str:
@@ -1658,6 +1708,77 @@ def build_tags_list(section: str, llm_tags: List[str]) -> List[str]:
     return tags
 
 
+def ensure_reading_content(paper, section, md_path, txt_path, client, *, require_complete=False, force_glance=False):
+    """日常与回溯共用的现代元数据页补齐：保留正文，逐阶段保存，只生成缺失内容。"""
+    with open(md_path, encoding='utf-8') as handle:
+        text = handle.read()
+    meta = _parse_front_matter(text)
+
+    def persist():
+        nonlocal meta
+        with tempfile.NamedTemporaryFile('w', dir=os.path.dirname(md_path), encoding='utf-8', delete=False) as handle:
+            handle.write(text)
+            temporary = handle.name
+        os.replace(temporary, md_path)
+        meta = _parse_front_matter(text)
+
+    def field(key, value):
+        nonlocal text
+        text, _ = upsert_front_matter_field(text, key, yaml_escape_value(str(value)))
+
+    if not meta.get('title_zh') or '## 摘要' not in text:
+        title_zh, abstract_zh = translate_title_and_abstract_to_zh(
+            paper.get('title', ''), paper.get('abstract', ''), client=client)
+        if title_zh and not meta.get('title_zh'):
+            field('title_zh', title_zh)
+        if abstract_zh and '## 摘要' not in text:
+            position = text.find('## Abstract')
+            block = f'## 摘要\n{abstract_zh}\n\n'
+            text = text[:position] + block + text[position:] if position >= 0 else text.rstrip() + '\n\n' + block
+        persist()
+
+    keys = ('tldr', 'motivation', 'method', 'result', 'conclusion')
+    needs_evidence = paper.get('selection_source') == 'long-range' and not meta.get('reading_content_version')
+    if force_glance or needs_evidence or any(not meta.get(key) for key in keys):
+        overview = generate_glance_overview(
+            paper.get('title', ''), paper.get('abstract', ''), client=client,
+            sidebar_context=paper.get('llm_tags', []) if needs_evidence else None)
+        parsed = {}
+        for line in (overview or '').splitlines():
+            match = re.match(r'^\*\*(TLDR|Motivation|Method|Result|Conclusion|Evidence)\*\*[：:]\s*(.*)', line)
+            if match:
+                parsed[match[1].lower()] = match[2].rstrip(' \\').strip()
+        for key in keys:
+            if parsed.get(key) and (force_glance or not meta.get(key)):
+                field(key, parsed[key])
+        if needs_evidence and parsed.get('evidence'):
+            field('evidence', parsed['evidence'])
+            field('reading_content_version', '1')
+        persist()
+    missing = [key for key in ('title_zh',) + keys if not meta.get(key)]
+    if '## 摘要' not in text:
+        missing.append('abstract_zh')
+    if needs_evidence and not meta.get('reading_content_version'):
+        missing.append('sidebar_evidence')
+    if missing and require_complete:
+        raise RuntimeError('论文内容未生成完整：' + ', '.join(missing))
+
+    if section == 'deep' and not extract_section_tail(text, '论文详细总结（自动生成）'):
+        ensure_text_content(paper.get('pdf_url') or paper.get('link') or '', txt_path)
+        summary = generate_deep_summary(md_path, txt_path, client=client)
+        if not summary or '（完）' not in summary:
+            if require_complete:
+                raise RuntimeError('论文精读总结未完整生成')
+        if summary:
+            upsert_auto_block(md_path, '论文详细总结（自动生成）', summary)
+            with open(md_path, encoding='utf-8') as handle:
+                text = handle.read()
+    field('reading_section', section)
+    persist()
+    paper['canonical_evidence'] = meta.get('evidence') or paper.get('canonical_evidence', '')
+    return meta
+
+
 def process_paper(
     paper: Dict[str, Any],
     section: str,
@@ -1665,13 +1786,23 @@ def process_paper(
     docs_dir: str,
     glance_only: bool = False,
     force_glance: bool = False,
+    route: str | None = None,
+    require_complete: bool = False,
 ) -> Tuple[str, str]:
     title = (paper.get("title") or "").strip()
     arxiv_id = str(paper.get("id") or paper.get("paper_id") or "").strip()
     md_path, txt_path, paper_id = prepare_paper_paths(docs_dir, date_str, title, arxiv_id)
+    if route is not None:
+        if not re.fullmatch(r'\d{8}-\d{8}/[A-Za-z0-9][A-Za-z0-9._-]{0,120}', route):
+            raise ValueError('无效论文阅读路由')
+        paper_id = route
+        md_path = os.path.join(docs_dir, route + '.md')
+        txt_path = os.path.join(docs_dir, route + '.txt')
     abstract_en = (paper.get("abstract") or "").strip()
     pdf_url = str(paper.get("pdf_url") or paper.get("link") or "").strip()
     paper_llm_client = create_llm_client()
+    if paper_llm_client is not None and paper.get('selection_source') == 'long-range':
+        paper_llm_client.kwargs['thinking'] = {'type': 'disabled'}
 
     glance = ""
 
@@ -1693,7 +1824,7 @@ def process_paper(
         existing_meta = _parse_front_matter(existing)
         has_figures_json = bool(str(existing_meta.get("figures_json") or "").strip()) if existing_meta else False
         has_tables_json = bool(str(existing_meta.get("tables_json") or "").strip()) if existing_meta else False
-        if not has_figures_json or not has_tables_json:
+        if (not has_figures_json or not has_tables_json) and not existing_meta.get('paper_media_checked'):
             figures, tables = maybe_generate_paper_media(
                 paper,
                 docs_dir=docs_dir,
@@ -1722,6 +1853,14 @@ def process_paper(
                     with open(md_path, "w", encoding="utf-8") as f:
                         f.write(updated + ("\n" if not updated.endswith("\n") else ""))
                     existing = updated
+
+        if existing_meta:
+            existing, _ = upsert_front_matter_field(existing, 'paper_media_checked', 'true')
+            with open(md_path, 'w', encoding='utf-8') as handle:
+                handle.write(existing)
+            ensure_reading_content(paper, 'quick' if glance_only else section, md_path, txt_path,
+                                   paper_llm_client, require_complete=require_complete, force_glance=force_glance)
+            return paper_id, title
 
         # 修复模式：若自动总结/速览存在“被截断”的迹象，则仅重生成该段落，不改动前面正文
         # 若已存在 Markdown，但缺少中文标题/中文摘要，则在“重新跑 Step6”时自动补齐
@@ -2032,7 +2171,7 @@ def update_sidebar(
     if day_idx != -1:
         end = day_idx + 1
         while end < len(lines):
-            if lines[end].startswith("  * ") and not lines[end].startswith("    * "):
+            if lines[end].startswith("* ") or (lines[end].startswith("  * ") and not lines[end].startswith("    * ")):
                 break
             end += 1
         existing_deep_lines, existing_quick_lines = _extract_day_block_papers(
