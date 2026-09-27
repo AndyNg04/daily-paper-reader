@@ -41,17 +41,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-09-26</span>
+      <span class="dpr-home-dashboard-kicker">2026-08-29 ~ 2026-09-27</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 15 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 27 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>5</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>10</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>11</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>16</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-09-26 21:51:45 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-09-27 01:12:18 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -62,9 +62,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今天共筛出 15 篇论文，精读 5 篇、速读 10 篇，重点集中在 AI 对话界面的&quot;疲劳抗性&quot;与无障碍交互。</p>
-<p>最值得看的是两篇 8.0 分精读：《RecalibrateGPT》提出对&quot;AI 疲劳&quot;更耐受的对话界面设计，《Are We There Yet?》则实测计算机使用型智能体能否让盲用户顺利操作桌面应用。</p>
-<p>普通读者可先读这两篇精读，再按兴趣浏览速读中关于 AI 智能体影响群体共识、人机团队认知耦合与生成式 AI 创作主体性的讨论。</p>
+<p>本期日报精选27篇AI论文，精读11篇、速读16篇，聚焦AI心理健康的可扩展监督与情感监测。</p>
+<p>最值得关注的是两篇9.0分精读：基于微眼动动态的情感监测智能决策系统，以及从35万次AI治疗间隙辅导对话中提炼的心理健康AI监督经验；速读中多智能体强化学习在线变点检测与金融预测的上下文增强LLM也值得一看。</p>
+<p>普通读者可优先了解AI心理健康监督的边界与落地经验，再顺带关注多智能体协作与金融预测的实用方法。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -73,12 +73,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">5 篇</strong>
+    <strong class="dpr-home-dashboard-count">11 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="RecalibrateGPT: AI Fatigue Resilient Conversational Interfaces">RecalibrateGPT: AI Fatigue Resilient Conversational Interfaces</span></li><li><span class="dpr-home-dashboard-paper-title" title="Are We There Yet? Assessing Computer-Use Agents for Blind Users&#x27; Accessible Interaction with Desktop Applications">Are We There Yet? Assessing Computer-Use Agents for Blind Users&#x27; Accessible Interaction with Desktop Applications</span></li><li><span class="dpr-home-dashboard-paper-title" title="GPS-Bench: A Governance Policy Benchmark for Automating Policy Analysis">GPS-Bench: A Governance Policy Benchmark for Automating Policy Analysis</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="An Intelligent Decision Support System for Emotion Monitoring using Microscopic Fixational Dynamics">An Intelligent Decision Support System for Emotion Monitoring using Microscopic Fixational Dynamics</span></li><li><span class="dpr-home-dashboard-paper-title" title="Scalable Oversight for AI in Mental Health: Lessons from 350,000 AI Coaching Conversations between Therapy Sessions">Scalable Oversight for AI in Mental Health: Lessons from 350,000 AI Coaching Conversations between Therapy Sessions</span></li><li><span class="dpr-home-dashboard-paper-title" title="SocialRL: Refining LLMs&#x27; Social Intelligence through Multi-turn Reinforcement Learning and Reward Design">SocialRL: Refining LLMs&#x27; Social Intelligence through Multi-turn Reinforcement Learning and Reward Design</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>6</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>4</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -86,12 +86,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">10 篇</strong>
+    <strong class="dpr-home-dashboard-count">16 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="AI agents reshape consensus formation in human groups">AI agents reshape consensus formation in human groups</span></li><li><span class="dpr-home-dashboard-paper-title" title="An Agent Model Abstraction for Human-AI Teaming Cognitive Coupling">An Agent Model Abstraction for Human-AI Teaming Cognitive Coupling</span></li><li><span class="dpr-home-dashboard-paper-title" title="Where Does the Human End? Creative Agency with Generative AI across Five Years of Chinese Digital Painting">Where Does the Human End? Creative Agency with Generative AI across Five Years of Chinese Digital Painting</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Online Change-point Detection for Cooperative Multi-Agent Reinforcement Learning">Online Change-point Detection for Cooperative Multi-Agent Reinforcement Learning</span></li><li><span class="dpr-home-dashboard-paper-title" title="Certifying cooperation: a novel approach to cooperative multi-agent task generation">Certifying cooperation: a novel approach to cooperative multi-agent task generation</span></li><li><span class="dpr-home-dashboard-paper-title" title="Making Alternative Data Work: Context-Augmented LLMs for Financial Forecasting">Making Alternative Data Work: Context-Augmented LLMs for Financial Forecasting</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>10</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>7</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>3</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span><span class="dpr-home-dashboard-tag">ba <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
 </section>
 </div>
 
