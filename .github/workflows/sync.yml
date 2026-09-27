@@ -4,33 +4,33 @@ permissions:
   contents: write # 必须有写权限才能合并代码
 
 on:
-  schedule:
-    - cron: "0 0 * * *" # 每天 UTC 0点（北京时间早8点）检查更新
   workflow_dispatch: # 允许用户手动点击触发
+  workflow_call: # 由 upstream-sync-schedule.yml 定时调用
 
-concurrency:
-  group: upstream-sync
-  cancel-in-progress: false
+env:
+  UPSTREAM_REPO: ziwenhahaha/daily-paper-reader
+  UPSTREAM_BRANCH: main
+  # 上次成功同步的上游提交记录在这里；它是下一次三方合并的 base。
+  SYNC_STATE_FILE: .github/upstream-sync-state.json
 
 jobs:
   sync_latest_from_upstream:
     name: Sync latest commits from upstream repo
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 30
+    if: github.repository != 'ziwenhahaha/daily-paper-reader' # 只有 Fork 的仓库才运行
+    concurrency:
+      group: upstream-sync
+      cancel-in-progress: false
 
     steps:
-      - name: Random delay to spread scheduled runs
-        if: github.event_name == 'schedule'
-        run: |
-          DELAY=$(shuf -i 0-3599 -n 1)
-          echo "Sleeping ${DELAY}s (≈$((DELAY/60))min) to stagger scheduled runs over 1 hour …"
-          sleep $DELAY
-
-      # 1. 检出用户仓库的代码
+      # 1. 检出用户仓库的代码。默认使用 GITHUB_TOKEN；如果配置了带 workflow 权限的
+      #    PAT（secrets.UPSTREAM_SYNC_TOKEN），上游的 workflow 文件改动也会一并同步。
       - name: Checkout target repo
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
 
       # 2. 配置 .gitattributes 中的 merge=ours 驱动，用于保护用户运行态文件
       - name: Configure git
@@ -39,46 +39,109 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config merge.ours.driver true
 
-      # 3. 不依赖 GitHub fork 关系，直接从显式上游仓库拉取并合并
+      # 3. 不依赖 GitHub fork 关系，直接从显式上游仓库拉取并合并。
+      #
+      #    GITHUB_TOKEN 不能推送修改 .github/workflows/ 的提交，所以这里不推送真正的
+      #    merge commit（它的第二个父提交会带上上游的 workflow 改动），而是把合并结果
+      #    压成一个普通提交。普通提交只有一个父提交，git 自己算出的 merge-base 会一直
+      #    停在最后一次真正的 merge 上，之后每天都会对上游改过的文件重复报冲突。因此
+      #    这里把每次同步到的上游提交记录到 SYNC_STATE_FILE，下一次用它做三方合并的
+      #    base（git merge-tree --merge-base）。
       - name: Merge upstream changes
+        env:
+          KEEP_FORK_WORKFLOWS: ${{ secrets.UPSTREAM_SYNC_TOKEN == '' }}
         run: |
           set -euo pipefail
 
           branch="${GITHUB_REF_NAME:-main}"
-          upstream_repo="https://github.com/ziwenhahaha/daily-paper-reader.git"
+          upstream_url="https://github.com/${UPSTREAM_REPO}.git"
 
           git remote remove upstream 2>/dev/null || true
-          git remote add upstream "$upstream_repo"
+          git remote add upstream "$upstream_url"
+          git fetch --no-tags origin "$branch"
+          git fetch --no-tags upstream "$UPSTREAM_BRANCH"
 
-          git fetch origin "$branch"
-          git fetch upstream main
+          git checkout -q "$branch"
+          git reset -q --hard "origin/$branch"
+          head_sha="$(git rev-parse HEAD)"
+          upstream_sha="$(git rev-parse "upstream/$UPSTREAM_BRANCH")"
 
-          git checkout "$branch"
-          target_sha="$(git rev-parse HEAD)"
-          if ! git merge --no-ff --no-edit --no-commit upstream/main; then
-            echo "::error::Upstream merge failed; unresolved files:"
-            git status --short
-            git diff --name-only --diff-filter=U
-            git merge --abort || true
-            exit 1
+          # 解析三方合并的 base：优先使用上次记录的上游提交，否则退回 git merge-base。
+          base=""
+          if [ -f "$SYNC_STATE_FILE" ]; then
+            base="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("upstream_sha", ""))' "$SYNC_STATE_FILE")"
+          fi
+          if [ -n "$base" ] && git cat-file -e "${base}^{commit}" 2>/dev/null \
+             && git merge-base --is-ancestor "$base" "$upstream_sha"; then
+            echo "Using recorded upstream base: $base"
+          else
+            base="$(git merge-base HEAD "$upstream_sha")"
+            echo "No usable recorded base; falling back to git merge-base: $base"
           fi
 
-          # Keep fork-specific metadata and workflows. GITHUB_TOKEN may push
-          # ordinary files, but GitHub rejects workflow-file updates.
-          git restore --source="$target_sha" -- .gitattributes .github/workflows
-          git add -A -- .gitattributes .github/workflows
+          if [ "$base" = "$upstream_sha" ]; then
+            echo "Already up to date with upstream ($upstream_sha)."
+            exit 0
+          fi
 
-          # Do not push a merge commit whose second parent contains workflow
-          # changes; GitHub validates all commits introduced by the push.
+          echo "Merging upstream ${base}..${upstream_sha} into ${head_sha}"
+          set +e
+          merge_output="$(git merge-tree --write-tree --name-only --merge-base="$base" HEAD "$upstream_sha")"
+          merge_status=$?
+          set -e
+          if [ "$merge_status" -ne 0 ]; then
+            echo "::error::Upstream merge failed; unresolved files:"
+            printf '%s\n' "$merge_output" | sed -n '2,/^$/p'
+            exit 1
+          fi
+          merged_tree="${merge_output%%$'\n'*}"
+
+          # 把合并结果写入索引和工作区。
+          git read-tree --reset -u "$merged_tree"
+
+          # 没有 PAT 时 GITHUB_TOKEN 不能推送 workflow 文件改动：保留 fork 现有的
+          # workflow 文件，并提示哪些上游 workflow 发生了变化需要手动跟进。
+          if [ "$KEEP_FORK_WORKFLOWS" = "true" ]; then
+            git restore --source=HEAD --staged --worktree -- .github/workflows
+            # 只提示「上游本次改过、且与 fork 当前版本不同」的 workflow，避免重复噪音。
+            changed_workflows=""
+            while IFS= read -r wf; do
+              [ -n "$wf" ] || continue
+              if [ "$(git rev-parse -q --verify "HEAD:$wf" || true)" != "$(git rev-parse -q --verify "$upstream_sha:$wf" || true)" ]; then
+                changed_workflows="${changed_workflows}${wf}"$'\n'
+              fi
+            done < <(git diff --name-only "$base" "$upstream_sha" -- .github/workflows)
+            if [ -n "$changed_workflows" ]; then
+              echo "::warning::Upstream changed workflow files that GITHUB_TOKEN cannot push; review them manually or set secrets.UPSTREAM_SYNC_TOKEN:"
+              printf '%s' "$changed_workflows"
+            fi
+          fi
+
+          # 记录本次同步到的上游提交，供下一次合并作为 base。
+          python3 - "$SYNC_STATE_FILE" "$UPSTREAM_REPO" "$UPSTREAM_BRANCH" "$upstream_sha" <<'PY'
+          import json, sys
+          from datetime import datetime, timezone
+          path, repo, branch, sha = sys.argv[1:5]
+          state = {
+              "upstream_repo": repo,
+              "upstream_branch": branch,
+              "upstream_sha": sha,
+              "synced_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+          }
+          with open(path, "w", encoding="utf-8") as fh:
+              json.dump(state, fh, ensure_ascii=False, indent=2)
+              fh.write("\n")
+          PY
+          git add -- "$SYNC_STATE_FILE"
+
           if git diff --cached --quiet; then
-            git merge --quit || true
             echo "No upstream changes to sync."
             exit 0
           fi
-          git merge --quit || true
-          git reset --soft "$target_sha"
-          git commit -m "chore: sync upstream changes"
+
+          git commit -q -m "chore: sync upstream ${UPSTREAM_REPO}@${upstream_sha:0:12}"
           git push origin "HEAD:$branch"
+          echo "Synced upstream ${upstream_sha} into ${branch}."
 
       # 4. 如果同步失败（比如有冲突），补充诊断信息；上一步已负责失败退出
       - name: Sync check

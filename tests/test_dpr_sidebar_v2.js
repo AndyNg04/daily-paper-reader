@@ -43,7 +43,7 @@ function setupBrowserStub(hash) {
           text = decodeEntities(value).replace(/<[^>]*>/g, '');
         },
         get innerHTML() {
-          return text;
+          return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
         },
         get textContent() {
           return text;
@@ -67,6 +67,178 @@ function loadSidebarForTest(hash) {
   setupBrowserStub(hash);
   delete require.cache[require.resolve('../app/dpr-sidebar.js')];
   return require('../app/dpr-sidebar.js');
+}
+
+// 公布日期必须有明确精度和出处；旧入库/更新时间不能冒充发表时间。
+{
+  const api = loadSidebarForTest().__test;
+  const model = { daily: [], conferences: [
+    { name: 'ICML', years: '2025', label: 'ICML 2025', topics: [{ label: 'ATSP', papers: [
+      { id: 'b', title: 'Beta', score: 8, published: '2025-01-01', updated: '2099-12-31' },
+      { id: 'a', title: 'Alpha', score: 9 },
+    ] }] },
+    { name: 'ACL', years: '2025', label: 'ACL 2025', topics: [] },
+  ] };
+  api.applyConferencePublicationDates(model, { items: [
+    { conference: 'ICML', year: 2025, publication_date: '2025-07-21', publication_date_precision: 'day', publication_date_source: 'https://official.test/icml', publication_date_kind: 'proceedings' },
+    { conference: 'ACL', year: 2025, publication_date: '2025-08', publication_date_precision: 'month', publication_date_source: 'https://official.test/acl', publication_date_kind: 'proceedings' },
+  ] });
+  assert.deepEqual(model.conferences.map(c => c.name), ['ACL', 'ICML']);
+  assert.deepEqual(model.conferences[1].topics[0].papers.map(p => p.id), ['a', 'b']);
+  assert.equal(api.publicationDateLabel(model.conferences[1].topics[0].papers[0]), '2025-07-21 · 论文集公布');
+  const old = { conferences: [{ name: 'SOSP', years: '2026', topics: [{ papers: [{ id: 'x', published: '2026-01-01', updated: '2099-01-01' }] }] }] };
+  api.applyConferencePublicationDates(old, {});
+  assert.equal(api.publicationDateLabel(old.conferences[0].topics[0].papers[0]), '2026 · 具体日期待确认');
+  const rows = [
+    { id: 'z', title: 'Zeta', score: 10, published: '2099-12-31', updated: '2099-12-31' },
+    { id: 'a', title: 'Alpha', score: 6, publication_date: '2025-11-03', publication_date_precision: 'day', publication_date_source: 'Official proceedings', publication_date_kind: 'proceedings' },
+    { id: 'c', title: 'Charlie', score: 9, publication_date: '2025-11-03', publication_date_precision: 'day', publication_date_source: 'Official proceedings', publication_date_kind: 'proceedings' },
+    { id: 'b', title: 'Beta', score: 9, publication_date: '2025-11-03', publication_date_precision: 'day', publication_date_source: 'Official proceedings', publication_date_kind: 'proceedings' },
+    { id: 'invalid', title: 'Invalid', score: 1, publication_date: '2025-02-30', publication_date_precision: 'day', publication_date_source: 'Official proceedings', publication_date_kind: 'proceedings' },
+  ];
+  const papers = { daily: [], conferences: [{ name: 'TEST', years: '2025', label: 'TEST 2025', topics: [{ label: 'ATSP', papers: rows }] }] };
+  rows.forEach(row => { row.section = 'conference'; row.href = '#/conference/test-2025/' + row.id; });
+  api.applyConferencePublicationDates(papers, {});
+  assert.deepEqual(papers.conferences[0].topics[0].papers.map(p => p.id), ['b', 'c', 'a', 'z', 'invalid']);
+  assert.equal(rows[4].publication_date_precision, 'year');
+  const html = api.renderBodyHtml(papers, { conferenceViewMode: 'conf', readMap: {} });
+  assert.ok(html.includes('2025-11-03 · 论文集公布'));
+  assert.ok(html.includes('2025 · 具体日期待确认'));
+  assert.ok(html.includes('aria-label="论文标记"'));
+  const mixed = { conferences: [{ name: 'ICML', years: '2024-2025', topics: [{ papers: [
+    { id: 'old', href: '#/conference/icml-2024/old' },
+    { id: 'new', href: '#/conference/icml-2025/new' },
+  ] }] }] };
+  api.applyConferencePublicationDates(mixed, { items: [
+    { conference: 'ICML', year: 2025, publication_date: '2025-10-06', publication_date_precision: 'day', publication_date_source: 'https://official.test', publication_date_kind: 'proceedings' },
+  ] });
+  assert.deepEqual(mixed.conferences[0].topics[0].papers.map(p => p.publication_date), ['2025-10-06', '2024']);
+  const mergedRoutes = { conferences: [{ name: 'ICML', years: '2024-2025', topics: [{ papers: [
+    { id: 'explicit', href: '#/conference/icml-2024-2025/explicit', publication_date: '2025', publication_date_precision: 'year' },
+    { id: 'unknown', href: '#/conference/icml-2024-2025/unknown' },
+    { id: 'no-route', href: '#/conference/icml/no-route' },
+  ] }] }] };
+  api.applyConferencePublicationDates(mergedRoutes, {});
+  const mergedPapers = Object.fromEntries(mergedRoutes.conferences[0].topics[0].papers.map(p => [p.id, p]));
+  assert.equal(mergedPapers.explicit.publication_date, '2025');
+  assert.equal(mergedPapers.unknown.publication_date_precision, 'unknown');
+  assert.equal(mergedPapers['no-route'].publication_date_precision, 'unknown');
+  api.applyConferencePublicationDates(mergedRoutes, { items: [
+    { conference: 'ICML', year: 2025, publication_date: '2025-10-06', publication_date_precision: 'day', publication_date_source: 'https://official.test', publication_date_kind: 'proceedings' },
+  ] });
+  assert.equal(mergedPapers.explicit.publication_date, '2025-10-06');
+  assert.equal(mergedPapers.unknown.publication_date_precision, 'unknown');
+  assert.equal(api.publicationDateLabel({ publication_date: '2026-09', publication_date_precision: 'month', publication_date_kind: 'accepted_notice' }), '2026-09 · 录用预告');
+}
+
+{
+  const api = loadSidebarForTest().__test;
+  const guides = api.parseStarterPackIndex({ version: 1, packs: [
+    { run_id: '20260911-abcdef123456', tag: 'ATSP', status: 'complete', paper_count: 12, href: 'https://evil.test' },
+    { run_id: '../unsafe', tag: 'bad', status: 'complete' },
+    { run_id: '20260911-abcdef123456', tag: 'duplicate' },
+    { run_id: '20260910-111111111111', tag: '<SR>', status: 'needs_resume' },
+  ] });
+  assert.equal(guides.length, 2);
+  assert.equal(guides[0].href, '#/starter-pack/20260911-abcdef123456/README');
+  const model = { daily: [], conferences: [], starterPacks: guides };
+  for (const state of [{}, { filter: 'unread' }]) {
+    const html = api.renderBodyHtml(model, state);
+    assert.ok(html.includes('专题回溯'));
+    assert.ok(html.includes('大礼包'));
+    assert.ok(html.includes('待续跑'));
+    assert.ok(html.includes('&lt;SR&gt;'));
+    assert.ok(html.includes(guides[0].href));
+    assert.ok(!html.includes('evil.test'));
+    assert.ok(!html.includes('target="_blank"'));
+    assert.ok(!html.includes('data-paper-id='));
+  }
+  assert.equal(api.collectPaperHrefsFromModel(model).length, 0);
+  assert.ok(api.collectReportHrefsFromModel(model).includes(guides[0].href));
+  assert.deepEqual(api.parseStarterPackIndex({}), []);
+  assert.ok(!api.renderBodyHtml({ daily: [], conferences: [] }, {}).includes('入门导读'));
+  const legacyHtml = api.renderBodyHtml(model, {});
+  assert.ok(!legacyHtml.includes('/papers.md'), '旧包不得编造新版导出文件');
+  assert.ok(!legacyHtml.includes('/catalog'), '旧包不得编造未知列表页');
+  const run = '20260912-111111111111';
+  const modern = api.parseStarterPackIndex({version: 1, packs: [{run_id: run, mode: '90',
+    export_path: `docs/starter-pack/${run}/papers.md`, selected_records: [
+      {route: 'saved/z', title: 'first selected', score: 8},
+      {route: 'saved/a', title: 'second selected', score: 8},
+    ]}]});
+  const modernHtml = api.renderBodyHtml({daily: [], conferences: [], starterPacks: modern}, {});
+  assert.ok(modernHtml.includes(`href="#/starter-pack/${run}/README">结果总览／导出清单</a>`));
+  assert.ok(modernHtml.includes(`href="#/starter-pack/${run}/catalog">论文列表</a>`));
+  assert.ok(modernHtml.indexOf('first selected') < modernHtml.indexOf('second selected'), '同分保持后端最终名单顺序');
+  const badExport = api.parseStarterPackIndex({version: 1, packs: [{run_id: run, export_path: 'https://evil.test/papers.md'}]});
+  assert.ok(!api.renderBodyHtml({daily: [], conferences: [], starterPacks: badExport}, {}).includes(' download '));
+  const scoped = api.parseStarterPackIndex({version: 1, packs: [{run_id: run, mode: '365', tag: 'RL',
+    scope: {description: '强化学习', refinement: '限定策略优化与离线学习<img src=x onerror=alert(1)>', as_of: '2026-09-12'}}]});
+  const scopedHtml = api.renderBodyHtml({daily: [], conferences: [], starterPacks: scoped}, {});
+  assert.ok(scopedHtml.includes('RL · 365天 · 限定策略优化'));
+  assert.ok(scopedHtml.includes('截止日期（不含当天）：2026-09-12'));
+  assert.ok(scopedHtml.includes('本次细化：'));
+  assert.ok(scopedHtml.includes('&lt;img'));
+  assert.ok(!scopedHtml.includes('<img'));
+}
+
+{
+  const api = loadSidebarForTest().__test;
+  const run = '20260912-abcdef123456';
+  const records = [
+    {route: `starter-pack/${run}/papers/older`, title: 'Older original', score: 9, published: '2025-09-01', summary: '原样短说明'},
+    {route: `starter-pack/${run}/papers/newer`, title: 'Newer original', score: 7, published: '2026-09-01'},
+    {route: 'javascript:alert(1)', title: 'unsafe'},
+    {route: '../unsafe', title: 'unsafe'},
+  ];
+  const packs = api.parseStarterPackIndex({version: 1, packs: [{run_id: run, tag: 'ATSP', mode: '365', export_path: `docs/starter-pack/${run}/papers.md`, selected_records: records, content_done: 1, content_pending: 1}]});
+  const model = {daily: [], conferences: [], starterPacks: packs};
+  const paperId = `starter-pack/${run}/papers/older`;
+  assert.equal(packs[0].papers.length, 2);
+  assert.equal(api.collectPaperHrefsFromModel(model).length, 2);
+  assert.ok(api.collectUnreadPaperIdsForSnapshot(model, {}).has(paperId));
+  const html = api.renderBodyHtml(model, {readMap: {[paperId]: 'good'}});
+  assert.ok(html.includes('ATSP · 365天'));
+  assert.ok(html.includes('结果总览'));
+  assert.ok(html.includes('导出'));
+  assert.ok(html.includes('data-paper-status="good"'));
+  assert.ok(html.includes('原样短说明'));
+  assert.ok(!html.includes('data-daily-calendar'));
+  assert.ok(html.indexOf('Older original') < html.indexOf('Newer original'));
+  const dateHtml = api.renderBodyHtml(model, {taskSort: 'date'});
+  assert.ok(dateHtml.indexOf('Newer original') < dateHtml.indexOf('Older original'));
+  assert.equal(api.computeModelReadSummary(model, {}).daily.unread, 0);
+  const unread = api.renderBodyHtml(model, {filter: 'unread', readMap: {[paperId]: 'good'}});
+  assert.ok(!unread.includes('Older original'));
+  assert.ok(unread.includes('Newer original'));
+  const kept = api.renderBodyHtml(model, {filter: 'unread', currentPaperHref: '#/' + paperId, readMap: {[paperId]: 'good'}, unreadResultPaperIds: []});
+  assert.ok(kept.includes('Older original'));
+}
+
+{
+  const api = loadSidebarForTest().__test;
+  const run = '20260912-abcdef123456';
+  const route = '20250910-20260909/marked';
+  const data = {title: 'Marked new result', research_run_id: run};
+  const line = (id, payload) => `      * <a href="#/${id}" data-sidebar-item="${JSON.stringify(payload).replace(/"/g, '&quot;')}">${payload.title}</a>\n`;
+  const model = api.parseSidebar('* Daily Papers\n  * 2025-09-10 ～ 2026-09-09 <!--dpr-date:20250910-20260909-->\n    * 速读区\n' + line(route, data) + line('20250910-20260909/old', {title: 'Unmarked historical'}));
+  assert.equal(model.daily[0].papers.find(p => p.title === data.title).research_run_id, run);
+  assert.ok(api.renderBodyHtml(model, {}).includes('Marked new result'), '索引未加载时旧投影可用');
+  model.starterPacks = api.parseStarterPackIndex({version: 1, packs: [{run_id: run, mode: '365', selected_records: [{route, title: data.title, score: 8, reading_status: 'pending', publication_date: '2025', publication_date_precision: 'year', publication_date_kind: 'proceedings', publication_date_source: 'official'}]}]});
+  const html = api.renderBodyHtml(model, {});
+  assert.equal((html.match(/Marked new result/gi) || []).length, 2, '只保留任务行的data-search和标题，不重复legacy行');
+  assert.ok(html.includes('Unmarked historical'));
+  assert.ok(html.includes('2025 · 具体日期待确认'));
+  assert.ok(!html.includes('2025-01-01'));
+  assert.ok(html.includes('阅读内容待生成'));
+  assert.deepEqual(api.computeModelReadSummary(model, {}).total, {papers: 2, unread: 2});
+  const unread = api.renderBodyHtml(model, {filter: 'unread'});
+  assert.equal((unread.match(/Marked new result/gi) || []).length, 2, '未读过滤也必须保留任务索引以去重');
+  delete model.daily[0].papers.find(p => p.title === data.title).research_run_id;
+  const legacyKept = api.renderBodyHtml(model, {});
+  assert.equal((legacyKept.match(/Marked new result/gi) || []).length, 4, '无标记历史条目不能因新任务同route而隐藏');
+  assert.deepEqual(api.computeModelReadSummary(model, {}).total, {papers: 2, unread: 2}, '总计按route唯一计数');
+  assert.deepEqual(api.computeModelReadSummary(model, {}).backtrack, {papers: 2, unread: 2});
 }
 
 function cssRule(css, selector) {
@@ -174,6 +346,19 @@ const rangeDailySidebar = `
   * 2017-06-12
     * 精读区
       * <a class="dpr-sidebar-item-link" href="#/201706/12/attention" data-sidebar-item="{&quot;title&quot;:&quot;Attention Paper&quot;}">Attention Paper</a>
+`;
+
+// 区间日报的结束日「没有」同日单日报，复刻线上真实形态：
+// 日历会把区间挂到锚定日 20260827，而该 key 不存在于 model.daily 的原始 key 集合中。
+const orphanRangeDailySidebar = `
+* Daily Papers
+  * 2026-08-28 <!--dpr-date:20260828-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link" href="#/202608/28/fresh" data-sidebar-item="{&quot;title&quot;:&quot;Fresh Paper&quot;,&quot;tags&quot;:[{&quot;kind&quot;:&quot;query&quot;,&quot;label&quot;:&quot;eeg&quot;}]}">Fresh Paper</a>
+  * 2026-07-29 ~ 2026-08-27 <!--dpr-date:20260729-20260827-->
+    * 速读区
+      * <a class="dpr-sidebar-item-link" href="#/20260729-20260827/range-one" data-sidebar-item="{&quot;title&quot;:&quot;Range One&quot;,&quot;tags&quot;:[{&quot;kind&quot;:&quot;query&quot;,&quot;label&quot;:&quot;eeg&quot;}]}">Range One</a>
+      * <a class="dpr-sidebar-item-link" href="#/20260729-20260827/range-two" data-sidebar-item="{&quot;title&quot;:&quot;Range Two&quot;,&quot;tags&quot;:[{&quot;kind&quot;:&quot;query&quot;,&quot;label&quot;:&quot;speech&quot;}]}">Range Two</a>
 `;
 
 function testSidebarNavigationContract() {
@@ -452,6 +637,51 @@ function testDailyRangeReportsStayReachableFromCalendarEndDate() {
   assert.ok(html.includes('data-axis-section="20260627-20260706:__all__"'));
 }
 
+// 回归：区间日报的锚定日（结束日）在当天没有同日单日报时，点击日历格必须能选中该区间。
+// 注意 rangeDailySidebar 的区间结束日 20260706 恰好另有一条单日报，会掩盖该缺陷，
+// 所以这里必须用「孤立锚定日」的 fixture，且保持单日组排在区间组之前（与线上生成顺序一致）。
+function testDailyRangeSelectableFromOrphanCalendarAnchorDay() {
+  const sidebar = loadSidebarForTest('#/202608/28/fresh');
+  const tools = sidebar.__test;
+  const model = tools.parseSidebar(orphanRangeDailySidebar);
+
+  assert.deepEqual(model.daily.map((day) => day.dateKey), [
+    '20260828',
+    '20260729-20260827',
+  ], '单日组必须排在区间组之前，否则该用例会假绿');
+
+  // 日历格按锚定日聚合，27 号格子应带出区间的两篇
+  const baseView = tools.buildDailyCalendarTagView(model, '', '__all__', {}, '202608');
+  const anchorDay = baseView.calendar.days.find((day) => day.dateKey === '20260827');
+  assert.equal(anchorDay.totalCount, 2, '27 号日历格应显示区间日报的篇数');
+  assert.equal(anchorDay.hasPapers, true);
+
+  // 点击 27 号格子传回的是锚定日 '20260827'，必须能还原到区间原始 key
+  const picked = tools.buildDailyDateView(model, '20260827', {}, '202608');
+  assert.equal(picked.activeKey, '20260729-20260827');
+  assert.deepEqual(picked.groups.map((group) => group.label), ['2026-07-29 ~ 2026-08-27']);
+  assert.deepEqual(picked.groups[0].papers.map((paper) => paper.title), ['Range One', 'Range Two']);
+
+  // 月份为空时走的是另一条兜底分支，同样不能落回最新单日
+  const pickedNoMonth = tools.buildDailyDateView(model, '20260827', {}, '');
+  assert.equal(pickedNoMonth.activeKey, '20260729-20260827');
+
+  // 完整视图：区间被选中，日历高亮落在锚定日上
+  const rangeView = tools.buildDailyCalendarTagView(model, '20260827', '__all__', {}, '202608');
+  assert.deepEqual(rangeView.groups.map((group) => [group.key, group.papers.length]), [
+    ['20260729-20260827:__all__', 2],
+  ]);
+  assert.equal(rangeView.calendar.days.find((day) => day.dateKey === '20260827').isActive, true);
+  assert.equal(rangeView.calendar.days.find((day) => day.dateKey === '20260828').isActive, false);
+
+  // 普通单日组不能因此回归
+  const freshView = tools.buildDailyCalendarTagView(model, '20260828', '__all__', {}, '202608');
+  assert.deepEqual(freshView.groups.map((group) => [group.key, group.papers.length]), [
+    ['20260828:__all__', 1],
+  ]);
+  assert.equal(freshView.calendar.days.find((day) => day.dateKey === '20260828').isActive, true);
+}
+
 function testDailyCalendarPlacementToggleKeepsControlRowFixedAboveLayers() {
   const sidebar = loadSidebarForTest('#/202606/24/paper-a');
   const tools = sidebar.__test;
@@ -533,8 +763,11 @@ function testDailyCalendarInPlaceRefreshUsesActiveDailyTag() {
   assert.ok(start > 0 && end > start, 'updateDailyCalendarUnreadMarks should be present');
   const block = js.slice(start, end);
 
-  assert.ok(block.includes('buildDailyCalendarTagView'));
-  assert.ok(block.includes('state.activeDailyTag'));
+  assert.ok(block.includes('buildDailyPanelView'));
+  assert.ok(block.includes("['daily', 'backtrack']"));
+  const helper = js.slice(js.indexOf('function buildDailyPanelView'), js.indexOf('function isDailySingleDateKey'));
+  assert.ok(helper.includes('buildDailyCalendarTagView'));
+  assert.ok(helper.includes("dailyPanelField(group, 'Tag')"));
   assert.ok(block.includes('view.activeDateKey'));
   assert.ok(!block.includes('buildDailyDateView'));
 }
@@ -571,7 +804,7 @@ function testDailyDateAndTagClicksExpandCurrentSectionOnlyForDaily() {
   const calendarBlock = js.slice(calendarStart, calendarEnd);
   assert.ok(calendarBlock.includes('expandCurrentDailyAxisSection('));
 
-  const tabStart = js.indexOf("if (tabGroup === 'daily') {");
+  const tabStart = js.indexOf("if (tabGroup === 'daily' || tabGroup === 'backtrack') {");
   const tabEnd = js.indexOf('rerenderSidebarBody(rerenderOptionsForAxisControlClick());', tabStart);
   assert.ok(tabStart > 0 && tabEnd > tabStart, 'axis tab handler should be present');
   const dailyTabBlock = js.slice(tabStart, tabEnd);
@@ -1236,9 +1469,10 @@ function testActivePaperCanForceOpenTopLevelPanel() {
   assert.ok(start > 0 && end > start, 'syncAxisStateToHref should be present');
   const block = js.slice(start, end);
 
-  assert.ok(block.includes('state.expandedGroups.daily = true'));
+  assert.ok(block.includes('state.expandedGroups[panel] = true'));
+  assert.ok(block.includes("isBacktrackDateKey(daily.dateKey) ? 'backtrack' : 'daily'"));
   assert.ok(block.includes('state.expandedGroups.conference = true'));
-  assert.ok(block.includes("state.activeDailyTag = '__all__';"));
+  assert.ok(block.includes("state[dailyPanelField(panel, 'Tag')] = '__all__';"));
 }
 
 function testPanelHeaderClickOnlyChangesSidebarViewState() {
@@ -1645,6 +1879,88 @@ function testReadStatusNormalization() {
   assert.equal(tools.normalizeReadStatus(null), '');
 }
 
+function testAnnualReviewReusesNativeSidebarReadingAndStatus() {
+  const route = '20250910-20260909/2510.17595v1';
+  const tools = loadSidebarForTest('#/' + route).__test;
+  const payload = JSON.stringify({title: 'ATSP', score: 8, tags: [
+    {kind: 'query', label: 'ATSP'}, {kind: 'paper', label: '核心'},
+  ]}).replace(/"/g, '&quot;');
+  const model = tools.parseSidebar('* Daily Papers\n' +
+    '  * 2025-09-10 ～ 2026-09-09 <!--dpr-date:20250910-20260909-->\n' +
+    '    * 速读区\n' +
+    `      * <a href="#/${route}" data-sidebar-item="${payload}">ATSP</a>\n`);
+  const view = tools.buildDailyCalendarTagView(model, '20260909', 'ATSP', {}, '202609');
+  assert.equal(view.calendar.days.find(day => day.dateKey === '20260909').totalCount, 1);
+  const html = tools.renderBodyHtml(model, {
+    expandedGroups: {daily: true}, activeDailyDate: '20260909',
+    readMap: {[route]: 'good'},
+  });
+  assert.ok(html.includes(`href="#/${route}"`));
+  assert.ok(html.includes('data-panel="backtrack"'), '年度回溯独立分栏但复用原论文条目');
+  assert.ok(html.includes('专题回溯'));
+  assert.ok(!html.includes('data-panel="daily"'), '回溯不得重复计入日报');
+  assert.ok(html.includes('data-paper-status="good"'));
+  assert.ok(html.includes('data-read="1"'));
+  assert.ok(!html.includes('target="_blank"'));
+  const unreadHtml = tools.renderBodyHtml(model, {
+    expandedGroups: {daily: true}, activeDailyDate: '20260909',
+    filter: 'unread', currentPaperHref: '#/' + route,
+    unreadResultPaperIds: [], readMap: {[route]: 'blue'},
+  });
+  assert.ok(unreadHtml.includes(`href="#/${route}"`), '首次切入未读也应保留当前正在阅读的论文');
+  const source = fs.readFileSync(require.resolve('../app/dpr-sidebar.js'), 'utf8');
+  assert.ok(!source.includes('dpr-long-range-nav'));
+  assert.ok(!source.includes('独立报告，不计入日报未读数'));
+}
+
+function testBacktrackPanelKeepsIndependentNativeViews() {
+  const tools = loadSidebarForTest('#/').__test;
+  assert.equal(tools.isBacktrackDateKey('20260811-20260909'), false, '30天仍归日报');
+  assert.equal(tools.isBacktrackDateKey('20260810-20260909'), true, '31天归专题回溯');
+  assert.equal(tools.isBacktrackDateKey('20260612-20260909'), true, '90天归专题回溯');
+  assert.equal(tools.isBacktrackDateKey('20250910-20260909'), true, '365天归专题回溯');
+  const paper = (id, tag) => ({id, href: '#/' + id, title: id, tags: [{kind: 'query', label: tag}]});
+  const model = {daily: [
+    {dateKey: '20260909', papers: [paper('20260909/daily', 'RL')]},
+    {dateKey: '20260811-20260909', papers: [paper('20260811-20260909/month', 'SR')]},
+    {dateKey: '20250910-20260909', papers: [paper('20250910-20260909/annual', 'ATSP')]},
+    {dateKey: '20260612-20260909', papers: [paper('20260612-20260909/quarter', 'SR')]},
+  ], conferences: []};
+  const readMap = {'20250910-20260909/annual': 'good'};
+  const vs = {activeDailyDate: '20260909', activeDailyTag: 'RL',
+    activeBacktrackDate: '20260909', activeBacktrackTag: 'ATSP', readMap};
+  const daily = tools.buildAxisViewForMode(model, 'daily', 'tag', vs, readMap);
+  const backtrack = tools.buildAxisViewForMode(model, 'backtrack', 'tag', vs, readMap);
+  assert.deepEqual(daily.groups.flatMap(g => g.papers.map(p => p.title)), ['20260909/daily']);
+  assert.deepEqual(backtrack.groups.flatMap(g => g.papers.map(p => p.title)), ['20250910-20260909/annual']);
+  assert.equal(backtrack.calendar.days.find(d => d.dateKey === '20260909').totalCount, 1);
+  assert.equal(backtrack.calendar.days.find(d => d.dateKey === '20260909').unreadCount, 0);
+  const summary = tools.computeModelReadSummary(model, readMap);
+  assert.deepEqual(summary.daily, {papers: 2, unread: 2});
+  assert.deepEqual(summary.backtrack, {papers: 2, unread: 1});
+  assert.deepEqual(summary.total, {papers: 4, unread: 3});
+  const html = tools.renderBodyHtml(model, {...vs, expandedGroups: {daily: false, backtrack: true},
+    backtrackCalendarPlacement: 'bottom', expandedAxisSections: new Set(['daily:tag:20260909:RL'])});
+  assert.ok(html.includes('data-panel="backtrack"'));
+  assert.ok(html.includes('data-panel="daily"'));
+  assert.equal((html.match(/data-axis-toggle="backtrack"/g) || []).length, 0);
+  assert.equal((html.match(/data-daily-calendar/g) || []).length, 1, '仅日报保留日历');
+  assert.equal((html.match(/data-axis-toggle="daily"/g) || []).length, 1);
+  assert.equal((html.match(/ href="#\/20250910-20260909\/annual"/g) || []).length, 1);
+  assert.ok(!html.includes('target="_blank"'));
+  const results = tools.buildAxisViewForMode(model, 'backtrack', 'results', {...vs, search: 'annual'}, readMap);
+  assert.deepEqual(results.groups.flatMap(g => g.papers.map(p => p.title)), ['20250910-20260909/annual']);
+  assert.equal(tools.resolveDailyAxisSectionStateKey(model, vs, readMap, 'backtrack'),
+    'backtrack:tag:20250910-20260909:ATSP');
+  const differentEnds = {daily: [model.daily[2], {
+    dateKey: '20250101-20250401', papers: [paper('20250101-20250401/older', 'ATSP')],
+  }], conferences: []};
+  const allRanges = tools.buildAxisViewForMode(differentEnds, 'backtrack', 'tag', vs, readMap);
+  assert.equal(allRanges.groups.length, 2, '无日历时不同结束日期的旧区间仍可访问');
+}
+
+testBacktrackPanelKeepsIndependentNativeViews();
+testAnnualReviewReusesNativeSidebarReadingAndStatus();
 testSidebarNavigationContract();
 testAxisViewsForDailyAndConference();
 testHyphenatedConferenceMarkerParsing();
@@ -1652,6 +1968,7 @@ testAxisTabsRenderUnreadCounts();
 testDailyCalendarViewUsesMonthGridAndActiveDateOnly();
 testDailyCalendarTagViewFiltersActiveDateByKeyword();
 testDailyRangeReportsStayReachableFromCalendarEndDate();
+testDailyRangeSelectableFromOrphanCalendarAnchorDay();
 testDailyCalendarPlacementToggleKeepsControlRowFixedAboveLayers();
 testConferenceAndDailyAxisTogglesRenderBesidePanelTitles();
 testDailyCalendarInPlaceRefreshUsesActiveDailyTag();
