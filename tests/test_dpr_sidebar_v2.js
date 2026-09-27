@@ -306,6 +306,7 @@ function createClassList(initial = []) {
     '  * 2026-09-26 <!--dpr-date:20260926-->\n',
     '    * 速读区\n',
     link('#/202609/26/2609.22222v3-single-day-quick'),
+    link('#/202609/25/2609.66666v1-same-length-other-day'),
     '  * 2026-07-01 ~ 2026-09-01 <!--dpr-date:20260701-20260901-->\n',
     '    * 速读区\n',
     link('#/20260701-20260901/2609.33333v1'),
@@ -333,6 +334,7 @@ function createClassList(initial = []) {
   assert.equal(ctx('#/20260828-20260926/2609.99999v2'), null, '无 slug 的 long-range 路由不支持');
   assert.equal(ctx('#/20260701-20260901/2609.33333v1'), null, 'long-range 回溯块不支持');
   assert.equal(ctx('#/202609/26/2609.11111v1-wrong-block'), null, '路由目录与日期块 token 不一致时不显示');
+  assert.equal(ctx('#/202609/25/2609.66666v1-same-length-other-day'), null, '同长度但不同日期的路由目录也不显示');
   assert.equal(ctx('#/202606/01/2606.44444v1-legacy-no-marker'), null, '没有 dpr-date 标记的旧块不猜 token');
   assert.equal(ctx('#/conference/icml-2025/2501.55555v1-conf'), null, '会议论文不支持');
   assert.equal(ctx('#/'), null);

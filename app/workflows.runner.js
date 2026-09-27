@@ -778,7 +778,12 @@ window.DPRWorkflowRunner = (function () {
       if (checkRes.ok) {
         const checkData = await checkRes.json();
         const runs = Array.isArray(checkData.workflow_runs) ? checkData.workflow_runs : [];
-        const activeRuns = runs.filter((r) => activeStatuses.has(r.status));
+        let activeRuns = runs.filter((r) => activeStatuses.has(r.status));
+        if (workflowFile === 'deep-read-paper.yml') {
+          // 精读按「日期块 + 论文」分并发组，只拦同一篇（run-name 与 deep-read-paper.yml 一致）。
+          const sameTitle = deepReadRunTitle(dispatchInputs);
+          activeRuns = activeRuns.filter((r) => String(r.display_title || '') === sameTitle);
+        }
         if (activeRuns.length > 0) {
           const r = activeRuns[0];
           const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${r.id}`;
@@ -791,6 +796,25 @@ window.DPRWorkflowRunner = (function () {
             `<div style="color:#c00;">同一时间只允许运行一个该工作流实例，请等待当前运行结束。</div>` +
             `<div style="margin-top:8px;"><a class="arxiv-tool-btn" style="padding:6px 10px; text-decoration:none;" target="_blank" href="${runUrl}">查看当前运行</a></div>`;
           return false;
+        }
+      }
+
+      if (workflowFile === 'deep-read-paper.yml') {
+        // 日报运行中（尤其提交阶段）再推送 main 会和日报抢推送；等日报结束再升级精读。
+        const dailyUrl = `https://api.github.com/repos/${owner}/${repo}/actions/workflows/daily-paper-reader.yml/runs?per_page=5`;
+        const dailyRes = await ghFetch(token, dailyUrl);
+        if (dailyRes.ok) {
+          const dailyData = await dailyRes.json();
+          const dailyRuns = Array.isArray(dailyData.workflow_runs) ? dailyData.workflow_runs : [];
+          const dailyActive = dailyRuns.find((r) => activeStatuses.has(r.status));
+          if (dailyActive) {
+            const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${dailyActive.id}`;
+            setStatus('日报工作流正在运行，为避免推送冲突，请等它结束后再升级精读。', '#c00');
+            runsEl.innerHTML =
+              `<div style="color:#c00;">日报（#${dailyActive.run_number || dailyActive.id}，状态：${statusZhMap[dailyActive.status] || dailyActive.status}）结束后再试。</div>` +
+              `<div style="margin-top:8px;"><a class="arxiv-tool-btn" style="padding:6px 10px; text-decoration:none;" target="_blank" href="${runUrl}">查看日报运行</a></div>`;
+            return false;
+          }
         }
       }
 
@@ -1229,6 +1253,12 @@ window.DPRWorkflowRunner = (function () {
   const runConferenceMaintain = async (conference, years) =>
     runConferenceRetrieval(conference, years);
 
+  // 与 deep-read-paper.yml 的 run-name 一致，用于只拦截同一篇论文的运行。
+  function deepReadRunTitle(inputs) {
+    const i = inputs || {};
+    return `deep read ${i.paper_id || ''} (${i.paper_date || ''})`;
+  }
+
   // 与 src/deep_read_paper.py / deep-read-paper.yml 的输入规则一致；前端只发带版本号的编号。
   const buildDeepReadRequest = (options = {}) => {
     const paperId = String((options && options.paperId) || '').trim();
@@ -1245,7 +1275,7 @@ window.DPRWorkflowRunner = (function () {
   };
 
   return {
-    __test: { buildQuickFetchRequest, buildStarterPackRequest, buildTopicResearchRequest, sanitizeResearchProfile, buildDeepReadRequest },
+    __test: { buildQuickFetchRequest, buildStarterPackRequest, buildTopicResearchRequest, sanitizeResearchProfile, buildDeepReadRequest, deepReadRunTitle },
     buildTopicResearchRequest,
     sanitizeResearchProfile,
     continueTopicResearch,

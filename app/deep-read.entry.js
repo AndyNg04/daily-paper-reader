@@ -24,6 +24,12 @@ window.DPRDeepReadEntry = (function () {
     return ctx && ctx.section === 'quick' ? ctx : null;
   };
 
+  // hashchange 后侧栏会先广播更新，此时正文可能仍是上一篇；只挂到正文属于当前论文的元信息区。
+  const pageMatches = (metaRight, ctx) => {
+    const section = metaRight && metaRight.closest ? metaRight.closest('.markdown-section') : null;
+    return !!section && String(section.innerHTML || '').indexOf(ctx.paperId) !== -1;
+  };
+
   const buildConfirmText = (ctx, title, local) => [
     '确认把这篇论文升级为精读？',
     '',
@@ -32,7 +38,7 @@ window.DPRDeepReadEntry = (function () {
     `日期块：${ctx.paperDate}`,
     '',
     local
-      ? '本地调试模式：本地后端会运行 deep_read_paper.py generate + promote，调用 DeepSeek 生成精读长总结（产生 API 费用），把侧边栏条目移到精读区，直接改写本地 docs/（不提交 git）。'
+      ? '本地调试模式：本地后端会运行 deep_read_paper.py generate + promote，调用 DeepSeek 生成精读长总结（产生 API 费用），把侧边栏条目移到精读区，直接改写本地 docs/（不提交 git）。本地后端不排队，请等上一篇完成后再升级下一篇。'
       : '将触发 GitHub Actions「deep-read-paper」：调用 DeepSeek 生成精读长总结（产生 API 费用），把侧边栏条目从速读区移到精读区，并直接提交推送到仓库默认分支；Pages 重新部署后生效，通常需要几分钟。',
   ].join('\n');
 
@@ -51,6 +57,12 @@ window.DPRDeepReadEntry = (function () {
 
   const onClick = async (ctx) => {
     if (pending || submitted.has(keyOf(ctx))) return;
+    // 点击时再确认一次当前路由仍是这篇（防止页面切换中途点到旧按钮）。
+    const current = resolveContext();
+    if (!current || current.href !== ctx.href) {
+      render();
+      return;
+    }
     pending = true;
     refreshButtons();
     try {
@@ -75,7 +87,7 @@ window.DPRDeepReadEntry = (function () {
     document.querySelectorAll(`.${ROW_CLASS}`).forEach((row) => {
       if (!ctx || row.parentNode !== metaRight || row.getAttribute('data-href') !== ctx.href) row.remove();
     });
-    if (!ctx || !metaRight || metaRight.querySelector(`.${ROW_CLASS}`)) return;
+    if (!ctx || !metaRight || !pageMatches(metaRight, ctx) || metaRight.querySelector(`.${ROW_CLASS}`)) return;
     const row = document.createElement('p');
     row.className = `paper-meta-link-row paper-meta-pdf-row ${ROW_CLASS}`;
     row.setAttribute('data-href', ctx.href);
@@ -116,5 +128,5 @@ window.DPRDeepReadEntry = (function () {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 
-  return { render, __test: { buildConfirmText, resolveContext, accessAllowed, onClick, submitted } };
+  return { render, __test: { buildConfirmText, resolveContext, accessAllowed, onClick, submitted, pageMatches } };
 })();
