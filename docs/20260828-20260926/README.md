@@ -3,8 +3,8 @@
 - 最近生成时间：2026-09-26 13:55:16 UTC
 - 今日累计更新：1 次
 - 今日累计推荐总数：31
-- 精读区：15
-- 速读区：16
+- 精读区：16
+- 速读区：15
 
 ## 今日简报（AI）
 2026-08-28至09-26日报完成：共筛出31篇，精读15篇、速读16篇，重点追踪人机共居与AI经济实时预测。
@@ -27,6 +27,7 @@
 13. [From Task Success to Productive Success: Evaluating Human-AI Collaboration by Quality and Cost](/20260828-20260926/2609.21117v1-from-task-success-to-productive-success-evaluating-human-ai-collaboration-by-quality-and-cost) （9.0/10）
 14. [Real-Time Hand Gesture Recognition for OpenXR Using Transformer-Based Machine Learning](/20260828-20260926/2609.25466v1-real-time-hand-gesture-recognition-for-openxr-using-transformer-based-machine-learning) （9.0/10）
 15. [Evolutionary Stability Does Not Guarantee Learning Accessibility: A Multi-Agent Reinforcement Learning Perspective on Cooperation Emergence](/20260828-20260926/2609.27664v1-evolutionary-stability-does-not-guarantee-learning-accessibility-a-multi-agent-reinforcement-learning-perspective-on-cooperation-emergence) （9.0/10）
+16. [When Retrieval Helps: Selective Retrieval for Single-Turn Mental-Health QA](/20260828-20260926/2609.03454v1-when-retrieval-helps-selective-retrieval-for-single-turn-mental-health-qa) （7.0/10）
 
 ## 速读区
 1. [AcCoRD: Evaluating User-Agent Collaboration Under Realistic User Preference Dynamics](/20260828-20260926/2608.27818v1-accord-evaluating-user-agent-collaboration-under-realistic-user-preference-dynamics) （8.0/10）
@@ -39,12 +40,11 @@
 8. [InsightToast: Proactive Information Retrieval & Glanceable Visualization in the Side Channel of Data-Rich Meetings](/20260828-20260926/2608.31115v2-insighttoast-proactive-information-retrieval--glanceable-visualization-in-the-side-channel-of-data-rich-meetings) （7.0/10）
 9. [A Wearable Pneumatic Device for Continuous, Closed-Loop, Bidirectional Tactile Interaction](/20260828-20260926/2609.00612v1-a-wearable-pneumatic-device-for-continuous-closed-loop-bidirectional-tactile-interaction) （7.0/10）
 10. [Knowing Is Not Enough: Information Retrievability as a Precondition to Effective LLM Oversight](/20260828-20260926/2609.01976v1-knowing-is-not-enough-information-retrievability-as-a-precondition-to-effective-llm-oversight) （7.0/10）
-11. [When Retrieval Helps: Selective Retrieval for Single-Turn Mental-Health QA](/20260828-20260926/2609.03454v1-when-retrieval-helps-selective-retrieval-for-single-turn-mental-health-qa) （7.0/10）
-12. [Feelium: A Touchable Blimp Body for Aerial Telepresence](/20260828-20260926/2608.29391v1-feelium-a-touchable-blimp-body-for-aerial-telepresence) （6.0/10）
-13. [Thesis Proposal: Toward a Human-Centered and Perspective-Aware Framework for Reproducible ML Evaluation and AI Alignment](/20260828-20260926/2608.30842v1-thesis-proposal-toward-a-human-centered-and-perspective-aware-framework-for-reproducible-ml-evaluation-and-ai-alignment) （6.0/10）
-14. [World Model-Guided Reinforcement Learning via Counterfactual User Engagement Simulation](/20260828-20260926/2609.01067v1-world-model-guided-reinforcement-learning-via-counterfactual-user-engagement-simulation) （6.0/10）
-15. [Classic AI Scaffolding for LLM Social Agents](/20260828-20260926/2609.01167v1-classic-ai-scaffolding-for-llm-social-agents) （6.0/10）
-16. [Dutch Books for Language Models](/20260828-20260926/2609.02797v1-dutch-books-for-language-models) （6.0/10）
+11. [Feelium: A Touchable Blimp Body for Aerial Telepresence](/20260828-20260926/2608.29391v1-feelium-a-touchable-blimp-body-for-aerial-telepresence) （6.0/10）
+12. [Thesis Proposal: Toward a Human-Centered and Perspective-Aware Framework for Reproducible ML Evaluation and AI Alignment](/20260828-20260926/2608.30842v1-thesis-proposal-toward-a-human-centered-and-perspective-aware-framework-for-reproducible-ml-evaluation-and-ai-alignment) （6.0/10）
+13. [World Model-Guided Reinforcement Learning via Counterfactual User Engagement Simulation](/20260828-20260926/2609.01067v1-world-model-guided-reinforcement-learning-via-counterfactual-user-engagement-simulation) （6.0/10）
+14. [Classic AI Scaffolding for LLM Social Agents](/20260828-20260926/2609.01167v1-classic-ai-scaffolding-for-llm-social-agents) （6.0/10）
+15. [Dutch Books for Language Models](/20260828-20260926/2609.02797v1-dutch-books-for-language-models) （6.0/10）
 
 ---
 使用键盘方向键可在日报/论文之间快速切换。
