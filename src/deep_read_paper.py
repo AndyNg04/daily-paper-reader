@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -833,12 +834,88 @@ def _matching_markdowns(target: PaperTarget, docs_dir: Path) -> List[str]:
     return sorted(p.name for p in day_dir.iterdir() if p.is_file() and pattern.fullmatch(p.name))
 
 
+_ABSTRACT_RE = re.compile(r"^## Abstract[ \t]*\n(.*?)(?=^## |^---[ \t]*$|\Z)", re.S | re.M)
+
+
+def local_arxiv_meta(md_text: str, paper_id: str) -> Optional[Dict[str, object]]:
+    """从已有论文 Markdown 还原 6.generate_docs.fetch_arxiv_paper_meta 需要的元数据。
+
+    GitHub Actions 的出口 IP 经常被 export.arxiv.org 限流（HTTP 429），而升级精读的论文
+    Markdown 里已经保存了标题、作者、日期、PDF 链接和英文摘要。字段不全（或 PDF 链接与
+    编号不符）时返回 None，由调用方回落到真实的 arXiv API。
+    """
+    meta = parse_front_matter(md_text)
+    title = " ".join(str(meta.get("title") or "").split())
+    pdf = str(meta.get("pdf") or "").strip()
+    body = (md_text or "").replace("\r\n", "\n")
+    match = _ABSTRACT_RE.search(body)
+    abstract = " ".join(match.group(1).split()) if match else ""
+    if not (title and abstract and pdf) or not pdf.rstrip("/").endswith(paper_id):
+        return None
+    authors = [a.strip() for a in str(meta.get("authors") or "").split(",") if a.strip()]
+    published = re.sub(r"\D", "", str(meta.get("date") or ""))[:8]
+    try:
+        tags = json.loads(meta.get("tags") or "[]")
+    except ValueError:
+        tags = []
+    llm_tags = [str(tag) for tag in tags if str(tag).strip()] if isinstance(tags, list) else []
+    return {
+        "id": paper_id,
+        "title": title,
+        "abstract": abstract,
+        "published": published,
+        "authors": authors,
+        "link": pdf,
+        "pdf_url": pdf,
+        "llm_tags": llm_tags,
+    }
+
+
+def run_generator_with_local_meta(generator: Path, meta_md: Path, generator_args: Sequence[str]) -> int:
+    """在本进程加载生成器，把 fetch_arxiv_paper_meta 换成「优先用已有 Markdown」，再调 main()。
+
+    生成器源码不改（上游文件）；只有已有 Markdown 缺字段时才请求 arXiv API。
+    """
+    generator = Path(generator).resolve()
+    md_text = _read_text_exact(Path(meta_md))
+    sys.argv = [str(generator), *generator_args]
+    if str(generator.parent) not in sys.path:
+        sys.path.insert(0, str(generator.parent))
+    spec = importlib.util.spec_from_file_location("dpr_generate_docs_single", generator)
+    if spec is None or spec.loader is None:
+        raise DeepReadError(f"无法加载生成器：{generator}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    real_fetch = getattr(module, "fetch_arxiv_paper_meta", None)
+    if callable(real_fetch):
+        def fetch_with_local_meta(arxiv_id: str):
+            wanted = str(arxiv_id or "").strip().rsplit("/", 1)[-1]
+            meta = local_arxiv_meta(md_text, wanted)
+            if meta is not None:
+                log(f"[INFO] 使用已有 Markdown 中的论文元数据（不请求 arXiv API）：{wanted}")
+                return meta
+            log("[WARN] 已有 Markdown 元数据不完整，改为请求 arXiv API。")
+            return real_fetch(arxiv_id)
+
+        module.fetch_arxiv_paper_meta = fetch_with_local_meta
+    main_fn = getattr(module, "main", None)
+    if callable(main_fn):
+        main_fn()
+    return 0
+
+
 def build_generator_command(
     target: PaperTarget, docs_dir: Path, generator: Path = GENERATOR_SCRIPT
 ) -> List[str]:
     return [
         sys.executable,
+        str(Path(__file__).resolve()),
+        "run-generator",
+        "--generator",
         str(generator),
+        "--meta-md",
+        str(target.md_path),
+        "--",
         "--docs-dir",
         str(Path(docs_dir).resolve()),
         "--paper-id",
@@ -897,7 +974,7 @@ def generate(
         with tempfile.TemporaryDirectory(prefix="deep-read-assets-") as saved:
             saved_root = Path(saved)
             snapshot_artifacts(docs_dir, protected, saved_root)
-            log("[INFO] 运行生成器：" + shlex.join(cmd[1:]))
+            log("[INFO] 运行生成器：" + shlex.join(cmd[cmd.index("--") + 1 :]))
             try:
                 code, output = run_generator(cmd)
             finally:
@@ -1081,11 +1158,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("check", help="检查 Markdown 是否已有精读总结（有则 exit 0）。")
     _add_target_args(p)
+
+    # 内部使用：由 generate 以子进程调用，参数在 -- 之后原样传给生成器。
+    p = sub.add_parser("run-generator", help=argparse.SUPPRESS)
+    p.add_argument("--generator", required=True)
+    p.add_argument("--meta-md", required=True)
+    p.add_argument("generator_args", nargs=argparse.REMAINDER)
     return parser
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "run-generator":
+        rest = list(args.generator_args)
+        if rest and rest[0] == "--":
+            rest = rest[1:]
+        return run_generator_with_local_meta(Path(args.generator), Path(args.meta_md), rest)
     docs_dir = Path(args.docs_dir)
     try:
         if args.command == "resolve":

@@ -4,6 +4,9 @@ import difflib
 import html
 import importlib.util
 import json
+import os
+import re
+import subprocess
 import sys
 import textwrap
 from pathlib import Path
@@ -1235,3 +1238,98 @@ def test_cli_promote_leaves_unrecognised_readme_alone(tmp_path, capsys):
     assert (docs / RANGE / "README.md").read_text(encoding="utf-8") == "# 自定义日报\n"
     out = capsys.readouterr().out
     assert "日报 README：skipped" in out and "papers.meta.json：absent" in out
+
+
+# ---------------------------------------------------------------------------
+# arXiv 元数据：优先用已有 Markdown（GitHub Actions 出口 IP 常被 export.arxiv.org 限流 429）
+# ---------------------------------------------------------------------------
+
+MODULE_GENERATOR = textwrap.dedent(
+    """\
+    import argparse, json, os
+
+    def fetch_arxiv_paper_meta(arxiv_id):
+        if os.environ.get("FAKE_API") == "ok":
+            return {"id": arxiv_id, "title": "from api", "abstract": "api", "source": "api"}
+        raise RuntimeError("arXiv API 请求失败，status=429")
+
+    def main():
+        p = argparse.ArgumentParser()
+        for name in ("--docs-dir", "--paper-id", "--paper-section", "--paper-date", "--paper-title"):
+            p.add_argument(name)
+        a = p.parse_args()
+        meta = fetch_arxiv_paper_meta(a.paper_id)
+        with open(os.environ["FAKE_META_OUT"], "w", encoding="utf-8") as fh:
+            json.dump(meta, fh, ensure_ascii=False)
+
+    if __name__ == "__main__":
+        main()
+    """
+)
+
+
+def test_local_arxiv_meta_reads_existing_markdown():
+    meta = drp.local_arxiv_meta(paper_markdown(), "2609.03454v1")
+    assert meta["id"] == "2609.03454v1"
+    assert meta["title"] == "When Retrieval Helps"
+    assert meta["pdf_url"] == meta["link"] == "https://arxiv.org/pdf/2609.03454v1"
+    assert meta["authors"] == ["Hyunseo Oh", "Chong-Kwon Kim"]
+    assert meta["published"] == "20260903"
+    assert meta["llm_tags"] == ["query:ai-hci-mh"]
+    assert meta["abstract"] and "\n" not in meta["abstract"]
+
+
+def test_local_arxiv_meta_rejects_incomplete_or_mismatched_markdown():
+    md = paper_markdown()
+    assert drp.local_arxiv_meta(md, "2609.03454v2") is None, "PDF 链接与编号不符"
+    no_abstract = re.sub(r"## Abstract\n.*?(?=\n## |\Z)", "", md, flags=re.S)
+    assert "## Abstract" not in no_abstract
+    assert drp.local_arxiv_meta(no_abstract, "2609.03454v1") is None
+    assert drp.local_arxiv_meta(md.replace('pdf: "https://arxiv.org/pdf/2609.03454v1"\n', ""), "2609.03454v1") is None
+
+
+def _run_module_generator(tmp_path, monkeypatch, md_text, api_mode):
+    gen = tmp_path / "module_generator.py"
+    gen.write_text(MODULE_GENERATOR, encoding="utf-8")
+    md = tmp_path / "paper.md"
+    md.write_text(md_text, encoding="utf-8")
+    out = tmp_path / "meta.json"
+    if out.exists():
+        out.unlink()
+    env = dict(os.environ, FAKE_META_OUT=str(out), FAKE_API=api_mode)
+    proc = subprocess.run(
+        [
+            sys.executable, str(Path(drp.__file__)), "run-generator",
+            "--generator", str(gen), "--meta-md", str(md), "--",
+            "--docs-dir", str(tmp_path), "--paper-id", "2609.03454v1", "--paper-section", "deep",
+            "--paper-date", RANGE, "--paper-title", "When Retrieval Helps",
+        ],
+        capture_output=True, text=True, env=env,
+    )
+    meta = json.loads(out.read_text(encoding="utf-8")) if out.exists() else None
+    return proc, meta
+
+
+def test_run_generator_uses_local_meta_without_calling_arxiv(tmp_path, monkeypatch):
+    proc, meta = _run_module_generator(tmp_path, monkeypatch, paper_markdown(), api_mode="429")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert meta["title"] == "When Retrieval Helps" and meta.get("source") != "api"
+    assert "不请求 arXiv API" in proc.stdout
+
+
+def test_run_generator_falls_back_to_arxiv_when_markdown_incomplete(tmp_path, monkeypatch):
+    md = re.sub(r"## Abstract\n.*?(?=\n## |\Z)", "", paper_markdown(), flags=re.S)
+    proc, meta = _run_module_generator(tmp_path, monkeypatch, md, api_mode="ok")
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert meta["source"] == "api"
+    proc, meta = _run_module_generator(tmp_path, monkeypatch, md, api_mode="429")
+    assert proc.returncode != 0 and meta is None
+
+
+def test_local_arxiv_meta_matches_real_generator_fields():
+    # 与 6.generate_docs.parse_arxiv_xml_feed 返回的字段集合一致（生成器只认这些键）。
+    src = (Path(drp.__file__).parent / "6.generate_docs.py").read_text(encoding="utf-8")
+    start = src.index("def parse_arxiv_xml_feed")
+    body = src[start : src.index("\ndef ", start + 10)]
+    keys = set(re.findall(r'^\s+"(\w+)":', body[body.rindex("return {") :], re.M))
+    assert keys == set(drp.local_arxiv_meta(paper_markdown(), "2609.03454v1"))
