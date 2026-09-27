@@ -93,6 +93,38 @@ class LocalDebugEnvTest(unittest.TestCase):
         self.assertLess(script.index("TOPIC_MARKER="), script.index("src/conference_pipeline.py"))
         self.assertLess(script.index("grep -Fq \"$TOPIC_MARKER\""), script.index("src/conference_pipeline.py"))
 
+    def test_local_deep_read_command_runs_generate_then_promote_on_local_docs(self):
+        py = self.mod.shlex.quote(self.mod.sys.executable)
+        expected_args = "--docs-dir docs --paper-id 2609.03454v1 --paper-date 20260828-20260926"
+        for key, workflow_file in (("deep-read-paper", ""), ("", "deep-read-paper.yml")):
+            cmd = self.mod.build_command(
+                key, workflow_file, {"paper_id": " 2609.03454v1 ", "paper_date": "20260828-20260926"}
+            )
+            self.assertEqual(cmd[:2], ["bash", "-lc"])
+            lines = cmd[-1].split("\n")
+            self.assertEqual(lines[0], "set -euo pipefail")
+            self.assertEqual(lines[1], f"{py} src/deep_read_paper.py generate {expected_args}")
+            self.assertEqual(lines[2], f"{py} src/deep_read_paper.py promote {expected_args}")
+            self.assertNotIn("git", cmd[-1])
+        single = self.mod.build_command("deep-read-paper", "deep-read-paper.yml", {"paper_id": "2609.12345v12", "paper_date": "20260926"})
+        self.assertIn("--paper-id 2609.12345v12 --paper-date 20260926", single[-1])
+
+    def test_local_deep_read_command_rejects_invalid_inputs(self):
+        bad_inputs = [
+            {"paper_id": "2609.03454", "paper_date": "20260926"},  # 缺版本号
+            {"paper_id": "2609.03454v0", "paper_date": "20260926"},
+            {"paper_id": "2609.03454v1; rm -rf /", "paper_date": "20260926"},
+            {"paper_id": "2609.03454v1", "paper_date": "2026-09-26"},
+            {"paper_id": "2609.03454v1", "paper_date": "20260926-2026092"},
+            {"paper_id": "2609.03454v1", "paper_date": "$(touch x)"},
+            {"paper_id": "\u0662609.03454v1", "paper_date": "20260926"},  # 非 ASCII 数字
+            {"paper_id": "", "paper_date": ""},
+            {},
+        ]
+        for inputs in bad_inputs:
+            with self.assertRaises(ValueError, msg=repr(inputs)):
+                self.mod.build_command("deep-read-paper", "deep-read-paper.yml", inputs)
+
 
 if __name__ == "__main__":
     unittest.main()
