@@ -946,6 +946,23 @@ def test_generate_skips_generator_when_already_deep(tmp_path, monkeypatch):
     assert (stash / "base" / md_rel).read_bytes() == (stash / "gen" / md_rel).read_bytes()
 
 
+def test_generate_reruns_generator_when_existing_summary_is_truncated(tmp_path, monkeypatch):
+    md = paper_markdown(deep_summary="- 主实验：2 个 Counsel")
+    code, _, _, argv = run_generate(tmp_path, monkeypatch, "ok", md_text=md)
+    assert code == 0
+    assert argv is not None, "精读总结缺少（完）时应重新调用生成器"
+
+
+def test_generate_fails_when_truncated_summary_is_left_unchanged(tmp_path, monkeypatch, capsys):
+    md = paper_markdown(deep_summary="- 主实验：2 个 Counsel")
+    # "noop"：生成器正常退出（exit 0）但什么都没写，模拟 LLM 失败时单篇模式的静默返回
+    code, _, stash, argv = run_generate(tmp_path, monkeypatch, "noop", md_text=md)
+    assert argv is not None
+    assert code == 1
+    assert "生成器没有改动它" in capsys.readouterr().out
+    assert not (stash / "gen").exists()
+
+
 # ---------------------------------------------------------------------------
 # apply：把产物三方比较后写回最新 origin
 # ---------------------------------------------------------------------------

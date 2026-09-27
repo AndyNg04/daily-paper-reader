@@ -49,6 +49,9 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY") or os.getenv("SUMMARY_API_KEY")
 DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL") or os.getenv("SUMMARY_BASE_URL") or "https://api.deepseek.com"
 DEEPSEEK_MODEL = os.getenv("SUMMARY_MODEL") or os.getenv("DEEPSEEK_MODEL") or "deepseek-v4-flash"
 STEP6_STRUCTURED_MAX_TOKENS = 16 * 1024
+# 精读长总结：单次输出上限与截断后的续写轮数（每轮都带原文上下文）。
+DEEP_SUMMARY_MAX_TOKENS = 4096
+DEEP_SUMMARY_MAX_CONTINUATIONS = 4
 
 
 def create_llm_client() -> DeepSeekClient | None:
@@ -588,35 +591,59 @@ def generate_deep_summary(
     messages.append({"role": "user", "content": f"### 论文 Markdown 元数据 ###\n{paper_md_content}"})
     messages.append({"role": "user", "content": user_prompt})
 
-    last = ""
+    best = ""
     for attempt in range(1, max_retries + 1):
         try:
-            summary = call_llm_text(active_client, messages, temperature=0.3, max_tokens=4096)
+            summary = call_llm_text(
+                active_client, messages, temperature=0.3, max_tokens=DEEP_SUMMARY_MAX_TOKENS
+            )
             summary = (summary or "").strip()
             if not summary:
                 continue
-            last = summary
             if os.getenv("DPR_DEBUG_STEP6") == "1":
                 log(f"[DEBUG][STEP6] deep_summary attempt={attempt} len={len(summary)} tail={summary[-20:]!r}")
+            # 输出被 max_tokens 截断时，带着原文和已输出内容多轮续写，直到出现「（完）」。
+            for round_no in range(1, DEEP_SUMMARY_MAX_CONTINUATIONS + 1):
+                if "（完）" in summary:
+                    break
+                cont_messages = messages + [
+                    {"role": "assistant", "content": summary},
+                    {
+                        "role": "user",
+                        "content": "你上一次的输出在中途被截断了。请紧接着最后一个字继续写完剩余内容，"
+                        "不要重复已输出的部分，也不要重新开头；全部写完后单独输出一行“（完）”。",
+                    },
+                ]
+                cont = call_llm_text(
+                    active_client, cont_messages, temperature=0.3, max_tokens=DEEP_SUMMARY_MAX_TOKENS
+                )
+                cont = (cont or "").strip()
+                if not cont:
+                    break
+                summary = join_continuation(summary, cont)
+                if os.getenv("DPR_DEBUG_STEP6") == "1":
+                    log(f"[DEBUG][STEP6] deep_summary_cont attempt={attempt} round={round_no} len={len(summary)}")
+            if len(summary) > len(best):
+                best = summary
             if "（完）" in summary:
                 return summary
-            # 续写一次：避免输出被截断
-            cont_messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "你上一次的总结可能被截断了，请从中断处继续补全，不要重复已输出内容。"},
-                {"role": "user", "content": f"上一次输出如下：\n\n{summary}\n\n请继续补全，最后以一行“（完）”结束。"},
-            ]
-            cont = call_llm_text(active_client, cont_messages, temperature=0.3, max_tokens=2048)
-            cont = (cont or "").strip()
-            merged = f"{summary}\n\n{cont}".strip()
-            if os.getenv("DPR_DEBUG_STEP6") == "1":
-                log(f"[DEBUG][STEP6] deep_summary_cont attempt={attempt} len={len(cont)} merged_tail={merged[-20:]!r}")
-            if "（完）" in merged:
-                return merged
+            log(f"[WARN] 精读总结续写 {DEEP_SUMMARY_MAX_CONTINUATIONS} 轮后仍未完整（第 {attempt} 次）。")
         except Exception as e:
             log(f"[WARN] 精读总结失败（第 {attempt} 次）：{e}")
             time.sleep(2 * attempt)
-    return last or None
+    return best or None
+
+
+def join_continuation(previous: str, cont: str) -> str:
+    """拼接续写：续写以 Markdown 结构（标题/列表/编号/表格/公式块）开头时换行，否则视为同一行接着写。"""
+    if re.match(r"^(#{1,6}\s|[-*+]\s|\d+[.)]\s|\||\$\$|```|（完）)", cont):
+        return f"{previous}\n{cont}"
+    return f"{previous}{cont}"
+
+
+def deep_summary_complete(md_text: str) -> bool:
+    """已有的精读总结是否写完（以「（完）」结束标记为准）。"""
+    return "（完）" in extract_section_tail(md_text, "论文详细总结（自动生成）")
 
 
 def generate_glance_overview(
@@ -1763,7 +1790,7 @@ def ensure_reading_content(paper, section, md_path, txt_path, client, *, require
     if missing and require_complete:
         raise RuntimeError('论文内容未生成完整：' + ', '.join(missing))
 
-    if section == 'deep' and not extract_section_tail(text, '论文详细总结（自动生成）'):
+    if section == 'deep' and not deep_summary_complete(text):
         ensure_text_content(paper.get('pdf_url') or paper.get('link') or '', txt_path)
         summary = generate_deep_summary(md_path, txt_path, client=client)
         if not summary or '（完）' not in summary:
@@ -1980,8 +2007,7 @@ def process_paper(
 
         if section == "deep":
             # 精读区：检查是否已有详细总结
-            tail = extract_section_tail(existing, "论文详细总结（自动生成）")
-            if tail:
+            if deep_summary_complete(existing):
                 return paper_id, title
 
             # 生成详细总结
