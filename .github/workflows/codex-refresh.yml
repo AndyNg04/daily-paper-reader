@@ -1,0 +1,55 @@
+name: codex-refresh
+
+# 每天检查一次 Codex 凭证，剩余有效期低于阈值时刷新并写回 CODEX_AUTH_JSON（fork 专用）。
+# refresh token 每用一次就作废：由这里提前刷新，日报、精读等 workflow 里的 proxy 就不会
+# 碰到它自己的刷新窗口（到期前 24 小时），也就不会出现两个运行同时刷新、互相作废的情况。
+# 那些 workflow 结束时也会检查并写回，作为兜底。
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "不管剩余有效期，强制刷新一次"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codex-auth
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: github.repository != 'ziwenhahaha/daily-paper-reader'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+          sparse-checkout: |
+            scripts
+            .github/actions
+
+      - name: Refresh Codex credentials
+        env:
+          CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          root="$RUNNER_TEMP/codex-proxy"
+          echo "CODEX_PROXY_ROOT=$root" >> "$GITHUB_ENV"
+          python3 scripts/codex_auth.py install --dir "$root/auth" --digest-out "$root/installed.sha256"
+          args=(--dir "$root/auth" --min-hours 96)
+          if [ "${FORCE:-false}" = "true" ]; then args+=(--force); fi
+          python3 scripts/codex_auth.py refresh "${args[@]}"
+
+      - name: Write back CODEX_AUTH_JSON
+        if: always()
+        uses: ./.github/actions/codex-auth-writeback
+        with:
+          write-token: ${{ secrets.CODEX_SECRET_WRITE_TOKEN }}
