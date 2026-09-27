@@ -57,16 +57,34 @@ def check_model(model: str) -> None:
         data = LLMClient.parse_json_content(r["content"])
         return isinstance(data, dict) and "score" in data, f"keys={sorted(data) if isinstance(data, dict) else type(data).__name__}"
 
-    def json_schema():
-        schema = {"type": "object", "properties": {"tags": {"type": "array", "items": {"type": "string"}}},
-                  "required": ["tags"], "additionalProperties": False}
-        r = client(model, temperature=0.1).chat_structured(
-            [{"role": "user", "content": "给论文《Attention Is All You Need》打 3 个英文关键词标签。"}],
-            schema_name="tags", schema=schema)
+    schema = {"type": "object", "properties": {"tags": {"type": "array", "items": {"type": "string"}}},
+              "required": ["tags"], "additionalProperties": False}
+    # 与真实调用方（如 Step 4）一致：默认格式（json_object → prompt_only）不会把 schema 发给模型，
+    # 所以字段名要写在提示词里。
+    schema_prompt = [{"role": "user", "content":
+                      '给论文《Attention Is All You Need》打 3 个英文关键词标签，输出 JSON：{"tags": [字符串, ...]}。'}]
+
+    def structured_result(r):
         data = r.get("parsed") if isinstance(r, dict) else None
-        if data is None and isinstance(r, dict):
-            data = LLMClient.parse_json_content(r.get("content", ""))
-        return isinstance(data, dict) and isinstance(data.get("tags"), list), f"result_keys={sorted(r) if isinstance(r, dict) else ''}"
+        ok = isinstance(data, dict) and isinstance(data.get("tags"), list) and r.get("parse_error") is None
+        return ok, f"format={r.get('response_format_used')} parsed={json.dumps(data, ensure_ascii=False)[:80]} error={r.get('parse_error')}"
+
+    def json_schema():
+        return structured_result(client(model, temperature=0.1).chat_structured(
+            schema_prompt, schema_name="tags", schema=schema))
+
+    def json_schema_native():
+        # 仅供参考：强制先发 json_schema（DPR_LLM_STRUCTURED_FORMAT=json_schema），看 proxy 是否原生支持。
+        old = os.environ.get("DPR_LLM_STRUCTURED_FORMAT")
+        os.environ["DPR_LLM_STRUCTURED_FORMAT"] = "json_schema"
+        try:
+            return structured_result(client(model, temperature=0.1).chat_structured(
+                schema_prompt, schema_name="tags", schema=schema))
+        finally:
+            if old is None:
+                os.environ.pop("DPR_LLM_STRUCTURED_FORMAT", None)
+            else:
+                os.environ["DPR_LLM_STRUCTURED_FORMAT"] = old
 
     def continuation():
         # 精读总结的续写方式（6.generate_docs.generate_deep_summary）：最后一轮是 assistant 已输出的内容。
@@ -91,16 +109,20 @@ def check_model(model: str) -> None:
             [{"role": "user", "content": "只回答 OK"}])
         return bool(r["content"].strip()), f"content={r['content'][:20]!r}"
 
-    def long_input():
-        filler = ("Transformers use self-attention to model token interactions. " * 900)
-        r = client(model, temperature=0.3, max_tokens=4096).chat(
-            [{"role": "system", "content": "你是论文阅读助手。"},
-             {"role": "user", "content": f"下面是一段很长的论文正文：\n{filler}\n\n用 5 条中文要点总结，最后单独一行写（完）。"}])
-        return "（完）" in r["content"], f"prompt_tokens={r['tokens']['prompt']} len={len(r['content'])} finish={r['finish_reason']}"
+    def long_input(repeat: int):
+        def run():
+            filler = ("Transformers use self-attention to model token interactions. " * repeat)
+            r = client(model, temperature=0.3, max_tokens=4096).chat(
+                [{"role": "system", "content": "你是论文阅读助手。"},
+                 {"role": "user", "content": f"下面是一段很长的论文正文：\n{filler}\n\n用 5 条中文要点总结，最后单独一行写（完）。"}])
+            return "（完）" in r["content"], f"prompt_tokens={r['tokens']['prompt']} len={len(r['content'])} finish={r['finish_reason']}"
+        return run
 
     for name, fn in [("普通对话", plain), ("JSON mode", json_object), ("json_schema", json_schema),
+                     ("json_schema 原生（参考）", json_schema_native),
                      ("assistant 续写", continuation), ("max_tokens 截断", truncation),
-                     ("thinking 参数", thinking_param), ("长输入", long_input)]:
+                     ("thinking 参数", thinking_param), ("长输入 ~9k", long_input(900)),
+                     ("长输入 ~40k（整篇论文量级）", long_input(4000))]:
         record(model, name, fn)
 
 
@@ -110,7 +132,8 @@ def main() -> int:
     ids = sorted(m.get("id", "") for m in resp.json().get("data", []))
     print("可用模型：", json.dumps(ids, ensure_ascii=False), flush=True)
     models = []
-    for m in (os.getenv("SUMMARY_MODEL", ""), os.getenv("DEEPSEEK_FILTER_MODEL", "")):
+    extra = [m.strip() for m in os.getenv("CODEX_CHECK_EXTRA_MODELS", "").split(",")]
+    for m in (os.getenv("SUMMARY_MODEL", ""), os.getenv("DEEPSEEK_FILTER_MODEL", ""), *extra):
         if m and m not in models:
             models.append(m)
     for m in models:
@@ -122,7 +145,8 @@ def main() -> int:
             fh.write(f"可用模型：`{', '.join(ids)}`\n\n| 模型 | 检查项 | 结果 | 说明 |\n|---|---|---|---|\n")
             for model, name, ok, detail in results:
                 fh.write(f"| {model} | {name} | {'✅' if ok else '❌'} | {detail.replace('|', '/')} |\n")
-    return 0 if all(ok for _, _, ok, _ in results) else 1
+    required = [ok for _, name, ok, _ in results if "（参考）" not in name]
+    return 0 if all(required) else 1
 
 
 if __name__ == "__main__":
