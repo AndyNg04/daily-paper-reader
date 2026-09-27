@@ -44,6 +44,12 @@ window.DPRWorkflowRunner = (function () {
         run_llm_refine: 'true',
       },
     },
+    {
+      key: 'deep-read-paper',
+      id: 'deep-read-paper.yml',
+      name: '升级为精读',
+      desc: '把某个日期块速读区的单篇论文补写精读总结并移到精读区（论文页入口触发）。',
+    },
   ];
 
   const QUICK_FETCH_PRESETS = {
@@ -1223,8 +1229,23 @@ window.DPRWorkflowRunner = (function () {
   const runConferenceMaintain = async (conference, years) =>
     runConferenceRetrieval(conference, years);
 
+  // 与 src/deep_read_paper.py / deep-read-paper.yml 的输入规则一致；前端只发带版本号的编号。
+  const buildDeepReadRequest = (options = {}) => {
+    const paperId = String((options && options.paperId) || '').trim();
+    const paperDate = String((options && options.paperDate) || '').trim();
+    if (!/^\d{4}\.\d{4,5}v[1-9]\d*$/.test(paperId)) throw new Error(`论文编号不合法：${paperId || '(空)'}，需要带版本号的 arXiv 编号，例如 2609.03454v1。`);
+    if (!/^\d{8}(-\d{8})?$/.test(paperDate)) throw new Error(`日期块不合法：${paperDate || '(空)'}，需要 YYYYMMDD 或 YYYYMMDD-YYYYMMDD。`);
+    return { key: 'deep-read-paper', inputs: { paper_id: paperId, paper_date: paperDate } };
+  };
+  const runDeepReadPaper = async (options) => {
+    let request;
+    try { request = buildDeepReadRequest(options); }
+    catch (error) { open(); setStatus(error.message, '#c00'); return false; }
+    return runWorkflowByKey(request.key, request.inputs);
+  };
+
   return {
-    __test: { buildQuickFetchRequest, buildStarterPackRequest, buildTopicResearchRequest, sanitizeResearchProfile },
+    __test: { buildQuickFetchRequest, buildStarterPackRequest, buildTopicResearchRequest, sanitizeResearchProfile, buildDeepReadRequest },
     buildTopicResearchRequest,
     sanitizeResearchProfile,
     continueTopicResearch,
@@ -1235,5 +1256,7 @@ window.DPRWorkflowRunner = (function () {
     runQuickFetchByDays,
     runConferenceRetrieval,
     runConferenceMaintain,
+    runDeepReadPaper,
+    isLocalDebugPage,
   };
 })();

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -351,6 +352,22 @@ def build_command(workflow_key: str, workflow_file: str, inputs: dict[str, str])
             f"--result archive/{run_date}/rank/conference-${{CONF_TOKEN}}-${{YEAR_TOKEN}}.supabase.rerank.json "
             f"--result archive/{run_date}/filtered/conference-${{CONF_TOKEN}}-${{YEAR_TOKEN}}.supabase.rrf.json "
             "--sidebar docs/_sidebar.md",
+        ])
+        return ["bash", "-lc", script]
+
+    if workflow_file == "deep-read-paper.yml" or workflow_key == "deep-read-paper":
+        # 与 deep-read-paper.yml 相同的两步，但直接写本地 docs/，不提交（与其他本地映射一致）。
+        paper_id = norm_text(inputs.get("paper_id"))
+        paper_date = norm_text(inputs.get("paper_date"))
+        if not re.fullmatch(r"\d{4}\.\d{4,5}v[1-9]\d*", paper_id, re.ASCII):
+            raise ValueError(f"paper_id 不合法：{paper_id!r}（需要带版本号，例如 2609.03454v1）")
+        if not re.fullmatch(r"\d{8}(?:-\d{8})?", paper_date, re.ASCII):
+            raise ValueError(f"paper_date 不合法：{paper_date!r}（需要 YYYYMMDD 或 YYYYMMDD-YYYYMMDD）")
+        args = f"--docs-dir docs --paper-id {shlex.quote(paper_id)} --paper-date {shlex.quote(paper_date)}"
+        script = "\n".join([
+            "set -euo pipefail",
+            f"{shlex.quote(python)} src/deep_read_paper.py generate {args}",
+            f"{shlex.quote(python)} src/deep_read_paper.py promote {args}",
         ])
         return ["bash", "-lc", script]
 

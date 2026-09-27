@@ -289,6 +289,64 @@ function createClassList(initial = []) {
   };
 }
 
+// 「升级为精读」入口：只认日报块速读区中带 slug 的 arXiv 论文，paperDate 取 <!--dpr-date:...--> 原样 token。
+{
+  const api = loadSidebarForTest().__test;
+  const link = (href) => `      * <a class="dpr-sidebar-item-link" href="${href}" data-sidebar-item="{&quot;title&quot;: &quot;T&quot;}">T</a>\n`;
+  const text = [
+    '* <a class="dpr-sidebar-root-link" href="#/">首页</a>\n',
+    '* Daily Papers\n',
+    '  * 2026-08-28 ~ 2026-09-26 <!--dpr-date:20260828-20260926-->\n',
+    '    * 精读区\n',
+    link('#/20260828-20260926/2608.28165v1-crabos-an-operating-system'),
+    '    * 速读区\n',
+    link('#/20260828-20260926/2609.03454v1-when-retrieval-helps'),
+    link('#/20260828-20260926/2609.99999v2'),
+    link('#/202609/26/2609.11111v1-wrong-block'),
+    '  * 2026-09-26 <!--dpr-date:20260926-->\n',
+    '    * 速读区\n',
+    link('#/202609/26/2609.22222v3-single-day-quick'),
+    '  * 2026-07-01 ~ 2026-09-01 <!--dpr-date:20260701-20260901-->\n',
+    '    * 速读区\n',
+    link('#/20260701-20260901/2609.33333v1'),
+    '  * 2026-06-01\n',
+    '    * 速读区\n',
+    link('#/202606/01/2606.44444v1-legacy-no-marker'),
+    '* Conference Papers\n',
+    '  * ICML 2025 <!--dpr-conference:icml-2025-->\n',
+    '    * ATSP\n',
+    link('#/conference/icml-2025/2501.55555v1-conf'),
+  ].join('');
+  const model = api.parseSidebar(text);
+  const ctx = (href) => api.findDailyPaperContextFromModel(model, href);
+  assert.equal(model.daily.find(d => d.dateKey === '20260828-20260926').dateToken, '20260828-20260926');
+  assert.equal(model.daily.find(d => d.dateKey === '20260926').dateToken, '20260926');
+  assert.deepEqual(ctx('#/20260828-20260926/2609.03454v1-when-retrieval-helps'), {
+    paperId: '2609.03454v1', paperDate: '20260828-20260926', section: 'quick',
+    href: '#/20260828-20260926/2609.03454v1-when-retrieval-helps',
+  });
+  assert.equal(ctx('#/20260828-20260926/2609.03454v1-when-retrieval-helps?id=x').paperId, '2609.03454v1', '忽略 query');
+  assert.deepEqual(ctx('#/202609/26/2609.22222v3-single-day-quick'), {
+    paperId: '2609.22222v3', paperDate: '20260926', section: 'quick', href: '#/202609/26/2609.22222v3-single-day-quick',
+  });
+  assert.equal(ctx('#/20260828-20260926/2608.28165v1-crabos-an-operating-system').section, 'deep', '精读区论文不显示入口');
+  assert.equal(ctx('#/20260828-20260926/2609.99999v2'), null, '无 slug 的 long-range 路由不支持');
+  assert.equal(ctx('#/20260701-20260901/2609.33333v1'), null, 'long-range 回溯块不支持');
+  assert.equal(ctx('#/202609/26/2609.11111v1-wrong-block'), null, '路由目录与日期块 token 不一致时不显示');
+  assert.equal(ctx('#/202606/01/2606.44444v1-legacy-no-marker'), null, '没有 dpr-date 标记的旧块不猜 token');
+  assert.equal(ctx('#/conference/icml-2025/2501.55555v1-conf'), null, '会议论文不支持');
+  assert.equal(ctx('#/'), null);
+  assert.equal(ctx('#/20260828-20260926/README'), null);
+  assert.equal(ctx('#/20260828-20260926/2609.03454-when-retrieval-helps'), null, '必须带版本号');
+  // 同一 href 在同块精读区与速读区都有（日报重跑残留）时视为已是精读。
+  const dup = api.parseSidebar('* Daily Papers\n  * 2026-09-26 <!--dpr-date:20260926-->\n    * 精读区\n' + link('#/202609/26/2609.22222v3-x') + '    * 速读区\n' + link('#/202609/26/2609.22222v3-x'));
+  assert.equal(api.findDailyPaperContextFromModel(dup, '#/202609/26/2609.22222v3-x').section, 'deep');
+  assert.equal(api.findDailyPaperContextFromModel(null, '#/202609/26/2609.22222v3-x'), null);
+  const publicApi = loadSidebarForTest('#/202609/26/2609.22222v3-x').api;
+  assert.equal(typeof publicApi.getDailyPaperContext, 'function');
+  assert.equal(publicApi.getDailyPaperContext(), null, '侧栏未加载时不显示入口');
+}
+
 const sampleSidebar = `
 * <a class="dpr-sidebar-root-link" href="#/">首页</a>
 * <a class="dpr-sidebar-root-link" href="#/tutorial/README">使用教程</a>

@@ -372,6 +372,23 @@
     var current = normalizeRouteHref(href || currentRouteHref());
     return collectPaperHrefsFromModel(model).indexOf(current) >= 0 ? current : '';
   }
+  // 「升级为精读」只接受日报块中带 slug 的 arXiv 论文；paperDate 必须是 <!--dpr-date:...--> 原样 token。
+  function findDailyPaperContextFromModel(model, href) {
+    var current = normalizeRouteHref(href || '');
+    var found = null;
+    (model && model.daily || []).forEach(function (day) {
+      var token = String(day && day.dateToken || '');
+      if (found || !/^\d{8}(-\d{8})?$/.test(token)) return;
+      var routeDir = token.indexOf('-') > 0 ? token : token.slice(0, 6) + '/' + token.slice(6);
+      var m = current.slice(2 + routeDir.length).match(/^\/(\d{4}\.\d{4,5}v[1-9]\d*)-[^/]+$/);
+      if (current.slice(0, 2 + routeDir.length) !== '#/' + routeDir || !m) return;
+      var hits = (day.papers || []).filter(function (paper) { return normalizeRouteHref(paper && paper.href) === current; });
+      if (!hits.length) return;
+      var deep = hits.some(function (paper) { return paper.section !== 'quick'; });
+      found = { paperId: m[1], paperDate: token, section: deep ? 'deep' : 'quick', href: current };
+    });
+    return found;
+  }
   function findCurrentReportHrefFromModel(model, href) {
     var current = normalizeRouteHref(href || currentRouteHref());
     return collectReportHrefsFromModel(model).indexOf(current) >= 0 ? current : '';
@@ -773,6 +790,7 @@
               rawLabel;
             var day = {
               dateKey: dateKey,
+              dateToken: markerMatch ? markerMatch[1].trim() : '',
               dateLabel: (dayLink && dayLink.label) || rawLabel || formatDateLabel(dateKey),
               reportHref: dayReportHrefFromKey(dateKey, dayLink && dayLink.href),
               papers: [],
@@ -2848,6 +2866,7 @@
     getCurrentHref: function () { return currentRouteHref(); },
     getCurrentPaperHref: function () { return findCurrentPaperHrefFromModel(state.model); },
     getCurrentReportHref: function () { return findCurrentReportHrefFromModel(state.model); },
+    getDailyPaperContext: function (href) { return findDailyPaperContextFromModel(state.model, href || currentRouteHref()); },
     openMobile: function () { return toggleMobile(true); },
     closeMobile: function () { return toggleMobile(false); },
     toggleMobile: function () { return toggleMobile(); },
@@ -2875,6 +2894,7 @@
         collectReportHrefsFromModel: collectReportHrefsFromModel,
         findCurrentPaperHrefFromModel: findCurrentPaperHrefFromModel,
         findCurrentReportHrefFromModel: findCurrentReportHrefFromModel,
+        findDailyPaperContextFromModel: findDailyPaperContextFromModel,
         collectUnreadPaperIdsForSnapshot: collectUnreadPaperIdsForSnapshot,
         ensureUnreadSessionPaperIds: ensureUnreadSessionPaperIds,
         buildDailyDateView: buildDailyDateView,
