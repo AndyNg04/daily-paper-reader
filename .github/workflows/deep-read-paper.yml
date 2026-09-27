@@ -1,0 +1,191 @@
+name: deep-read-paper
+run-name: "deep read ${{ inputs.paper_id }} (${{ inputs.paper_date }})"
+
+# 把某个日期块「速读区」里的论文升级为精读：
+#   1. 调用 src/6.generate_docs.py 已有的单篇模式（--paper-section deep）补精读长总结/图表；
+#   2. 把 docs/_sidebar.md 中该日期块的条目挪到「精读区」，并同步 _daily_state.json、
+#      该日期的日报 README.md（两节列表 + 计数）与 papers.meta.json（纯文本，不调 LLM）；
+#   3. 只提交这篇论文相关的文件，推送到触发时所在的分支（与日报 workflow 相同）。
+# 已知不更新：首页 docs/README.md（该日期块是最新一期时首页仍按旧分区展示，下次日报运行重建）、
+# 日报 README 中 LLM 写的「今日简报（AI）」段落。PR #1 之后的 long-range 回溯块（<id>.md）不支持。
+# 编排逻辑在 fork 专用的 src/deep_read_paper.py 中，由 tests/test_deep_read_paper*.py 覆盖。
+on:
+  workflow_dispatch:
+    inputs:
+      paper_id:
+        description: "arXiv 编号，例如 2609.03454v1（可省略版本号，但该日期目录下只能有一个版本）"
+        required: true
+        type: string
+      paper_date:
+        description: "论文所在日期块：单日 YYYYMMDD 或区间 YYYYMMDD-YYYYMMDD（即侧边栏 <!--dpr-date:...--> 标记）"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+# 并发设计：
+# - 不与日报共用 `daily-paper-reader` 组。GitHub 同一并发组最多保留 1 个 pending 运行，
+#   新排队的运行会直接取消已在 pending 的那个（cancel-in-progress: false 也一样），
+#   共用组会让「日报」和「精读」互相静默吞掉排队中的运行。
+# - 按「日期块 + 论文」分组：只有完全相同的请求才会互相顶替（被取消的是重复请求），
+#   不同论文可以并行。
+# - 本 workflow 后推送时：提交步骤每次都基于最新 origin/<branch> 重建提交（三方比较写回
+#   论文文件 + 幂等移动侧边栏条目），推送被拒就重试，从不 force push，也不会覆盖别人刚提交的
+#   docs/_sidebar.md。
+# - 反方向不受保护：同一日期 token 的日报重跑若在本次推送之前检出、之后提交，它的
+#   `git rebase -X theirs` 会用旧状态解决重叠 hunk，可能把条目放回速读区，或让它同时出现在
+#   精读区和速读区。等日报跑完后重新运行本 workflow 即可修复（promote 会删掉速读区残留副本）。
+#   定时日报每天写新的 token，只有手动重跑同一 token 才会碰到。
+# - 日报推送被拒：日报的 Commit results 只做一次 fetch → rebase → push，不重试。若本
+#   workflow 恰好在日报 fetch 与 push 之间（几秒窗口）推送，日报推送会被拒（non-fast-forward），
+#   整个日报 job 失败，当天生成的 docs/archive 不会提交。本 workflow 不与日报串行，无法阻止：
+#   请不要在日报运行（尤其是提交阶段）时触发本 workflow；若日报因推送被拒失败，直接重跑日报即可。
+#   sync / maintain-* / conference 等其他推送 main 的 workflow 也有同样的窗口。
+concurrency:
+  group: deep-read-paper-${{ inputs.paper_date }}-${{ inputs.paper_id }}
+  cancel-in-progress: false
+
+jobs:
+  deep-read:
+    if: github.repository != 'ziwenhahaha/daily-paper-reader'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      # 需要完整 docs/（侧边栏、论文 Markdown/txt、图表目录），检出成本与日报相当；
+      # 这里只取最新一个提交（不需要历史，提交步骤不做 rebase）。
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      # 只用标准库，在安装依赖前就拒绝非法输入；输入只通过 env 传入，脚本里不做 ${{ }} 插值。
+      - name: Validate inputs and locate paper
+        id: target
+        env:
+          INPUT_PAPER_ID: ${{ inputs.paper_id }}
+          INPUT_PAPER_DATE: ${{ inputs.paper_date }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" != "branch" ]; then
+            echo "::error::请在分支上触发本 workflow（当前 ref 类型：${GITHUB_REF_TYPE}）。"
+            exit 1
+          fi
+          python src/deep_read_paper.py resolve \
+            --docs-dir docs \
+            --paper-id "$INPUT_PAPER_ID" \
+            --paper-date "$INPUT_PAPER_DATE" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Cache Python deps
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.cache/uv
+          key: ${{ runner.os }}-dpr-deep-read-deps-v1-${{ hashFiles('requirements.txt') }}
+
+      # 轻量安装：不装 torch / PaperCropper，与 PR #1 的云端化方向一致。图表提取因此走 PyMuPDF 兜底，
+      # 但只用于 front matter 里原本没有 figures_json / tables_json 的那一类：已有的图表目录在
+      # generate 中只读（生成器改动一律还原），不会被质量更差的 PyMuPDF 结果覆盖。
+      - name: Install deps (skip sqlite3)
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import re
+          lines = open("requirements.txt", "r", encoding="utf-8").read().splitlines()
+          lines = [l for l in lines if l.strip() and not re.match(r"^sqlite3\b", l)]
+          path = os.path.join(os.environ["RUNNER_TEMP"], "req.txt")
+          open(path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
+          PY
+          python -m pip install --upgrade pip
+          python -m pip install uv
+          uv pip install --system -r "$RUNNER_TEMP/req.txt"
+
+      # 单篇模式只读取 DeepSeek/Summary 相关变量（6.generate_docs.py 顶部），
+      # 不涉及召回/重排/向量化，因此不注入 RERANK_* / SILICONFLOW_* / DPR_EMBED_* 等 secrets。
+      # 优先级与日报 Step 6 一致（src/main.py resolve_summary_step_env）：SUMMARY_* 优先，
+      # 并把同一组值同时写进 DEEPSEEK_*/SUMMARY_*。生成器自己的优先级是 key/URL 取 DEEPSEEK_*、
+      # model 取 SUMMARY_*，两组 secrets 不一致时会混用，所以这里先归一。
+      - name: Generate deep summary
+        timeout-minutes: 35
+        env:
+          PAPER_ID: ${{ steps.target.outputs.paper_id }}
+          PAPER_DATE: ${{ steps.target.outputs.paper_date }}
+          DEEPSEEK_API_KEY: ${{ secrets.SUMMARY_API_KEY || secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ secrets.SUMMARY_BASE_URL || secrets.DEEPSEEK_BASE_URL }}
+          DEEPSEEK_MODEL: ${{ secrets.SUMMARY_MODEL || secrets.DEEPSEEK_MODEL }}
+          SUMMARY_API_KEY: ${{ secrets.SUMMARY_API_KEY || secrets.DEEPSEEK_API_KEY }}
+          SUMMARY_BASE_URL: ${{ secrets.SUMMARY_BASE_URL || secrets.DEEPSEEK_BASE_URL }}
+          SUMMARY_MODEL: ${{ secrets.SUMMARY_MODEL || secrets.DEEPSEEK_MODEL }}
+          PAPERCROPPER_DISABLE: "1"
+        run: |
+          set -euo pipefail
+          python src/deep_read_paper.py generate \
+            --docs-dir docs \
+            --paper-id "$PAPER_ID" \
+            --paper-date "$PAPER_DATE" \
+            --stash "$RUNNER_TEMP/deep-read"
+
+      # 只提交这篇论文的 md/txt/图表目录 + docs/_sidebar.md + 该日期的 _daily_state.json /
+      # README.md / papers.meta.json（清单由 `deep_read_paper.py paths` 给出）。
+      # 生成器的副作用（backfill_history_day_reports 补的历史日报 README 等）不提交：
+      # 每次尝试都先 reset 到最新 origin/<branch> 并清掉 docs/ 下未跟踪文件。
+      # reset 会把 src/ 换成远端最新版本，所以先把本次运行校验/生成时用的脚本固定到 RUNNER_TEMP。
+      - name: Commit deep read results
+        if: github.repository != 'ziwenhahaha/daily-paper-reader'
+        env:
+          PAPER_ID: ${{ steps.target.outputs.paper_id }}
+          PAPER_DATE: ${{ steps.target.outputs.paper_date }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          branch="${GITHUB_REF_NAME}"
+          stash="$RUNNER_TEMP/deep-read"
+          drp="$RUNNER_TEMP/deep_read_paper.py"
+          cp src/deep_read_paper.py "$drp"
+          max_attempts=5
+          attempt=1
+          while true; do
+            echo "[INFO] 提交尝试 ${attempt}/${max_attempts}"
+            git fetch --no-tags --depth=1 origin "$branch"
+            git reset -q --hard FETCH_HEAD
+            git clean -fdq -- docs
+            python "$drp" apply --docs-dir docs --paper-id "$PAPER_ID" --paper-date "$PAPER_DATE" --stash "$stash"
+            python "$drp" promote --docs-dir docs --paper-id "$PAPER_ID" --paper-date "$PAPER_DATE"
+            paths_out="$(python "$drp" paths --docs-dir docs --paper-id "$PAPER_ID" --paper-date "$PAPER_DATE")"
+            paths=()
+            while IFS= read -r path; do
+              if [ -n "$path" ]; then paths+=("$path"); fi
+            done <<< "$paths_out"
+            git add -A -- "${paths[@]}"
+            if git diff --cached --quiet; then
+              echo "[INFO] 没有需要提交的改动（论文已在精读区且内容一致）。"
+              exit 0
+            fi
+            git diff --cached --stat
+            git commit -q -m "[chore] deep read ${PAPER_ID}"
+            if git push origin "HEAD:refs/heads/${branch}"; then
+              echo "[OK] 已推送到 ${branch}"
+              exit 0
+            fi
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              echo "::error::推送 ${branch} 连续 ${max_attempts} 次失败，放弃。"
+              exit 1
+            fi
+            attempt=$((attempt + 1))
+            sleep $((attempt * 5))
+          done
