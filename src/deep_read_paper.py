@@ -962,9 +962,11 @@ def generate(
     if stash is not None:
         snapshot_artifacts(docs_dir, rel_paths, stash / "base")
 
-    if has_deep_block(_read_text_exact(target.md_path)):
-        log(f"[INFO] {target.md_path.name} 已包含精读总结，跳过生成器，只需移动侧边栏。")
+    if deep_block_complete(_read_text_exact(target.md_path)):
+        log(f"[INFO] {target.md_path.name} 已包含完整的精读总结，跳过生成器，只需移动侧边栏。")
     else:
+        if has_deep_block(_read_text_exact(target.md_path)):
+            log(f"[INFO] {target.md_path.name} 的精读总结不完整（缺少「{DEEP_SUMMARY_END_MARKER}」），重新生成。")
         if not (os.getenv("DEEPSEEK_API_KEY") or os.getenv("SUMMARY_API_KEY")):
             raise DeepReadError("未配置 DEEPSEEK_API_KEY / SUMMARY_API_KEY，无法生成精读总结。")
         original_md = _read_text_exact(target.md_path)
@@ -995,6 +997,11 @@ def generate(
                 "预期只更新已有文件。"
             )
         md_text = _read_text_exact(target.md_path)
+        if has_deep_block(original_md) and md_text == original_md:
+            raise DeepReadError(
+                f"{target.md_path.name} 原有的精读总结不完整，但生成器没有改动它"
+                "（常见原因：LLM 调用失败或额度不足）。"
+            )
         if not has_deep_block(md_text):
             raise DeepReadError(
                 f"生成器返回成功，但 {target.md_path.name} 中没有「## {DEEP_SUMMARY_HEADING}」内容"
