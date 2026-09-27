@@ -92,8 +92,10 @@ def test_step_order(job):
         "Validate inputs and locate paper",
         "Cache Python deps",
         "Install deps (skip sqlite3)",
+        "Start Codex proxy",
         "Generate deep summary",
         COMMIT_STEP,
+        "Write back Codex auth",
     ]
 
 
@@ -116,32 +118,36 @@ def test_lightweight_install_without_torch_or_papercropper(job):
     assert generate["env"]["PAPERCROPPER_DISABLE"] == "1"
 
 
-def test_only_llm_secrets_are_injected_into_generate_step(text, job):
+def test_only_codex_secrets_are_used(text, job):
+    # LLM 走本机 Codex proxy：只允许 proxy 的凭证和写回 token 两个 secret，且只出现在这两个步骤里。
     secrets = set(re.findall(r"secrets\.([A-Z0-9_]+)", text))
-    assert secrets == {
-        "DEEPSEEK_API_KEY",
-        "DEEPSEEK_BASE_URL",
-        "DEEPSEEK_MODEL",
-        "SUMMARY_API_KEY",
-        "SUMMARY_BASE_URL",
-        "SUMMARY_MODEL",
-    }
+    assert secrets == {"CODEX_AUTH_JSON", "CODEX_SECRET_WRITE_TOKEN"}
     for step in job["steps"]:
-        env_text = str(step.get("env", {}))
-        if step["name"] != "Generate deep summary":
-            assert "secrets." not in env_text, step["name"]
+        if step.get("name") not in ("Start Codex proxy", "Write back Codex auth"):
+            assert "secrets." not in str(step.get("env", {})), step["name"]
+            assert "secrets." not in str(step.get("with", {})), step["name"]
     assert "secrets." not in str(job.get("env", {}))
-    assert "secrets." not in str(steps_by_name(job)["Checkout"].get("with", {}))
 
 
-def test_llm_secret_precedence_matches_daily_summary_step(job):
-    # src/main.py resolve_summary_step_env：SUMMARY_* 优先，同一组值同时写入 DEEPSEEK_* 与 SUMMARY_*，
-    # 这样 6.generate_docs.py（key/URL 取 DEEPSEEK_*、model 取 SUMMARY_*）看到的是同一组配置。
+def test_generate_step_reads_llm_env_from_codex_proxy(job):
+    # proxy 把 DEEPSEEK_* / SUMMARY_* 写进 GITHUB_ENV；步骤级 env 里再声明会盖过它。
+    names = [step.get("name") for step in job["steps"]]
+    assert names.index("Start Codex proxy") < names.index("Generate deep summary")
     env = steps_by_name(job)["Generate deep summary"]["env"]
-    for suffix in ("API_KEY", "BASE_URL", "MODEL"):
-        expected = f"${{{{ secrets.SUMMARY_{suffix} || secrets.DEEPSEEK_{suffix} }}}}"
-        assert env[f"DEEPSEEK_{suffix}"] == expected
-        assert env[f"SUMMARY_{suffix}"] == expected
+    assert not [k for k in env if k.startswith(("DEEPSEEK_", "SUMMARY_", "LLM_PRIMARY"))]
+
+
+def test_codex_writeback_runs_last_after_commit_reset(job):
+    # 提交步骤会 git reset --hard FETCH_HEAD，写回用的 action 与脚本要在最新 main 上存在，
+    # 所以写回必须放在提交步骤之后，并且是最后一步。
+    last = job["steps"][-1]
+    assert last["name"] == "Write back Codex auth"
+    assert last["if"] == "always()"
+    assert last["uses"] == "./.github/actions/codex-auth-writeback"
+    names = [step.get("name") for step in job["steps"]]
+    assert names.index(COMMIT_STEP) < names.index("Write back Codex auth")
+    assert (ROOT / ".github" / "actions" / "codex-auth-writeback" / "action.yml").exists()
+    assert (ROOT / "scripts" / "codex_proxy.sh").exists()
 
 
 def test_permissions_timeout_and_concurrency(workflow, job):

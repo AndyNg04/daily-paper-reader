@@ -139,9 +139,6 @@ jobs:
       DPR_EMBED_API_TIMEOUT: "60"
       DPR_EMBED_API_URL: ${{ secrets.DPR_EMBED_API_URL || 'https://zwwen.online/embed' }}
       DPR_EMBED_API_KEY: ${{ secrets.DPR_EMBED_API_KEY }}
-      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-      DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
-      DEEPSEEK_MODEL: ${{ secrets.DEEPSEEK_MODEL }}
       PYTHONUNBUFFERED: "1"
 
     steps:
@@ -177,6 +174,15 @@ jobs:
 
       - name: Check cloud embedding and reranker
         run: python scripts/check_cloud_models.py --require-lightweight
+
+      # LLM 调用走本机 Codex proxy（ChatGPT 订阅额度）。它把 DEEPSEEK_* / SUMMARY_* /
+      # LLM_PRIMARY_BASE_URL 写进 GITHUB_ENV；YAML 里不能再声明这些变量，否则会盖过它。
+      - name: Start Codex proxy
+        uses: ./.github/actions/codex-proxy
+        with:
+          auth-json: ${{ secrets.CODEX_AUTH_JSON }}
+          model: ${{ vars.CODEX_MODEL || 'gpt-5.5' }}
+          fast-model: ${{ vars.CODEX_FAST_MODEL || 'gpt-5.5' }}
 
       - name: Run conference retrieval pipeline
         env:
@@ -242,7 +248,7 @@ jobs:
           fi
           if [ "${RUN_LLM_REFINE:-false}" = "true" ]; then
             if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
-              echo "::error::run_llm_refine=true requires DEEPSEEK_API_KEY secret."
+              echo "::error::run_llm_refine=true requires DEEPSEEK_API_KEY (set by the Start Codex proxy step)."
               exit 1
             fi
             ARGS+=(--run-llm-refine --llm-min-star "${LLM_MIN_STAR:-4}" --llm-filter-concurrency 2 --display-min-score 4)
@@ -329,3 +335,11 @@ jobs:
             git diff --cached --quiet && { echo "[OK] no changes after re-merge, skipping"; exit 0; }
             git commit -m "$COMMIT_MSG"
           done
+
+      # refresh token 每用一次就作废：本次运行里 proxy 刷新过凭证就写回 CODEX_AUTH_JSON。
+      # 必须是 job 的最后一步，并且无论前面成功与否都要执行。
+      - name: Write back Codex auth
+        if: always()
+        uses: ./.github/actions/codex-auth-writeback
+        with:
+          write-token: ${{ secrets.CODEX_SECRET_WRITE_TOKEN }}
