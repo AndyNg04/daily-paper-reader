@@ -1,0 +1,51 @@
+name: Write back Codex auth
+description: >-
+  refresh token 每用一次就作废。如果本次运行里凭证被刷新过，把新凭证写回 repo secret
+  CODEX_AUTH_JSON（需要 CODEX_SECRET_WRITE_TOKEN：只有本仓库 Secrets 读写权限的
+  fine-grained PAT）。凭证没变时什么都不做。fork 专用，请用 if: always() 调用。
+inputs:
+  write-token:
+    description: secrets.CODEX_SECRET_WRITE_TOKEN
+    required: false
+    default: ""
+  always:
+    description: "true 时无论是否变化都写回（登录 workflow 用）"
+    required: false
+    default: "false"
+runs:
+  using: composite
+  steps:
+    - name: Write back Codex auth
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.write-token }}
+        WRITE_ALWAYS: ${{ inputs.always }}
+      run: |
+        set -uo pipefail
+        root="${CODEX_PROXY_ROOT:-${RUNNER_TEMP}/codex-proxy}"
+        if [ ! -d "$root/auth" ]; then
+          echo "[codex-auth] 没有凭证目录，跳过写回"
+          exit 0
+        fi
+        bash "$GITHUB_WORKSPACE/scripts/codex_proxy.sh" stop || true
+        out="$root/export.json"
+        digest_args=()
+        if [ "$WRITE_ALWAYS" != "true" ]; then digest_args=(--digest-in "$root/installed.sha256"); fi
+        python3 "$GITHUB_WORKSPACE/scripts/codex_auth.py" export --dir "$root/auth" --out "$out" "${digest_args[@]}"
+        rc=$?
+        if [ "$rc" -eq 0 ]; then rm -f "$out"; exit 0; fi
+        if [ "$rc" -ne 10 ]; then rm -f "$out"; exit 1; fi
+        if [ -z "$GH_TOKEN" ]; then
+          rm -f "$out"
+          echo "::error::Codex 凭证已刷新，但没有配置 CODEX_SECRET_WRITE_TOKEN，无法写回 CODEX_AUTH_JSON。旧凭证已作废，请重新运行 Codex login workflow。"
+          exit 1
+        fi
+        gh secret set CODEX_AUTH_JSON --repo "$GITHUB_REPOSITORY" < "$out"
+        rc=$?
+        rm -f "$out"
+        if [ "$rc" -eq 0 ]; then
+          echo "[codex-auth] 已把新凭证写回 CODEX_AUTH_JSON"
+        else
+          echo "::error::写回 CODEX_AUTH_JSON 失败（检查 CODEX_SECRET_WRITE_TOKEN 是否过期、是否有本仓库 Secrets 写权限）。"
+        fi
+        exit "$rc"
