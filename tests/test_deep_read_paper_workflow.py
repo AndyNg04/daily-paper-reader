@@ -156,7 +156,7 @@ def test_permissions_timeout_and_concurrency(workflow, job):
 
 
 def test_concurrency_comment_documents_daily_push_rejection(text):
-    # 日报的提交步骤只推送一次不重试；本 workflow 与日报不串行，必须在注释里写明这个竞态和恢复方式。
+    # 本 workflow 与日报不串行，日报推送可能被拒（日报会有限次重试）；注释里必须写明这个竞态和恢复方式。
     header = text.split("\nconcurrency:", 1)[0]
     assert "日报推送被拒" in header
     assert "重跑日报" in header
