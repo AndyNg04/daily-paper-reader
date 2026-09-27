@@ -98,7 +98,7 @@ cmd_start() {
   fi
   log "proxy 已在 ${base} 启动"
 
-  local strong="${CODEX_MODEL:-gpt-5.5}" fast="${CODEX_FAST_MODEL:-${CODEX_MODEL:-gpt-5.5}}"
+  local strong="${CODEX_MODEL:-gpt-6-sol}" fast="${CODEX_FAST_MODEL:-gpt-6-luna}"
   local out="${GITHUB_ENV:-/dev/stdout}"
   {
     echo "CODEX_PROXY_ROOT=${ROOT}"
