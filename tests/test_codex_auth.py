@@ -147,3 +147,10 @@ def test_proxy_script_pins_and_verifies_binary():
     assert 'CPA_VERSION="7.3.20"' in sh and "sha256sum -c" in sh
     assert 'host: "127.0.0.1"' in sh and "::add-mask::" in sh
     assert 'ROOT="${CODEX_PROXY_ROOT:-${RUNNER_TEMP:-/tmp}/codex-proxy}"' in sh
+
+
+def test_proxy_script_sets_official_default_reasoning_effort():
+    # GPT-6 Sol/Luna 官方默认推理强度是 medium；用 CLIProxyAPI 的 "模型(强度)" 后缀显式指定。
+    sh = (ROOT / "scripts/codex_proxy.sh").read_text(encoding="utf-8")
+    assert 'effort="${CODEX_REASONING_EFFORT:-medium}"' in sh
+    assert 'strong="${strong}(${effort})"' in sh and 'fast="${fast}(${effort})"' in sh

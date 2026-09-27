@@ -98,7 +98,12 @@ cmd_start() {
   fi
   log "proxy 已在 ${base} 启动"
 
-  local strong="${CODEX_MODEL:-gpt-5.5}" fast="${CODEX_FAST_MODEL:-${CODEX_MODEL:-gpt-5.5}}"
+  local strong="${CODEX_MODEL:-gpt-6-sol}" fast="${CODEX_FAST_MODEL:-gpt-6-luna}"
+  # 推理强度用 OpenAI 给 GPT-6 Sol/Luna 的官方默认值 medium，写成 CLIProxyAPI 的
+  # "模型(强度)" 后缀显式指定，不依赖 proxy 自己的默认值。模型名已带后缀时不再追加。
+  local effort="${CODEX_REASONING_EFFORT:-medium}"
+  case "$strong" in *\)) ;; *) strong="${strong}(${effort})" ;; esac
+  case "$fast" in *\)) ;; *) fast="${fast}(${effort})" ;; esac
   local out="${GITHUB_ENV:-/dev/stdout}"
   {
     echo "CODEX_PROXY_ROOT=${ROOT}"
