@@ -1,0 +1,1104 @@
+HapticWorld: an Interactive World Simulator
+with Real-time Torque Feedback
+Shaoting Peng1,2, Litian Liang1, Yixuan Wang3,
+Ming Yang1, Katherine Driggs-Campbell2, Mark Cutkosky4, James Jingxi Xu1,4
+https://haptic-world.github.io/
+Not sure if I pressed 
+hard enough… Oops!
+👍
+👎
+I can feel 
+the torque 
+feedback!
+Predicted Video in 
+World Simulator
+Teleoperate in 
+Real World
+Wrong details
+Without Torque Feedback
+Fy
+Fz
+HapticWorld
+Box Flipping
+Kettlebell Pushing
+Slingshot Game
+F
+F
+F
+F
+F
+F
+10 lb
+5 lb
+15 lb
+Keep 
+pushing
+F
+F
+F
+F
+F
+Fig. 1.
+HapticWorld closes the haptic loop with a learned world model. Left: the operator teleoperates through a leader arm in real world while the
+world model predicts the robot keeps pushing the box against the fixture to pivot it upright. Without torque feedback, the operator cannot tell whether
+enough force is applied, and the rollout drifts out of the distribution the model was trained on and fails the task; with HapticWorld, the operator feels
+the predicted torque and flips the box successfully. Right: two game domains illustrate that the rendered torque reflects the physical interaction. Pushing
+kettlebells of 5, 10, and 15 lb produces correspondingly larger resistance, and in the slingshot game the draw force and the flight distance grow together,
+landing the projectile in different scoring zones. Cyan arrows show the force feedback at the end-effector; vertical lines in the force plots mark the frames
+shown above; and the colored bands give the force range for each behavior: pushing each kettlebell, or landing in each scoring zone.
+Abstract— Contact-rich manipulation depends on force sens-
+ing that is hard to infer from visual signals alone, both
+for collecting demonstrations and for training policies. Force-
+annotated data, however, remains hard to obtain at scale: real-
+robot collection ties every demonstration to physical hard-
+ware, physics simulators report contact forces that deviate
+systematically from real measurements, and learned world
+simulators, though scalable and realistic, are vision-only, so
+operators feel nothing during data collection and the data car-
+ries no force/torque (F/T) labels. We present HapticWorld, an
+interactive world simulator that predicts joint torque together
+with observations and renders it back to the operator in real
+time, closing the haptic loop between a human and a learned
+world model. Across three contact-rich tasks, torque feedback
+1Ant Group
+2Coordinated Science Laboratory, Electrical and Computer Engineering,
+University of Illinois Urbana-Champaign
+3NVIDIA
+4Mechanical Engineering, Stanford University
+raises data collection throughput by 1.6× on average. Policies
+trained on HapticWorld-generated demonstrations succeed in
+54/60 real-world trials, approaching the 56/60 upper bound
+of real-world data, and far exceeding the 19/60 success rate
+of the vision-only baseline. Moreover, the success rates mea-
+sured inside HapticWorld closely match real-world evaluation,
+demonstrating that HapticWorld can serve as a stand-alone
+F/T-conditioned policy evaluation platform.
+I. INTRODUCTION
+Contact-rich manipulation is governed by forces that vi-
+sual sensors cannot perceive. Whether a part is jammed or
+aligned, whether a grasp is about to slip, whether a tool is
+pressing hard enough to take effect: these states are often
+visually indistinguishable yet dynamically decisive. Accord-
+ingly, a rapidly growing body of work shows that policies
+observing force or tactile signals substantially outperform
+vision-only counterparts on contact-rich tasks [1], [2], [3],
+arXiv:2609.31924v1  [cs.RO]  25 Sep 2026
+
+
+[4], [5], [6], [7]. Like all imitation-learning policies, however,
+these force-conditioned policies are data-hungry, and their
+demonstrations must carry a force channel.
+Where can force-annotated demonstrations come from?
+Hardware-based collection captures real forces [8], [9], [10],
+but the entire workflow lives in the physical world: the
+scene must be manually reset after every trial; switching
+tasks means clearing the old setup, and returning to it
+later means rebuilding it from scratch; and contact-rich
+interaction constantly risks damaging the robot or the objects.
+Physics simulation removes the hardware [11], [12], but
+building a simulated scene requires object assets, contact
+parameters, and per-scene system identification, and even
+then the rendered observations and dynamics differ from their
+real counterparts, leaving a sim-to-real gap. For our purpose
+the problem is sharper still: the contact forces reported by
+physics engines carry artifacts of relaxed contact models and
+soft-constraint solvers, and deviate systematically from real
+measurements [13], [14].
+In parallel, a third paradigm has emerged on the vision
+side: action-conditioned video prediction models, or world
+simulators, that let users collect demonstrations by teleop-
+erating inside the model and support reproducible policy
+evaluation with strong sim-to-real correlation [15], [16]. In
+particular, the Interactive World Simulator (IWS) [17] needs
+only a few hundred teleoperated episodes per task, and
+sustains stable real-time rollouts on a single GPU. Trained
+directly on real images and real dynamics, world simulators
+require no scene modeling or parameter tuning; resets are
+instant and exact, a task’s setup lives in the model and can be
+revisited at any time, and excessive force damages nothing,
+since no robot or object physically exists. Collection and
+evaluation thus become convenient and efficient.
+However, existing world simulators are vision-only, which
+creates three problems. First, the operator feels nothing:
+pressing into a virtual object is indistinguishable from mov-
+ing through free space. With no physics to clamp the com-
+manded motion, the operator’s actions may drift out of the
+training distribution, corrupting rollouts and poisoning the
+recorded action labels. Second, the generated demonstrations
+carry no force labels, so force-conditioned policies cannot
+be trained from them. Third, such policies cannot even be
+rolled out inside the simulator for evaluation, since the force
+observations they require do not exist. Recent world models
+do incorporate force or tactile signals, but as observation
+channels for autonomous rollouts [18], [19], [20]; none
+closes the loop with a human operator, so the demonstrations
+they generate inherit no human force feedback.
+We present HapticWorld, an interactive world simulator
+that jointly predicts joint torque alongside visual observations
+and renders the predicted torque back to the operator in real
+time; to our knowledge, it is the first system to close the
+haptic loop between a human operator and a learned world
+model. HapticWorld is trained on teleoperated play data with
+recorded joint torque measurements, and requires no object
+models, physics engine, or per-scene system identification.
+We train HapticWorld on five domains: kettlebell pushing
+and slingshot shooting for qualitative demonstration (Fig. 1);
+microwave door opening, whiteboard wiping, and box piv-
+oting against a fixture for quantitatively evaluating the full
+pipeline (Fig. 3 (b-d)).
+In summary, our contributions are as follows:
+• We present HapticWorld, an interactive world simula-
+tor that predicts joint torque jointly with observations.
+Instead of training a separate torque predictor, Haptic-
+World reads torque from the internal features of the
+dynamics model, encouraging consistency between the
+predicted torque and sampled visual future through a
+shared dynamics representation. The predicted torques
+closely match held-out real measurements: across the
+three tasks, the overall RMSE is only 0.26–0.38,N·m,
+and the average joint-wise RMSE normalized by each
+joint’s peak torque is 3.5–4.8%.
+• HapticWorld’s torque feedback improves data collection
+efficiency in simulation and the success rate of learned
+policies in real-world. Collection is faster because the
+operator can feel contact instead of failing and retrying,
+raising throughput by 1.6× on average. More impor-
+tantly, torque-annotated demonstrations collected inside
+HapticWorld are sufficient to train torque-conditioned
+policies that succeed in the real world: policies trained
+with HapticWorld data reach 54/60 success trials across
+three tasks, approaching the 56/60 upper bound achieved
+with real-world data, whereas demonstrations collected
+without torque modality yield only 19/60.
+• HapticWorld faithfully evaluate the performance of
+torque-conditioned policies without a real-robot, which
+cannot be done with vision-only simulators: success
+rates measured inside HapticWorld deviate from real-
+world evaluation by at most three trials out of twenty.
+II. RELATED WORK
+A. World Models for Robotic Manipulation
+Action-conditioned video prediction models, often called
+world models, have been widely applied in robotics. Large-
+scale video foundation models can be fine-tuned into simula-
+tors for robot learning [21]; some works jointly model video
+and actions so that the same model also acts as a policy or
+planner [22], [23], [24]; others learn dynamics in a latent
+space and plan within it [25], [26]; and generated rollouts
+have been used as additional training data for imitation learn-
+ing [27], [28]. Most relevant to us, recent work uses world
+models for reproducible policy evaluation without physical
+robots [15], [16], [29]. The Interactive World Simulator [17]
+provides the visual backbone of HapticWorld: an action-
+conditioned consistency model efficient enough for real-time
+interaction inside the model. However, all of these models
+are strictly vision-only: none predicts interaction force or
+torque, and none renders any feedback to the operator.
+B. Force/Torque- and Tactile-Aware Policy Learning
+Force/torque (F/T) and tactile sensing consistently im-
+proves contact-rich manipulation, from multimodal fusion
+policies [1], [2], [30] to reactive and compliance-aware
+
+
+architectures [3], [31], [32], and a fast-growing family of
+F/T- and tactile-aware VLA models now treats wrench and
+tactile signals as first-class observations [4], [33], [34]. These
+methods are the downstream consumers of our system: they
+demonstrate that force channels improve policies, yet all
+presuppose a physical robot with F/T or tactile sensors
+to collect that data, which is the scarcity our in-simulator
+collection relieves.
+C. Acquiring Force Data: Hardware and Simulation
+Force-annotated demonstrations today mostly come from
+hardware. Bilateral teleoperation feeds measured or esti-
+mated follower torques back to the operator [8], [35] or
+renders tactile signals in augmented reality [3]; handheld
+devices capture forces robot-free [9]; and mainstream kine-
+matic interfaces record no force at all [36], [37], [38]. All
+build on classical bilateral teleoperation and haptic render-
+ing [39], [40], and all keep a physical robot and scene
+in the loop, with throughput bound by hardware and no
+path to policy evaluation. Simulation is the other route:
+physics engines with tactile simulation and demonstration
+generation [11], [41], [42], [12] produce contact data at
+scale, but solver contact forces deviate systematically from
+real measurements, and closing the gap requires per-scene
+identification. Closer to us, learned dynamics models predict
+contact outcomes from real interaction data [43], [30], and
+recent tactile world models jointly predict visual and tactile
+futures [18], [19], [44]; ViTacWorld [20] further uses such
+a model to generate training rollouts and evaluate policies.
+In all of these, however, rollouts are produced by the model
+alone and curated afterwards; none renders its predictions
+back to a human. To our knowledge, we are the first to close
+the haptic loop between an operator and a learned world
+model, using the rendered torque to shape collection itself
+rather than filtering data after the fact.
+III. METHOD
+A. System Overview
+HapticWorld is an interactive world simulator that predicts
+joint torque together with visual observations and renders
+both back to a human operator in real time. It is built and
+used in two phases, involving two kinds of data.
+In the first phase, we teleoperate the real robot to collect
+play data: task-free interaction in which the operator sim-
+ply explores the scene, while camera images, commanded
+joint positions, and measured joint torques are recorded.
+For example, for the box flipping task play data contains
+behaviors such as pushing the box in random directions,
+pivoting it and releasing halfway, or moving the arm without
+touching the box at all. The play data trains HapticWorld
+itself, which couples the visual backbone of the Interactive
+World Simulator [17] with a torque head, so that every
+generated frame is accompanied by the joint torque the robot
+would experience (Fig. 2).
+In the second phase, the operator teleoperates inside the
+trained model with real-time torque feedback to collect task
+demonstration data: goal-oriented trajectories whose obser-
+vations and torque labels are both generated by the model.
+For box flipping, a demonstration is a complete, successful
+flip. The demonstrations train torque-conditioned policies,
+which can then be evaluated either inside HapticWorld or real
+world. The remaining subsections detail each component.
+B. Problem Formulation
+We collect a play dataset P = {ξ (1),...,ξ (M)} by teleop-
+erating the robot with no task objective, where each episode
+is a synchronized stream of triplets
+ξ =
+ (o1,a1,τ1), ..., (oL,aL,τL)
+
+.
+(1)
+Here ok ∈R3×H×W is the RGB observation at step k, ak ∈
+R8 is the commanded joint position issued by the operator
+through the leader device, and τk ∈R8 is the joint torque
+measured on the robot, over seven arm joints and the gripper.
+The torque channel can be obtained directly from the robotic
+arm’s motors, without external sensors.
+Our goal is a model fΘ that, from the past C steps, predicts
+the next observation together with the torque the robot would
+experience at that step,
+( ˆok, ˆτk) = fΘ
+ ok−C:k−1, ak−C:k−1
+
+.
+(2)
+Here aj denotes the command issued at step j, which drives
+the transition to step j+1; ak−1 is thus the command the op-
+erator has just issued, and it is what the predicted frame and
+torque respond to. Two properties of this formulation matter
+for what follows. First, the two outputs are produced from the
+same dynamics model rather than separate models, coupling
+the torque prediction to the representation that generates the
+visual future seen by the operator. Second, and crucially for
+torque, the action is the commanded joint position rather than
+the measured one. The two differ when contact occurs. For
+example, as the eraser presses on the whiteboard, the robot
+stops at the surface while the commanded position continues
+below it, and the harder the operator presses, the further
+below the surface it aims. The observation barely changes
+as the press deepens, so a model conditioned on measured
+positions would receive nearly identical inputs across very
+different torques, and the mapping would not be learnable;
+the commanded position resolves this ambiguity, because
+under the arm’s position controller the interaction torque is
+governed largely by the gap between where the robot is told
+to go and where contact holds it.
+C. Action-Conditioned Video Prediction Backbone
+The model is trained in two stages. In the first stage, an
+autoencoder maps each RGB observation o into a compact
+2D latent z = Eφ(o) and reconstructs it with a consistency-
+model decoder Dθ. In the second stage, the autoencoder
+is frozen and an action-conditioned latent dynamics model
+Fψ, also a consistency model, is trained with next-frame
+supervision: within a window of past latents and actions,
+full noise is applied to the terminal frame, and Fψ learns
+to denoise it conditioned on the action sequence and noise
+levels. Fψ is instantiated as a stack of 3D convolutional
+
+
+ResBlock + 
+spatiotemporal 
+attention
+Midblock
+Torque Head
+Decoder
+at−1̂
+τt
+Consistency Dynamics Model 
+Encoder
+Noise 
+level
+ResBlock + 
+spatiotemporal 
+attention
+t −1
+t
+Torque 
+feedback
+Next step 
+observation̂
+ot
+Fig. 2.
+HapticWorld Model Architecture. At each step, the observation
+history is encoded into latents and fed to the consistency dynamics model
+together with the operator’s commanded joint positions at−1 and the noise
+level. The model generates the next latent, which is decoded into the next
+observation ˆot; the torque head reads the widest intermediate features from
+the middle of the block stack and maps them to the joint torque ˆτt, which
+is rendered back to the leader arm.
+blocks with FiLM [45] action modulation and spatiotemporal
+attention, and at inference autoregressively predicts latents
+over a sliding context window, which Dθ decodes into
+frames. For the consistency-model training procedure and
+further architectural details, we follow the Interactive World
+Simulator [17].
+D. Torque Prediction as a Readout of the Dynamics Model
+Rather than training a separate torque predictor, Haptic-
+World reads torque directly from the internal features of Fψ.
+Let Φt denote the intermediate features at the middle of
+the block stack of Fψ, where the representation is widest,
+for frame t during a forward pass of Fψ. These features
+summarize exactly the information a torque estimator needs:
+they are conditioned on the commanded actions through
+FiLM and temporally filtered by causal attention over the
+context window. A lightweight head hω maps them to per-
+frame torque,
+ˆτt = hω(AvgPool(Φt), eσ),
+(3)
+where AvgPool is spatial average pooling and eσ is the
+embedding of the frame’s noise level, which is provided
+because the trunk operates on noisy latents and the same
+physical state yields different features at different noise
+levels. The head consists of pooling and a small MLP, adding
+181K parameters, roughly 0.5% of the full model.
+This readout design follows from what the interaction
+torque actually depends on. The torque at a step is deter-
+mined by the robot’s configuration, the commanded motion,
+and the state of whatever the robot is in contact with, which
+is precisely the state the dynamics model must already infer
+in order to predict how the scene will change. A separate
+torque network taking raw latents and actions would have
+to recover that state on its own, effectively duplicating work
+already performed by the trunk. Reading the trunk instead
+lets the torque head consume a representation in which the
+relevant contact information is already exposed, and keeps its
+parameter count negligible. The arrangement also shapes the
+trunk itself: because the torque loss backpropagates through
+Fψ, the features that generate the next frame are additionally
+trained to carry the contact information needed to predict
+torque.
+Both outputs are trained in a single second-stage run with
+a joint objective,
+L = Ldyn +λ Lτ,
+Lτ = 1
+T
+T
+∑
+t=1
+∥ˆτt −τt∥2
+2 ,
+(4)
+where Ldyn is the consistency-model denoising loss on the
+predicted latents, inherited from [17], torque is supervised
+densely at every frame of the window. We set λ = 1.
+E. Autoregressive Interaction and Haptic Rendering
+At interaction time, HapticWorld runs autoregressively: at
+each step the operator’s newest command enters the window,
+Fψ generates the next latent, and the frozen decoder renders
+it for display, following the sliding-window inference of [17].
+The question specific to HapticWorld is how torque reaches
+the operator’s hand. First, predicting torque must not slow
+the loop down. It does not: the torque is read from the same
+forward pass that generates the latent, so the haptic channel
+adds no inference cost, and the loop runs at 10 Hz. Second,
+the predicted torque is the total joint torque, which includes
+gravity, while the operator should only feel the interaction.
+We therefore subtract the configuration-dependent gravity
+term g(q) computed from a robot model, low-pass filter and
+clamp the result for safety, and apply it to the motors of
+the leader device (OpenArm 1) on all eight axes, including
+the gripper; gripper torque is essential for tasks such as
+microwave opening, where the operator must feel whether
+the handle is securely grasped. The haptic rendering can also
+be disabled while torque prediction keeps running; we use
+this configuration in our experiments to isolate the effect of
+feeling the predicted torque during collection, with all other
+components unchanged.
+IV. EXPERIMENTS
+A. Experimental Design
+Our experiments are designed to answer four questions,
+which correspond to the main claims of this work:
+Q1 Does HapticWorld predict joint torque accurately?
+(Sec. IV-B)
+Q2 Does haptic feedback improve in-simulator data col-
+lection? (Sec. IV-C)
+Q3 Can policies trained on HapticWorld-generated force-
+annotated demonstrations transfer directly to real
+robots? (Sec. IV-D)
+Q4 Can HapticWorld serve as a stand-alone evaluation
+platform for force-conditioned policies? (Sec. IV-E)
+
+
+(a) Data Collection
+Leader
+Follower
+Head Camera
+Data Collection 
+GUI
+Synchronized
+(b) Microwave Opening
+(c) Whiteboard Wiping
+(d) Box Flipping
+Fig. 3.
+Hardware setup and tasks. (a) Play data is collected by teleoperating the follower arm with a synchronized leader arm, recording the head
+camera view, the commanded joint positions, and the measured joint torques. (b–d) The three evaluated tasks: open the microwave, wipe the marks on the
+whiteboard, and flip the box against a fixture. Cyan arrows indicate the equivalent Cartesian force corresponding to the joint-torque feedback.
+Tasks. We evaluate on three contact-rich tabletop tasks,
+illustrated in Fig. 3(b–d):
+1) Microwave opening: Grasping the door handle and
+pulling it open along the hinge arc, where the grasp
+must transmit force without slipping. A trial succeeds
+if the door is opened to at least 45◦. Play data consists
+of grasping and releasing the handle, and pulling the
+door to random angles or pushing it back; demonstra-
+tion data consists of complete openings past 45◦.
+2) Whiteboard wiping: Erasing marks from a whiteboard.
+Whether the eraser is in contact is hard to tell visually,
+so the operator must rely on torque feedback to judge.
+A trial succeeds if no marks remain visible. Play data
+contains wiping in different directions, partial wipes,
+and wipes that miss the board; demonstration data
+consists of complete erasures.
+3) Box flipping: Pressing a box against a fixture and
+pivoting it upright, where the normal force must be
+maintained within the friction cone throughout the
+rotation to avoid slip. A trial succeeds if the box is
+brought upright to 90◦. Play data includes random
+pushes, halfway pivots that are then released, and
+contact-free arm motion; demonstration data consists
+of complete, successful flips.
+Play data collection for HapticWorld training. For each
+task we collect 500 training and 50 validation play episodes
+of roughly 20 s each (Fig. 3(a)). Training HapticWorld takes
+approximately two days on eight NVIDIA A100 GPUs.
+Demonstration data collection for policy training. After
+training HapticWorld, We collect 50 demonstration episodes
+per configuration inside the world simulator and train an
+ACT [38] policy on each, yielding the configurations in Ta-
+ble II. The IWS configuration reproduces the complete prior
+pipeline end to end: the original vision-only simulator [17] is
+trained on the same play data using only images and actions,
+and the image-only demonstrations collected inside it train
+an image-only policy. The no-feedback configuration collects
+inside HapticWorld with torque prediction running but torque
+feedback disabled; the demonstrations still carry predicted
+torque labels, so comparing against the full system isolates
+the effect of feeling the torque during collection.
+ Task 1: Microwave Opening
+Task 2: Whiteboard Wiping
+Task 3: Box Flipping
+Joint 0
+Joint 1
+Joint 7
+Joint 0
+Joint 1
+Joint 3
+Joint 0
+Joint 1
+Joint 3
+gt
+pred
+0
+2
+4
+6
+-2
+0
+2
+4
+6
+-2
+200
+175
+150
+125
+100
+75
+50
+25
+0
+0
+1
+2
+3
+4
+5
+200
+175
+150
+125
+100
+75
+50
+25
+0
+200
+175
+150
+125
+100
+75
+50
+25
+0
+-.25
+0
+.25
+.5
+.75
+1
+1.25
+1.5
+200
+175
+150
+125
+100
+75
+50
+25
+0
+200
+175
+150
+125
+100
+75
+50
+25
+0
+200
+175
+150
+125
+100
+75
+50
+25
+0
+200
+175
+150
+125
+100
+75
+50
+25
+0
+200
+175
+150
+125
+100
+75
+50
+25
+0
+200
+175
+150
+125
+100
+75
+50
+25
+0
+1
+2
+3
+4
+5
+6
+7
+8
+-2
+-1
+0
+1
+2
+3
+4
+5
+-2
+0
+2
+4
+6
+-2
+0
+2
+4
+6
+-4
+-6
+0
+2
+4
+6
+8
+10
+12
+Fig. 4.
+Torque prediction on held-out validation episodes. Predicted
+(dashed orange line) and measured (solid blue line) torque for three
+representative joints on each task.
+Evaluation protocol. Each policy is trained once and eval-
+uated over 20 trials with randomized initial configurations,
+both in the real world and inside HapticWorld. Each rollout
+is limited to 20s.
+B. HapticWorld Accurately Predicts Torque (Q1)
+We first verify that the predicted torque is accurate, since
+every downstream result depends on it. On 50 held-out
+validation episodes per task, we compare the predicted joint
+torques against the measured ground truth. The overall torque
+RMSE is 0.38 N·m on microwave opening, 0.26 N·m on
+whiteboard wiping, and 0.36 N·m on box flipping; normal-
+izing each joint’s RMSE by that joint’s peak torque in the
+same episode, the average relative error is 4.8%, 3.6%, and
+3.5%, respectively. To better illustrate the accuracy, Fig. 4
+shows predicted and measured traces for the three joints
+with the largest torque readings on each task: the predictions
+closely track the ground truth. Full torque visualizations are
+available on the project website. These results answer Q1:
+HapticWorld recovers joint torques accurately enough to be
+rendered to the operator.
+
+
+Policy w/o Torque Modality 
+(Training data from IWS)
+Task 1 
+Microwave 
+Opening
+0
+0.5 F_gripper (N)
+0
+-10
+-20
+F_z (N)
+20
+10
+0
+-10
+20
+10
+0
+-10
+F_z (N)
+F_y (N)
+Grasp slip
+Marks remain
+Insufficient 
+force
+Door not 
+opened
+Insufficient 
+force
+Box drops 
+back
+Task 2 
+Whiteboard 
+Wiping
+Task 3  
+Box 
+Flipping
+ Policy w/ Torque Modality 
+(Training data from HapticWorld)
+Fig. 5.
+Real-world rollouts of policies trained without and with torque modality, using data collected from IWS and HapticWorld, respectively.
+Left: failure modes of policies trained without torque: the gripper grasps the microwave handle too weakly and slips, leaving the door unopened (Task
+1); the eraser is not pressed hard enough, leaving marks on the whiteboard (Task 2); and the box is not pushed firmly enough and drops back during
+flipping (Task 3). Right: policies trained with HapticWorld data apply sufficient and consistent force and complete all three tasks. Cartesian force traces
+derived from the joint torques are shown below each rollout, with the cyan shading marking the phases where torque matters most, and colored vertical
+lines corresponding to each frame shown above.
+TABLE I
+Demonstrations collected in 10 minutes of teleoperation inside
+HapticWorld.
+Collection condition
+Microwave
+Opening
+Whiteboard
+Wiping
+Box
+Flipping
+With haptic feedback
+26
+19
+22
+Without haptic feedback
+21
+8
+14
+Relative throughput
+1.2×
+2.4×
+1.6×
+C. HapticWorld’s Torque Feedback Improves Data Collec-
+tion (Q2)
+Haptic feedback improves data collection in two ways: it
+makes in-simulator data collection faster, and improves the
+data quality.
+Throughput. Table I reports the number of demonstra-
+tions collected in 10 minutes of teleoperation inside Haptic-
+World, with and without haptic feedback. Feedback increases
+throughput on all three tasks, by 1.2× on microwave open-
+ing, 2.4× on whiteboard wiping, and 1.6× on box flipping.
+Demonstration quality. Throughput alone does not estab-
+lish that the retained demonstrations are good. We therefore
+train identical torque-conditioned policies on 50 demonstra-
+tions collected inside HapticWorld with and without haptic
+feedback (Table II, second and last columns). Note that, re-
+gardless of whether the operator can feel the torque feedback,
+both policies are trained with the predicted torque modality in
+HapticWorld. Removing feedback drops real-world success
+from 19/20 to 14/20 on microwave opening, from 19/20 to
+5/20 on whiteboard wiping, and from 16/20 to 6/20 on box
+flipping, indicating the importance of HapticWorld’s torque
+feedback during task data collection.
+Failure mechanism. Without torque feedback the operator
+cannot perceive contact, and applied force falls outside the
+range covered by the real play data in either direction. Under-
+application leaves the task incomplete: the door handle
+is not gripped securely, the eraser does not contact the
+board consistently, the box is not pressed firmly enough
+to pivot. Over-application drives the commanded pose into
+regions the real play data never contains, because during
+real-world collection physical contact prevents the operator
+from pressing further; the model has no such constraint,
+and rollouts degrade. Haptic feedback restores this constraint
+inside the model, keeping the operator’s actions within the
+distribution the simulator was trained on. Consistent with
+this account, the benefit is largest on whiteboard wiping,
+whose two-sided tolerance band is narrowest, and smallest on
+microwave opening, where over-gripping the handle carries
+minimal penalty. Together these results answer Q2: haptic
+feedback improves in-simulator data collection by yielding
+both more demonstrations per unit time and data that train
+substantially better force-mediated policies.
+D. HapticWorld Trains Policies that Work on Real Robots
+(Q3)
+Table II compares policies trained on HapticWorld-
+generated demonstrations against policies trained on real-
+world demonstrations, with and without the torque channel.
+HapticWorld outperforms the vision-only pipeline. The
+complete prior pipeline, collecting inside the vision-only
+
+
+TABLE II
+Real-world success rates (out of 20 trials) of ACT policies trained on 50 demonstrations per configuration. Policies trained on real-world
+data serve as a reference upper bound.
+Data source
+IWS [17]
+HapticWorld w/o feedback
+Real-world data
+HapticWorld (Ours)
+Task 1 – Microwave opening
+10/20
+14/20
+19/20
+19/20
+Task 2 – Whiteboard wiping
+1/20
+5/20
+20/20
+19/20
+Task 3 – Box flipping
+8/20
+6/20
+17/20
+16/20
+TABLE III
+Policy success rates (out of 20 trials) for torque-conditioned ACT policies trained on real-world or HapticWorld demonstration data and
+evaluated both in the real world and inside HapticWorld.
+Training data source
+Real-world data
+HapticWorld data
+Evaluation platform
+Real-world
+HapticWorld
+Real-world
+HapticWorld
+Task 1 – Microwave opening
+19/20
+19/20
+19/20
+19/20
+Task 2 – Whiteboard wiping
+20/20
+20/20
+19/20
+20/20
+Task 3 – Box flipping
+17/20
+14/20
+16/20
+14/20
+simulator and training an image-only policy, reaches 10/20
+on microwave opening, 1/20 on whiteboard wiping, and
+8/20 on box flipping, versus 19/20, 19/20, and 16/20 for
+HapticWorld (Table II, first and last columns). All three tasks
+require torque information that neither the visual observation
+nor the vision-only collection process provides. Fig. 5 shows
+the characteristic failures of the image-only policies along-
+side successful HapticWorld rollouts.
+HapticWorld generated demonstrations match real
+ones. Policies trained purely on HapticWorld demonstrations
+reach 19/20, 19/20, and 16/20, compared with 19/20, 20/20,
+and 17/20 for policies trained on real-world demonstrations
+(third and last columns of Table II), a difference of at
+most one trial on every task. These results answer Q3:
+HapticWorld supplies torque data at a quality comparable
+to real-world collection, so that policies trained with it can
+be successfully deployed in real world.
+E. HapticWorld Serves as a Stand-alone Evaluation Plat-
+form (Q4)
+Table III compares each policy’s success rate in the real
+world against its success rate evaluated inside HapticWorld.
+Across all three tasks and all evaluated configurations, in-
+simulator evaluation preserves the ordering of policies and
+closely tracks real-world success: force-conditioned poli-
+cies trained on HapticWorld and on real data score iden-
+tically in simulation on all three tasks, matching their near-
+identical real-world performance. Notably, this evaluation is
+only possible because HapticWorld predicts torque: a force-
+conditioned policy can not be rolled out inside a vision-only
+simulator since the observations it requires do not exist.
+These results answer Q4: HapticWorld can evaluate the
+performance of force-conditioned policies faithfully without
+the real robot and scene, while vision-only simulator cannot.
+F. Additional Tasks with Qualitative Results
+Beyond the three evaluated tasks, we train HapticWorld
+on two further domains to illustrate the range of contact
+behaviors the model captures. In kettlebell pushing, three
+visually distinguishable kettlebells of 5, 10, and 15 lb sit
+on the table; pushing each produces a markedly different
+resistance, giving a direct check that the rendered torque
+reflects the object being manipulated rather than the motion
+alone. In slingshot shooting, the operator draws a slingshot
+and releases a projectile into scoring zones, with both the
+rendered draw force and the resulting flight distance growing
+with how far the slingshot is pulled. Fig. 1 shows predicted
+frames alongside the force rendered to the operator in both
+domains. Please refer to the project webpage for videos and
+more results.
+V. CONCLUSION & LIMITATION
+We presented HapticWorld, an interactive world simulator
+that predicts joint torque jointly with visual observations and
+renders it back to the operator in real time, closing the haptic
+loop between a human operator and a learned world model. A
+lightweight readout of the dynamics network’s intermediate
+features recovers joint torque accurately enough to be felt
+during teleoperation and consumed by downstream policies.
+Across three contact-rich tasks, haptic feedback raises col-
+lection throughput by 1.6× on average, and the torque-
+annotated demonstrations collected inside HapticWorld are
+sufficient to train torque-conditioned policies that succeed in
+the real world, approaching policies trained on real-world
+data and far exceeding the vision-only pipeline; in-simulator
+evaluation further preserves real-world policy results for this
+policy class, which vision-only simulators cannot achieve.
+Although promising, several limitations still remain. First,
+HapticWorld handles relatively slow and smooth interactions,
+while fast events such as impacts or sudden slips are neither
+predicted nor rendered crisply. This stems from both the
+model’s temporal resolution and the 10 Hz rendering rate,
+which is below the update rates of the robot. Second,
+HapticWorld is trained per task; each new scene requires
+collecting its own play data and training its own model,
+and the simulator inherits the coverage of that data. Third,
+the haptic channel is only as faithful as the visual model it
+reads from. Since torque is predicted from the same forward
+pass that generates the frame, errors in the learned dynamics
+propagate directly into what the operator feels. Addressing
+
+
+fast contact transients, training a single model that serves
+multiple tasks, and further tightening the physical fidelity of
+the underlying world model are natural future directions.
+ACKNOWLEDGMENT
+We thank Houzhu Ding, Jyh-Herng Chow, Kairui Shi,
+Luqi Wang, Sean Lu, Xinda Qi, Yujun Cai, and Zhixin Sun
+for insightful discussions and feedback on paper writing,
+Kairui Shi and Sean Lu for their help in data collection.
+REFERENCES
+[1] H. Li, Y. Zhang, J. Zhu, S. Wang, M. A. Lee, H. Xu, E. Adelson,
+L. Fei-Fei, R. Gao, and J. Wu, “See, hear, and feel: Smart sensory
+fusion for robotic manipulation,” in Conference on Robot Learning
+(CoRL), 2022, arXiv:2212.03858.
+[2] B. Huang, Y. Wang, X. Yang, Y. Luo, and Y. Li, “3D-ViTac: Learning
+fine-grained manipulation with visuo-tactile sensing,” in Conference
+on Robot Learning (CoRL), 2024, arXiv:2410.24091.
+[3] H. Xue, J. Ren, W. Chen, G. Zhang, Y. Fang, G. Gu, H. Xu, and C. Lu,
+“Reactive diffusion policy: Slow-fast visual-tactile policy learning for
+contact-rich manipulation,” in Robotics: Science and Systems (RSS),
+2025, arXiv:2503.02881.
+[4] J. Yu, H. Liu, Q. Yu, J.-J. Ren, C. Hao, H. Ding, G.-Y. Huang, G.-F.
+Huang, Y. Song, P. Cai, W. Zhang, and C. Lu, “Forcevla: Enhancing
+vla models with a force-aware moe for contact-rich manipulation,”
+ArXiv, vol. abs/2505.22159, 2025.
+[5] J. Xu, S. Song, and M. Ciocarlie, “Tandem: Learning joint explo-
+ration and decision making with tactile sensors,” IEEE Robotics and
+Automation Letters, vol. 7, no. 4, pp. 10 391–10 398, 2022.
+[6] J. Xu, H. Lin, S. Song, and M. Ciocarlie, “Tandem3d: Active tactile
+exploration for 3d object recognition,” in 2023 IEEE International
+Conference on Robotics and Automation (ICRA).
+IEEE, 2023, pp.
+10 401–10 407.
+[7] J. Xu, Y. Jia, D. Yang, P. Meng, X. Zhu, Z. Guo, S. Song, and
+M. Ciocarlie, “Tactile-based object retrieval from granular media,”
+Autonomous Robots, vol. 49, no. 4, p. 32, 2025.
+[8] J. J. Liu, Y. Li, K. Shaw, T. Tao, R. Salakhutdinov, and D. Pathak,
+“FACTR: Force-attending curriculum training for contact-rich pol-
+icy learning,” in Robotics: Science and Systems (RSS), 2025,
+arXiv:2502.17432.
+[9] W. Liu, J. Wang, Y. Wang, W. Wang, and C. Lu, “ForceMimic:
+Force-centric imitation learning with force-motion capture system
+for contact-rich manipulation,” in IEEE International Conference on
+Robotics and Automation (ICRA), 2025, arXiv:2410.07554.
+[10] L. Liang, J. Xu, X. Qi, Y. Cai, H. Ding, L. Wang, Z. Sun, J.-H.
+Chow, M. Yang, and M. Cutkosky, “Universal manipulation exoskele-
+ton: Learning compliant whole-body policies with real-time torque
+feedback,” arXiv preprint arXiv:2606.14218, 2026.
+[11] E. Todorov, T. Erez, and Y. Tassa, “Mujoco: A physics engine
+for model-based control,” in IEEE/RSJ International Conference on
+Intelligent Robots and Systems (IROS), 2012, pp. 5026–5033.
+[12] A. Mandlekar, S. Nasiriany, B. Wen, I. Akinola, Y. Narang, L. Fan,
+Y. Zhu, and D. Fox, “Mimicgen: A data generation system for scalable
+robot learning using human demonstrations,” in Conference on Robot
+Learning (CoRL), 2023, arXiv:2310.17596.
+[13] Q. Le Lidec, W. Jallet, L. Montaut, I. Laptev, C. Schmid, and
+J. Carpentier, “Contact models in robotics: A comparative analysis,”
+IEEE Transactions on Robotics, vol. 40, pp. 3716–3733, 2024.
+[14] B. Acosta, W. Yang, and M. Posa, “Validating robotics simulators on
+real-world impacts,” IEEE Robotics and Automation Letters, vol. 7,
+no. 3, pp. 6471–6478, 2022, arXiv:2110.00541.
+[15] Y. Guo, L. X. Shi, J. Chen, and C. Finn, “Ctrl-world: A control-
+lable generative world model for robot manipulation,” arXiv preprint
+arXiv:2510.10125, 2025.
+[16] Gemini
+Robotics
+Team,
+K.
+Choromanski,
+C.
+Devin,
+Y.
+Du,
+D. Dwibedi, R. Gao, A. Jindal, T. Kipf, S. Kirmani, I. Leal et al.,
+“Evaluating gemini robotics policies in a Veo world simulator,” arXiv
+preprint arXiv:2512.10675, 2025.
+[17] Y. Wang, R. Syed, F. Wu, M. Zhang, A. Onol, J. Barreiros, H. Nayyeri,
+T. Dear, H. Zhang, and Y. Li, “Interactive world simulator for robot
+policy training and evaluation,” in Robotics: Science and Systems
+(RSS), 2026, arXiv:2603.08546.
+[18] Y. Lou, Y. Ye, Y. Fu, J. Cen, X. Chi, Y. Lyu, P. Jia, S. Han, Z. Lu,
+and S. Zhang, “Dream-tac: A unified tactile world action model for
+contact-rich robot manipulation,” arXiv preprint arXiv:2606.08737,
+2026.
+[19] C. Higuera, S. Arnaud, B. Boots, M. Mukadam, F. R. Hogan,
+and
+F.
+Meier,
+“Visuo-tactile
+world
+models,”
+arXiv
+preprint
+arXiv:2602.06001, 2026.
+[20] Y. Huang, S. Sang, H. Lu, S. Ni, S. Wu, Z. Guo, Y. Shi, and J. Wang,
+“ViTacWorld: Scaling visuo-tactile world models for contact-rich robot
+manipulation,” arXiv preprint arXiv:2607.22530, 2026.
+[21] N. Agarwal, A. Ali, M. Bala, Y. Balaji, E. Barker, T. Cai, P. Chattopad-
+hyay, Y. Chen, Y. Cui, Y. Ding et al., “Cosmos world foundation model
+platform for physical AI,” arXiv preprint arXiv:2501.03575, 2025.
+[22] S. Li, Y. Gao, D. Sadigh, and S. Song, “Unified video action model,”
+arXiv preprint arXiv:2503.00200, 2025.
+[23] S. Ye, Y. Ge, K. Zheng, S. Gao, S. Yu, G. Kurian, S. Indupuru,
+Y. L. Tan, C. Zhu, J. Xiang et al., “World action models are zero-
+shot policies,” arXiv preprint arXiv:2602.15922, 2026.
+[24] M. J. Kim, Y. Gao, T.-Y. Lin, Y.-C. Lin, Y. Ge, G. Lam, P. Liang,
+S. Song, M.-Y. Liu, C. Finn, and J. Gu, “Cosmos policy: Fine-tuning
+video models for visuomotor control and planning,” in International
+Conference on Learning Representations (ICLR), 2026.
+[25] G. Zhou, H. Pan, Y. LeCun, and L. Pinto, “DINO-WM: World
+models on pre-trained visual features enable zero-shot planning,” arXiv
+preprint arXiv:2411.04983, 2024.
+[26] D. Hafner, W. Yan, and T. Lillicrap, “Training agents inside of scalable
+world models,” arXiv preprint arXiv:2509.24527, 2025.
+[27] J. Jang, S. Ye, Z. Lin, J. Xiang, J. Bjorck, Y. Fang, F. Hu, S. Huang,
+K. Kundalia, Y.-C. Lin et al., “Dreamgen: Unlocking generaliza-
+tion in robot learning through video world models,” arXiv preprint
+arXiv:2505.12705, 2025.
+[28] S. Gao, W. Liang, K. Zheng, A. Malik, S. Ye, S. Yu, W.-C.
+Tseng, Y. Dong, K. Mo, C.-H. Lin et al., “Dreamdojo: A generalist
+robot world model from large-scale human videos,” arXiv preprint
+arXiv:2602.06949, 2026.
+[29] J. Quevedo, A. K. Sharma, Y. Sun, V. Suryavanshi, P. Liang, and
+S. Yang, “Worldgym: World model as an environment for policy
+evaluation,” arXiv preprint arXiv:2506.00613, 2025.
+[30] B. Ai, S. Tian, H. Shi, Y. Wang, C. Tan, Y. Li, and J. Wu, “RoboPack:
+Learning tactile-informed dynamics models for dense packing,” in
+Robotics: Science and Systems (RSS), 2024, arXiv:2407.01418.
+[31] Y. Hou, Z. Liu, C. Chi, E. Cousineau, N. Kuppuswamy, S. Feng,
+B. Burchfiel, and S. Song, “Adaptive compliance policy: Learning
+approximate compliance for diffusion guided control,” in IEEE In-
+ternational Conference on Robotics and Automation (ICRA), 2024,
+pp. 4829–4836.
+[32] Z. He, H. Fang, J. Chen, H.-S. Fang, and C. Lu, “FoAR: Force-aware
+reactive policy for contact-rich robotic manipulation,” arXiv preprint
+arXiv:2411.15753, 2024.
+[33] J. Huang, S. Wang, F. Lin, Y. Hu, C. Wen, and Y. Gao, “Tactile-
+VLA: Unlocking vision-language-action model’s physical knowledge
+for tactile generalization,” arXiv preprint arXiv:2507.09160, 2025.
+[34] R. Zhao, W. Wang, Y. Ma, X. Li, F. E. Tay, M. H. Ang Jr, and H. Zhu,
+“Fd-vla: Force-distilled vision-language-action model for contact-rich
+manipulation,” arXiv preprint arXiv:2602.02142, 2026.
+[35] S. Oh, J. J. Liu, T. Tao, P. Han, K. Shaw, S. Funabashi, R. Salakhut-
+dinov, and D. Pathak, “FACTR 2: Learning external force sensing
+for commodity robot arms improves policy learning,” arXiv preprint
+arXiv:2606.12406, 2026.
+[36] C. Chi, Z. Xu, C. Pan, E. Cousineau, B. Burchfiel, S. Feng, R. Tedrake,
+and S. Song, “Universal manipulation interface: In-the-wild robot
+teaching without in-the-wild robots,” in Robotics: Science and Systems
+(RSS), 2024, arXiv:2402.10329.
+[37] P. Wu, Y. Shentu, Z. Yi, X. Lin, and P. Abbeel, “GELLO: A
+general, low-cost, and intuitive teleoperation framework for robot
+manipulators,” arXiv preprint arXiv:2309.13037, 2023.
+[38] T. Z. Zhao, V. Kumar, S. Levine, and C. Finn, “Learning fine-grained
+bimanual manipulation with low-cost hardware,” arXiv preprint
+arXiv:2304.13705, 2023.
+[39] P. F. Hokayem and M. W. Spong, “Bilateral teleoperation: An histor-
+ical survey,” Automatica, vol. 42, no. 12, pp. 2035–2057, 2006.
+[40] B. Hannaford and J.-H. Ryu, “Time-domain passivity control of haptic
+interfaces,” IEEE Transactions on Robotics and Automation, vol. 18,
+no. 1, pp. 1–10, 2002.
+
+
+[41] V. Makoviychuk, L. Wawrzyniak, Y. Guo, M. Lu, K. Storey, M. Mack-
+lin, D. Hoeller, N. Rudin, A. Allshire, A. Handa et al., “Isaac gym:
+High performance GPU-based physics simulation for robot learning,”
+arXiv preprint arXiv:2108.10470, 2021.
+[42] Z. Si, G. Zhang, Q. Ben, B. Romero, Z. Xian, C. Liu, and
+C. Gan, “DiffTactile: A physics-based differentiable tactile simulator
+for contact-rich robotic manipulation,” in International Conference on
+Learning Representations (ICLR), 2024, arXiv:2403.08716.
+[43] R. Calandra, A. Owens, D. Jayaraman, J. Lin, W. Yuan, J. Malik,
+E. H. Adelson, and S. Levine, “More than a feeling: Learning to grasp
+and regrasp using vision and touch,” IEEE Robotics and Automation
+Letters, vol. 3, no. 4, pp. 3300–3307, 2018.
+[44] Y. Zheng, S. Gu, Y. Zheng, W. Li, Y. Zang, S. Tian, X. Li, C. Hao,
+C. Gao, S. Liu, H. Li, Y. Chen, S. Yan, and W. Ding, “OmniVTA:
+Visuo-tactile world modeling for contact-rich robotic manipulation,”
+arXiv preprint arXiv:2603.19201, 2026.
+[45] E. Perez, F. Strub, H. De Vries, V. Dumoulin, and A. Courville, “Film:
+Visual reasoning with a general conditioning layer,” in Proceedings of
+the AAAI conference on artificial intelligence, vol. 32, no. 1, 2018.
