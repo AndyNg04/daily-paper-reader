@@ -3,8 +3,8 @@
 - 最近生成时间：2026-09-30 19:19:17 UTC
 - 今日累计更新：1 次
 - 今日累计推荐总数：27
-- 精读区：11
-- 速读区：16
+- 精读区：12
+- 速读区：15
 
 ## 今日简报（AI）
 今日 AI 论文日报收录 27 篇：精读 11 篇、速读 16 篇。
@@ -23,6 +23,7 @@
 9. [Epistemic-Probabilistic Model for Guarded Multi-Agent LLM Coordination](/202609/30/2609.29366v1-epistemic-probabilistic-model-for-guarded-multi-agent-llm-coordination) （8.0/10）
 10. [DashAct: A Progressive Diagnostic Benchmark for GUI Agents in Interactive Dashboard Analysis](/202609/30/2609.32385v1-dashact-a-progressive-diagnostic-benchmark-for-gui-agents-in-interactive-dashboard-analysis) （8.0/10）
 11. [The Future of Visualization Dashboards in the Age of Generative AI](/202609/30/2609.35170v1-the-future-of-visualization-dashboards-in-the-age-of-generative-ai) （8.0/10）
+12. [Learning from Others, Acting for You: Cross-User Memory Sharing for LLM Agents](/202609/30/2609.32511v1-learning-from-others-acting-for-you-cross-user-memory-sharing-for-llm-agents) （7.0/10）
 
 ## 速读区
 1. [REALMS: An AI-Assistant Conversational System for Real-Time Exact Audience Sizing over High-Dimensional Nested Profiles](/202609/30/2609.30547v1-realms-an-ai-assistant-conversational-system-for-real-time-exact-audience-sizing-over-high-dimensional-nested-profiles) （8.0/10）
@@ -35,12 +36,11 @@
 8. [Sampling Safe Futures: Multimodal Trajectory Planning for Personalized Safety in Anthropomorphic AI](/202609/30/2609.30780v1-sampling-safe-futures-multimodal-trajectory-planning-for-personalized-safety-in-anthropomorphic-ai) （7.0/10）
 9. [PIA: A Personal Intelligence Agent Turning Health Conversations into Records and Records into Understanding](/202609/30/2609.31255v1-pia-a-personal-intelligence-agent-turning-health-conversations-into-records-and-records-into-understanding) （7.0/10）
 10. [Enabling Timely Guidance before Skill Retrieval: Retaining Helpful Warm Tips in Agent Context](/202609/30/2609.32339v1-enabling-timely-guidance-before-skill-retrieval-retaining-helpful-warm-tips-in-agent-context) （7.0/10）
-11. [Learning from Others, Acting for You: Cross-User Memory Sharing for LLM Agents](/202609/30/2609.32511v1-learning-from-others-acting-for-you-cross-user-memory-sharing-for-llm-agents) （7.0/10）
-12. [A Behavioral Trait Leaks into Preferences: Diagnosing Trait Interference in LLM User Simulators](/202609/30/2609.25572v1-a-behavioral-trait-leaks-into-preferences-diagnosing-trait-interference-in-llm-user-simulators) （6.0/10）
-13. [Enriching Speech Emotion Representations with Conversational Context](/202609/30/2609.26422v1-enriching-speech-emotion-representations-with-conversational-context) （6.0/10）
-14. [Learn How to Act from Your Own Interactions: On-Policy Self-Distillation for GUI Agents](/202609/30/2609.27307v1-learn-how-to-act-from-your-own-interactions-on-policy-self-distillation-for-gui-agents) （6.0/10）
-15. [Turning Safety into Competence: Minimally Exploitable Robot Policies via Safety-Filtered Reinforcement Learning](/202609/30/2609.27312v1-turning-safety-into-competence-minimally-exploitable-robot-policies-via-safety-filtered-reinforcement-learning) （6.0/10）
-16. [BiCFlow-MER: Orchestrating Discriminative and Generative Multimodal Emotion Recognition via Conditional Transport](/202609/30/2609.27615v1-bicflow-mer-orchestrating-discriminative-and-generative-multimodal-emotion-recognition-via-conditional-transport) （6.0/10）
+11. [A Behavioral Trait Leaks into Preferences: Diagnosing Trait Interference in LLM User Simulators](/202609/30/2609.25572v1-a-behavioral-trait-leaks-into-preferences-diagnosing-trait-interference-in-llm-user-simulators) （6.0/10）
+12. [Enriching Speech Emotion Representations with Conversational Context](/202609/30/2609.26422v1-enriching-speech-emotion-representations-with-conversational-context) （6.0/10）
+13. [Learn How to Act from Your Own Interactions: On-Policy Self-Distillation for GUI Agents](/202609/30/2609.27307v1-learn-how-to-act-from-your-own-interactions-on-policy-self-distillation-for-gui-agents) （6.0/10）
+14. [Turning Safety into Competence: Minimally Exploitable Robot Policies via Safety-Filtered Reinforcement Learning](/202609/30/2609.27312v1-turning-safety-into-competence-minimally-exploitable-robot-policies-via-safety-filtered-reinforcement-learning) （6.0/10）
+15. [BiCFlow-MER: Orchestrating Discriminative and Generative Multimodal Emotion Recognition via Conditional Transport](/202609/30/2609.27615v1-bicflow-mer-orchestrating-discriminative-and-generative-multimodal-emotion-recognition-via-conditional-transport) （6.0/10）
 
 ---
 使用键盘方向键可在日报/论文之间快速切换。
