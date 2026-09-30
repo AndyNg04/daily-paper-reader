@@ -48,7 +48,7 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-09-29</span>
+      <span class="dpr-home-dashboard-kicker">2026-09-30</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
     <strong class="dpr-home-dashboard-count">共 27 篇</strong>
@@ -58,7 +58,7 @@
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>11</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>16</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-09-29 19:34:30 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-09-30 19:19:17 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日 AI 论文日报收录 27 篇：精读 11 篇、速读 16 篇，聚焦人机协作与可靠交互。</p>
-<p>最值得看的是满分推荐的《Working with AI》人机协作设计框架，以及 9 分的 Qwen-Audio 实时语音交互研究。</p>
-<p>普通读者可先读人机协作框架，再按兴趣选看语音助手、端侧功能调用或 AI 系统信任校准。</p>
+<p>今日 AI 论文日报收录 27 篇：精读 11 篇、速读 16 篇。</p>
+<p>最值得关注的是人类引导的灵巧操作，以及 AI 风险变化时人类何时接管控制；两篇精读均获 9.0 分。</p>
+<p>普通读者可先看这两篇的摘要，再从实时受众规模估算、机器人导航和人机文学创作中挑一个感兴趣的方向速读。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -83,9 +83,9 @@
     <strong class="dpr-home-dashboard-count">11 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Working with AI: A Design Framework for Human-AI Collaboration">Working with AI: A Design Framework for Human-AI Collaboration</span></li><li><span class="dpr-home-dashboard-paper-title" title="Qwen-Audio-3.1-Realtime: Towards Reliable Agentic Voice Interaction">Qwen-Audio-3.1-Realtime: Towards Reliable Agentic Voice Interaction</span></li><li><span class="dpr-home-dashboard-paper-title" title="A Benchmarking Framework for Context-aware XR Interfaces">A Benchmarking Framework for Context-aware XR Interfaces</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Res-HIL: Human-Guided Residual Reinforcement Learning for Sample-Efficient Dexterous Manipulation">Res-HIL: Human-Guided Residual Reinforcement Learning for Sample-Efficient Dexterous Manipulation</span></li><li><span class="dpr-home-dashboard-paper-title" title="When Should a Human Take Back Control? Optimal Delegation under Turbulent AI Risk">When Should a Human Take Back Control? Optimal Delegation under Turbulent AI Risk</span></li><li><span class="dpr-home-dashboard-paper-title" title="Assisting for Open-Ended Tasks: Goal-Oriented Shared Autonomy as a Particle Filter">Assisting for Open-Ended Tasks: Goal-Oriented Shared Autonomy as a Particle Filter</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>3</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>8</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -96,9 +96,9 @@
     <strong class="dpr-home-dashboard-count">16 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="CRiDiT: Instantiating a run-time testbed for trust calibration in AI-infused systems">CRiDiT: Instantiating a run-time testbed for trust calibration in AI-infused systems</span></li><li><span class="dpr-home-dashboard-paper-title" title="Extending FunctionGemma for Practical On-Device Mobile Function Calling">Extending FunctionGemma for Practical On-Device Mobile Function Calling</span></li><li><span class="dpr-home-dashboard-paper-title" title="Safety-Constrained Model Predictive Control for an Omnidirectional Walking Assistive Robot Using Control Barrier Function">Safety-Constrained Model Predictive Control for an Omnidirectional Walking Assistive Robot Using Control Barrier Function</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="REALMS: An AI-Assistant Conversational System for Real-Time Exact Audience Sizing over High-Dimensional Nested Profiles">REALMS: An AI-Assistant Conversational System for Real-Time Exact Audience Sizing over High-Dimensional Nested Profiles</span></li><li><span class="dpr-home-dashboard-paper-title" title="SoGuDiff: Socially Guided Diffusion for Steerable, Norm-Grounded Robot Navigation">SoGuDiff: Socially Guided Diffusion for Steerable, Norm-Grounded Robot Navigation</span></li><li><span class="dpr-home-dashboard-paper-title" title="Incipit: Axiom-Grounded Scaffolding for Human-AI Literary Creation">Incipit: Axiom-Grounded Scaffolding for Human-AI Literary Creation</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>7</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>5</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>4</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>10</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>3</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
 </section>
 </div>
 
