@@ -300,8 +300,7 @@ const flush = () => new Promise((resolve) => setTimeout(resolve, 5));
   g = await runGuardScenario({ deepRuns: [{ id: 9, status: 'queued', display_title: 'deep read 2609.03454v1 (20260828-20260926)' }] });
   assert.equal(g.dispatched, false, '同一篇正在运行时拦截');
   g = await runGuardScenario({ dailyRuns: [{ id: 7, run_number: 2, status: 'in_progress' }] });
-  assert.equal(g.dispatched, false, '日报运行中拦截');
-  assert.match(g.status, /日报工作流正在运行/);
+  assert.equal(g.dispatched, true, '日报运行中不拦截，直接排队（workflow 内部等日报结束）');
 })().catch((error) => {
   console.error(error);
   process.exit(1);

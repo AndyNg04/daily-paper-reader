@@ -23,6 +23,8 @@ on:
 
 permissions:
   contents: write
+  # 第一步查询日报是否在运行（排队等待用）。
+  actions: read
 
 # 并发设计：
 # - 不与日报共用 `daily-paper-reader` 组。GitHub 同一并发组最多保留 1 个 pending 运行，
@@ -49,7 +51,8 @@ jobs:
   deep-read:
     if: github.repository != 'ziwenhahaha/daily-paper-reader'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # 最多等日报 240 分钟 + 精读本身 45 分钟。
+    timeout-minutes: 285
     defaults:
       run:
         shell: bash
@@ -57,6 +60,36 @@ jobs:
       PYTHONUNBUFFERED: "1"
 
     steps:
+      # 排队：日报在运行（包括随机延迟阶段）时先等它结束，再检出最新 main 开始精读，
+      # 避免两边同时推送 main。前端因此不再拦截日报运行中的升级请求。
+      # 查询失败或等待超时就直接开始：推送冲突由下面提交步骤的重试兜底。
+      - name: Wait for running daily report
+        timeout-minutes: 240
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          deadline=$(( $(date +%s) + 230 * 60 ))
+          while true; do
+            active="$(gh api "repos/${GH_REPO}/actions/workflows/daily-paper-reader.yml/runs?per_page=10" \
+              --jq '[.workflow_runs[] | select(.status != "completed")] | length' 2>/dev/null || echo error)"
+            if [ "$active" = "0" ]; then
+              echo "[INFO] 没有运行中的日报，开始精读。"
+              break
+            fi
+            if [ "$active" = "error" ]; then
+              echo "::warning::查询日报状态失败，直接开始精读。"
+              break
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::warning::等待日报超过 230 分钟，直接开始精读。"
+              break
+            fi
+            echo "[INFO] 日报还在运行（${active} 个），60 秒后再查。"
+            sleep 60
+          done
+
       # 需要完整 docs/（侧边栏、论文 Markdown/txt、图表目录），检出成本与日报相当；
       # 这里只取最新一个提交（不需要历史，提交步骤不做 rebase）。
       - name: Checkout
