@@ -652,10 +652,13 @@ def generate_glance_overview(
     max_retries: int = 3,
     client: DeepSeekClient | None = None,
     sidebar_context: List[str] | None = None,
+    front_text: str = "",
 ) -> str | None:
     """
     生成论文速览（包含 TLDR、Motivation、Method、Result、Conclusion）。
     使用 JSON 结构化输出，确保返回完整的五个字段。
+    给了 front_text（PDF 首页文字）时，同一次调用顺便抽取一作和通讯作者的机构，
+    追加一行 **Affiliations**（找不到就不输出这一行）。
     """
     active_client = client or LLM_CLIENT
     if active_client is None:
@@ -696,6 +699,21 @@ def generate_glance_overview(
         )
         schema['properties']['evidence'] = {'type': 'string'}
         schema['required'].append('evidence')
+    front_text = (front_text or "").strip()[:AFFILIATION_FRONT_CHARS]
+    if front_text:
+        payload["pdf_first_page"] = front_text
+        user_text = json.dumps(payload, ensure_ascii=False)
+        user_prompt += (
+            "\n同时根据 pdf_first_page（论文 PDF 首页文字）输出作者机构字段，只依据首页原文，不要猜测，找不到就填空字符串：\n"
+            "- first_author：第一作者姓名（按原文拼写）\n"
+            "- first_author_affiliation：第一作者的机构（大学/公司名，保留原文英文，多个机构用“; ”分隔）\n"
+            "- corresponding_author：通讯作者姓名（原文用 *、†、信封图标或 Corresponding author 标注的人；"
+            "有多位时用“, ”分隔；没有明确标注就填空字符串，不要默认是最后一位作者）\n"
+            "- corresponding_affiliation：通讯作者的机构（同上格式）"
+        )
+        for key in ("first_author", "first_author_affiliation", "corresponding_author", "corresponding_affiliation"):
+            schema["properties"][key] = {"type": "string"}
+            schema["required"].append(key)
 
     messages = [
         {"role": "system", "content": system_prompt},
@@ -726,6 +744,7 @@ def generate_glance_overview(
             evidence = str(obj.get('evidence') or '').strip()
             if sidebar_context is not None and not evidence:
                 continue
+            affiliations = format_affiliations(obj) if front_text else ""
             return "\n".join(
                 [
                     f"**TLDR**：{ensure_single_sentence_end(tldr)} \\",
@@ -733,7 +752,9 @@ def generate_glance_overview(
                     f"**Method**：{ensure_single_sentence_end(method)} \\",
                     f"**Result**：{ensure_single_sentence_end(result)} \\",
                     f"**Conclusion**：{ensure_single_sentence_end(conclusion)}",
-                ] + ([f'**Evidence**：{evidence}'] if evidence else [])
+                ]
+                + ([f'**Evidence**：{evidence}'] if evidence else [])
+                + ([f"**Affiliations**：{affiliations}"] if affiliations else [])
             )
         except Exception as e:
             # 额度不足等“硬失败”不必重试，直接降级
@@ -749,6 +770,47 @@ def generate_glance_overview(
             log(f"[WARN] 速览生成失败（第 {attempt} 次）：{e}")
             time.sleep(2 * attempt)
     return None
+
+
+AFFILIATION_FRONT_CHARS = 4000
+
+
+def _clean_field(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "")).strip().strip("；;，,")
+
+
+def format_affiliations(obj: Dict[str, Any]) -> str:
+    """把 LLM 抽出的一作/通讯作者机构拼成一行，例如：一作 A（MIT）；通讯 B（Stanford）。"""
+    first = _clean_field(obj.get("first_author"))
+    first_aff = _clean_field(obj.get("first_author_affiliation"))
+    corr = _clean_field(obj.get("corresponding_author"))
+    corr_aff = _clean_field(obj.get("corresponding_affiliation"))
+
+    def person(name: str, aff: str) -> str:
+        if name and aff:
+            return f"{name}（{aff}）"
+        return name or aff
+
+    if corr and first and corr.lower() == first.lower():
+        both = person(first, first_aff or corr_aff)
+        return f"一作兼通讯 {both}" if both else ""
+    parts = []
+    if first or first_aff:
+        parts.append(f"一作 {person(first, first_aff)}")
+    if corr or corr_aff:
+        # 没写通讯作者姓名、只抽到机构时不输出，避免误导
+        if corr:
+            parts.append(f"通讯 {person(corr, corr_aff)}")
+    return "；".join(parts)
+
+
+def read_front_text(txt_path: str) -> str:
+    """读取已下载的 PDF 文本开头部分（首页，含作者和机构），读不到返回空字符串。"""
+    try:
+        with open(txt_path, "r", encoding="utf-8") as f:
+            return f.read(AFFILIATION_FRONT_CHARS)
+    except OSError:
+        return ""
 
 
 def build_glance_fallback(paper: Dict[str, Any]) -> str:
@@ -1640,6 +1702,7 @@ def build_markdown_content(
     glance_method = ""
     glance_result = ""
     glance_conclusion = ""
+    glance_affiliations = ""
 
     if glance:
         for line in glance.split("\n"):
@@ -1654,6 +1717,8 @@ def build_markdown_content(
                 glance_result = line.split("：", 1)[-1].split(":", 1)[-1].strip()
             elif line.startswith("**Conclusion**：") or line.startswith("**Conclusion**:"):
                 glance_conclusion = line.split("：", 1)[-1].split(":", 1)[-1].strip()
+            elif line.startswith("**Affiliations**："):
+                glance_affiliations = line.split("：", 1)[-1].strip()
 
     # 优先使用速览生成的 TLDR（100字左右），否则使用原来的 TLDR
     display_tldr = glance_tldr if glance_tldr else tldr
@@ -1665,6 +1730,8 @@ def build_markdown_content(
     if zh_title:
         lines.append(f"title_zh: {yaml_escape_value(zh_title)}")
     lines.append(f"authors: {yaml_escape_value(', '.join(authors) if authors else 'Unknown')}")
+    if glance_affiliations:
+        lines.append(f"affiliations: {yaml_escape_value(glance_affiliations)}")
     lines.append(f"date: {yaml_escape_value(published or 'Unknown')}")
     if pdf_url:
         lines.append(f"pdf: {yaml_escape_value(pdf_url)}")
@@ -2039,7 +2106,7 @@ def process_paper(
             paper["_figure_assets"] = figures
         if tables:
             paper["_table_assets"] = tables
-        glance = generate_glance_overview(title, abstract_en, client=paper_llm_client) or build_glance_fallback(paper)
+        glance = generate_glance_overview(title, abstract_en, client=paper_llm_client, front_text=read_front_text(txt_path)) or build_glance_fallback(paper)
         if glance:
             paper["_glance_overview"] = glance
         tags_list = build_tags_list(section, paper.get("llm_tags") or [])
@@ -2065,7 +2132,7 @@ def process_paper(
 
     zh_title, zh_abstract = translate_title_and_abstract_to_zh(title, abstract_en, client=paper_llm_client)
     tags_list = build_tags_list(section, paper.get("llm_tags") or [])
-    glance = generate_glance_overview(title, abstract_en, client=paper_llm_client) or build_glance_fallback(paper)
+    glance = generate_glance_overview(title, abstract_en, client=paper_llm_client, front_text=read_front_text(txt_path)) or build_glance_fallback(paper)
     if glance:
         paper["_glance_overview"] = glance
     content = build_markdown_content(paper, section, zh_title, zh_abstract, tags_list)
