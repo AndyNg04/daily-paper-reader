@@ -3130,6 +3130,9 @@ window.$docsify = {
         // 右侧：基本信息
         lines.push('<div class="paper-meta-right">');
         lines.push(`<p><strong>Authors</strong>: ${escapeHtml(meta.authors || 'Unknown')}</p>`);
+        if (meta.affiliations) {
+          lines.push(`<p><strong>Affiliations</strong>: ${escapeHtml(meta.affiliations)}</p>`);
+        }
         if (meta.source) {
           lines.push(`<p><strong>Source</strong>: ${renderSourceChips(meta.source)}</p>`);
         }
