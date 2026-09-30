@@ -87,6 +87,7 @@ def test_inputs_reach_scripts_only_through_env(job):
 def test_step_order(job):
     names = [step["name"] for step in job["steps"]]
     assert names == [
+        "Wait for running daily report",
         "Checkout",
         "Setup Python",
         "Validate inputs and locate paper",
@@ -151,8 +152,10 @@ def test_codex_writeback_runs_last_after_commit_reset(job):
 
 
 def test_permissions_timeout_and_concurrency(workflow, job):
-    assert workflow["permissions"] == {"contents": "write"}
-    assert 30 <= job["timeout-minutes"] <= 45
+    assert workflow["permissions"] == {"contents": "write", "actions": "read"}
+    wait = steps_by_name(job)["Wait for running daily report"]
+    # job 超时 = 等日报的上限 + 精读本身（30–45 分钟）
+    assert 30 <= job["timeout-minutes"] - wait["timeout-minutes"] <= 45
     concurrency = workflow["concurrency"]
     assert concurrency["cancel-in-progress"] is False
     group = concurrency["group"]
@@ -220,3 +223,16 @@ def test_generate_and_apply_share_the_same_stash_directory(job):
     assigned = re.search(r'^\s*stash=("[^"]+"|\S+)$', commit, re.M).group(1)
     assert gen_stash == assigned == '"$RUNNER_TEMP/deep-read"'
     assert '--stash "$stash"' in commit
+
+
+def test_waits_for_running_daily_report_before_checkout(job):
+    # 前端不再拦截日报运行中的升级请求，由这一步排队：日报结束后再检出最新 main。
+    steps = job["steps"]
+    wait = steps[0]
+    assert wait["name"] == "Wait for running daily report"
+    assert "daily-paper-reader.yml/runs" in wait["run"]
+    assert 'select(.status != "completed")' in wait["run"]
+    assert wait["env"]["GH_TOKEN"] == "${{ github.token }}"
+    # 等待有上限，超时或查询失败都直接继续，不让精读卡死
+    assert "deadline" in wait["run"] and "break" in wait["run"]
+    assert wait["timeout-minutes"] <= 240

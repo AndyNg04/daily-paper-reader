@@ -799,22 +799,16 @@ window.DPRWorkflowRunner = (function () {
         }
       }
 
+      let queuedBehindDaily = false;
       if (workflowFile === 'deep-read-paper.yml') {
-        // 日报运行中（尤其提交阶段）再推送 main 会和日报抢推送；等日报结束再升级精读。
+        // 日报运行中不再拦截：精读 workflow 第一步会等日报结束再开始（避免和日报抢推送），
+        // 这里只用来提示用户任务已排队。查询失败不影响派发。
         const dailyUrl = `https://api.github.com/repos/${owner}/${repo}/actions/workflows/daily-paper-reader.yml/runs?per_page=5`;
         const dailyRes = await ghFetch(token, dailyUrl);
         if (dailyRes.ok) {
           const dailyData = await dailyRes.json();
           const dailyRuns = Array.isArray(dailyData.workflow_runs) ? dailyData.workflow_runs : [];
-          const dailyActive = dailyRuns.find((r) => activeStatuses.has(r.status));
-          if (dailyActive) {
-            const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${dailyActive.id}`;
-            setStatus('日报工作流正在运行，为避免推送冲突，请等它结束后再升级精读。', '#c00');
-            runsEl.innerHTML =
-              `<div style="color:#c00;">日报（#${dailyActive.run_number || dailyActive.id}，状态：${statusZhMap[dailyActive.status] || dailyActive.status}）结束后再试。</div>` +
-              `<div style="margin-top:8px;"><a class="arxiv-tool-btn" style="padding:6px 10px; text-decoration:none;" target="_blank" href="${runUrl}">查看日报运行</a></div>`;
-            return false;
-          }
+          queuedBehindDaily = dailyRuns.some((r) => activeStatuses.has(r.status));
         }
       }
 
@@ -849,7 +843,13 @@ window.DPRWorkflowRunner = (function () {
         throw new Error(`触发失败：HTTP ${res.status} ${res.statusText} - ${txt}`);
       }
 
-      setStatus('已触发，正在等待运行记录创建...', '#666', { waiting: true });
+      setStatus(
+        queuedBehindDaily
+          ? '日报正在运行：精读已加入队列，日报结束后自动开始（关闭页面不影响）。'
+          : '已触发，正在等待运行记录创建...',
+        '#666',
+        { waiting: true },
+      );
 
       // 派发确认与进度轮询分离，关闭页面不会把已提交的任务误报为提交失败。
       const monitor = async () => {
