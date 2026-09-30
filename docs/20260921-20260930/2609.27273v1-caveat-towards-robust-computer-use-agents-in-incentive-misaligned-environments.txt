@@ -1,0 +1,788 @@
+CAVEAT:
+TOWARDS
+ROBUST
+COMPUTER-USE
+AGENTS IN INCENTIVE-MISALIGNED ENVIRONMENTS
+Yuxuan Li∗
+Carnegie Mellon University
+yuxuanll@andrew.cmu.edu
+Will Epperson
+Microsoft Research
+willepperson@microsoft.com
+Wesley Deng
+Microsoft Research
+wesleydeng@microsoft.com
+Zezhou Huang
+Microsoft Research
+zacharyhuang@microsoft.com
+ABSTRACT
+Computer-use agents (CUAs) increasingly act on behalf of users online. What
+happens when the environments they operate in have incentives that do not align
+with the user’s? In online marketplaces, for example, platforms may favor some
+products over others, potentially steering agents away from the user’s objective.
+Existing CUA benchmarks cover cooperative settings or explicit attacks, but do
+not test whether agents preserve user objectives when the environment itself has
+a stake in the outcome. We introduce CAVEAT, a controlled benchmark span-
+ning nine marketplace environments and a taxonomy of eight common steering
+mechanisms. Across five model families, agents purchase the user-optimal prod-
+uct in 78.6% of matched-control episodes but only 17.3% when steering mech-
+anisms are enabled. Larger models and increased reasoning improve robustness,
+but substantial failures persist. Our trajectory analysis and targeted ablations iden-
+tify three points where steering enters the decision process: (1) agents distort the
+user’s priorities, (2) prematurely narrow the set of alternatives they consider, and
+(3) commit before resolving decision-relevant evidence. Guided by this diagno-
+sis, we develop CAVEAT-Harness, which directly targets these failure modes and
+raises user-optimal purchasing by 55.0%. Targeted post-training further improves
+a smaller open model. These results establish incentive robustness as a distinct
+challenge for delegated agents, diagnose how it fails, and show that targeted inter-
+ventions can substantially improve it.
+1
+INTRODUCTION
+Computer-use agents (CUAs) are increasingly used to make purchases, book services, and act on
+users’ behalf across online platforms Deng et al. (2023); Zhou et al. (2024); He et al. (2024). These
+platforms often have their own incentives around what users buy, read, watch, or engage with, shap-
+ing how options are ranked and presented Xu et al. (2022); Covington et al. (2016); Yao et al. (2023);
+Dai et al. (2024). As users delegate more decisions to agents, those agents must preserve the user’s
+objective while operating in environments with competing objectives. Yet current CUA evaluations
+provide little evidence about this setting: capability benchmarks largely study task completions in
+neutral environments Zhou et al. (2024); Drouin et al. (2024); Xie et al. (2024), while security bench-
+marks focus on explicit attempts to manipulate or compromise the agent Debenedetti et al. (2024);
+Evtimov et al. (2026); Zhan et al. (2024). This leaves largely untested a common regime in which
+a platform operates as intended while favoring outcomes that may conflict with the user’s. We call
+these incentive-misaligned environments, and ask: when the environment has a stake in the outcome,
+does the agent still choose according to the user’s objective?
+We formalize incentive-misaligned environments and instantiate them in online marketplaces, where
+platforms have long used sponsored ranking, promotional framing, scarcity cues, and related mech-
+anisms to steer consumer choice Mathur et al. (2019); Wu et al. (2021); Sinha & Smith (2000). We
+∗Work done during an internship at Microsoft Research.
+1
+arXiv:2609.27273v1  [cs.AI]  23 Sep 2026
+
+
+“Buy me a laptop with ...”
+Preference 1
+Preference 2
+Preference 3
+Computer-Use 
+Agent
+CAVEAT Environments
+Normal Website
+Incentive-Misaligned
+Optimal Purchase Rate: 78.6%
+Optimal Purchase Rate: 17.3%
+Platform 
+steering 
+mechanisms 
+that influence 
+agent decisions
+Figure 1: Incentive misalignment changes agent decisions while the underlying task remains fixed.
+The same user request and product catalog are shown in matched-control and incentive-misaligned
+CAVEAT-Shop environments. Across five model configurations on CAVEAT-Standard, enabling
+steering mechanisms reduces optimal purchase rate from 78.6% to 17.3%.
+introduce CAVEAT, a benchmark spanning nine high-fidelity marketplace environments and eight
+steering mechanisms drawn from commercial practice, where agents search, compare, and purchase
+products end to end. Evaluating 18 model configurations on CAVEAT, we show a large gap between
+solving the underlying task and remaining robust to marketplace incentives. Across matched tasks,
+agents select the optimal product in 78.6% of cases when steering mechanisms are absent, compared
+with 17.3% when they are present. This effect appears across 18 model configurations and persists
+with stronger models and increased reasoning. On CAVEAT-Hard, which expands the search space
+beyond 2,000 products, GPT-5.6-Sol with high reasoning drops from 90.0% in the matched control
+to 0.0% under incentive misalignment.
+To understand why incentives have such a large effect, we combine quantitative and qualitative tra-
+jectory analysis with targeted ablations, and find that incentive misalignment enters the decision
+process at three points: agents (1) drift from the user’s stated priorities toward whatever the mar-
+ketplace makes salient, (2) stop searching after seeing only the options the marketplace surfaces
+first, and (3) commit to a purchase before resolving decision-relevant facts, such as the full price.
+Informed by this diagnosis, we develop CAVEAT-Harness by having the agent pin down the user’s
+objective before browsing and verify its decision before buying. The harness raises optimal pur-
+chasing for GPT-5.6-Terra from 11.7% to 66.7% on Standard and for GPT-5.6-Sol from 0.0% to
+80.0% on Hard. The gains are much smaller for Qwen3.5-27B, which reaches only 4.2% with the
+harness, suggesting that agent harness interventions still depend on the underlying model’s ability
+to carry out the prescribed decision process. We therefore post-train Qwen3.5-27B on trajectories
+that instantiate this process and obtain CAVEAT-27B, which improves to 22.9% under the same
+harness. Together, these results show that the failures exposed by CAVEAT are diagnosable and
+actionable through both inference-time structure and targeted post-training.
+We make three contributions:
+• We formalize incentive-misaligned environments and introduce CAVEAT, a controlled bench-
+mark spanning 9 high-fidelity environments for evaluating whether CUAs preserve user objec-
+tives under competing marketplace incentives.
+• Across 18 model configurations, we identify a large incentive-induced degradation in optimal
+purchasing and trace it to failures in objective preservation, search coverage, and evidence reso-
+lution.
+• We show that these failures can be mitigated through structured inference and targeted post-
+training with CAVEAT-Harness and CAVEAT-27B.
+2
+
+
+A
+1
+4
+7
+CAVEAT environments
+2
+3
+5
+6
+8
+9
+B
+User request
+“Buy me headphones:
+Under $50
+Blue
+Highest rated”
+Computer-use agent
+Agent interaction and scoring
+Marketplace interaction
+Purchased User-optimal
+Optimal purchase rate
+= 0.60
+Figure 2: Overview of CAVEAT. (A) Nine marketplace environments provide diverse interfaces
+for end-to-end purchasing. Respectively: (B) Given a natural-language request containing hard and
+comparative requirements, a computer-use agent browses the marketplace and completes a purchase.
+Each task has a unique user-optimal product, and optimal purchase rate measures the fraction of
+episodes in which the agent purchases it.
+2
+INCENTIVE-MISALIGNED ENVIRONMENTS
+We consider a user who delegates a decision to an agent. Let X denote the feasible outcomes and
+U(x) the user’s objective. The set of user-optimal outcomes is X ⋆
+U = arg maxx∈X U(x). The agent
+receives the user’s request and interacts with an environment E to choose an outcome ˆxE. We call
+a selection optimal when ˆxE ∈X ⋆
+U, and measure decision quality by the optimal selection rate,
+the fraction of tasks on which this occurs. Task completion records whether the agent successfully
+executes an outcome, whereas optimal selection asks whether that outcome is best according to the
+user’s objective.
+The environment may itself be shaped by an objective V , which gives it incentives over outcomes
+or interactions. We call E incentive-misaligned for a delegated decision when advancing V can
+favor outcomes outside X ⋆
+U. This relationship depends on the decision: the same ranking rule or
+recommendation may favor the user-optimal outcome on one task and a worse outcome on another.
+We use steering mechanism for the way an environment advances its objective through the agent’s
+decision context, such as by changing which options are surfaced, how they are presented, or the
+effort required to inspect them. Throughout the paper, misalignment refers to the conflict between
+objectives, while robustness refers to the agent’s ability to preserve decision quality under that con-
+flict.
+We evaluate robustness using matched conditions that preserve the underlying decision problem.
+The user request, feasible outcomes, decision-relevant facts, and X ⋆
+U remain fixed, while the steer-
+ing mechanisms shaping the interaction are varied. We refer to the resulting difference in optimal
+selection rate as incentive-induced degradation. Because the underlying choice set and user ob-
+jective are unchanged, the matched comparison isolates degradation induced by the environment’s
+choice architecture rather than changes in the underlying decision problem. Explicit adversarial
+attacks form a different setting in which the environment deliberately attempts to compromise the
+agent; an incentive-misaligned environment may operate as designed while pursuing an objective
+that conflicts with the user’s.
+3
+CAVEAT: INCENTIVE-MISALIGNED MARKETPLACES
+We instantiate this setting in CAVEAT, a benchmark of nine browser-based marketplaces spanning
+short-term lodging, general retail, food delivery, resale, freelance services, grocery delivery, and
+specialty shopping (Figure 2A). Each environment has its own storefront and domain-appropriate
+transaction flow. An agent receives a natural-language user request and then operates the market-
+place autonomously until it places an order or booking (Figure 2B). It may search, navigate, inspect
+listings, use available filters or sorting controls, and modify its cart as it sees fit; the benchmark does
+not prescribe a decision procedure or how much of the marketplace the agent should inspect.
+3
+
+
+Table 1: Marketplace incentive-mechanism taxonomy used in CAVEAT.
+Mechanism
+How it appears
+Sponsored placement
+Paid or promoted options receive more prominent placement.
+Preferential ranking
+Platform-favored options are promoted; disfavored ones are buried.
+Drip pricing
+Required costs are revealed later in the purchase flow.
+Promotional framing
+Discounts or reference prices make selected options appear more at-
+tractive.
+Defaults & bundling
+Add-ons, bundles, or upgraded choices are preselected or favored.
+Scarcity & social proof
+Urgency, availability, or popularity cues encourage commitment.
+Trust signals
+Ratings, reviews, or badges increase the apparent credibility of se-
+lected options.
+Friction & obstruction
+Some choices or corrections require additional effort.
+Agent task and scoring. Each request specifies hard requirements that the chosen option must
+satisfy and comparative requirements over otherwise valid options. A request might, for example,
+require a product to stay within budget and meet a minimum specification while preferring lower
+total cost and higher capacity. We construct every scored task so that exactly one option satisfies
+the requirements and is jointly best on all stated preferences, yielding a unique user-optimal option
+without requiring arbitrary weights between preferences.
+The product attributes needed to evaluate each request are stored in structured form, and every task
+is validated programmatically against the full catalog. As illustrated in Figure 2B, an episode is
+scored by comparing the completed transaction with the user-optimal option. The optimal purchase
+rate is the fraction of episodes in which they match.
+Marketplace steering mechanisms. To ground CAVEAT in steering mechanisms documented
+in real online marketplaces, we reviewed prior academic work, regulatory guidance, and policy
+analyses on online choice architecture, advertising and ranking, pricing, reviews, and interface de-
+sign Blake et al. (2021); Mathur et al. (2019); Competition and Markets Authority (2022); Federal
+Trade Commission (2022); OECD (2022); European Commission (2020); Federal Trade Commis-
+sion (2015; 2025; 1967; 2024). We synthesize the recurring mechanisms into the eight-family tax-
+onomy in Table 1, and operationalize each family in CAVEAT.
+For every Standard task, we evaluate the same user request in two versions of the marketplace (Fig-
+ure 1). The matched control disables these mechanisms, while the incentive-misaligned condition
+activates all eight. The request, available products, product attributes, prices, availability, and user-
+optimal option remain identical across the two versions. The mechanisms change how the market-
+place presents and mediates the same choice, including which products appear first, which receive
+sponsored or promotional treatment, when costs become visible, and what urgency or trust cues ac-
+company them. Comparing optimal purchase rate across the two matched conditions measures the
+incentive-induced degradation defined in Section 2.
+Benchmark settings. CAVEAT-Standard contains 52 tasks across the nine environments, with
+approximately 70 products in each scenario. We further construct CAVEAT-Hard to test the same
+decision problem at substantially larger search scale. Its 5 CAVEAT-Shop tasks each contain 2,112
+products distributed across 88 result pages. This setting tests whether agents can maintain decision
+quality when finding strong candidates requires much broader exploration of the marketplace.
+4
+EVALUATING CUAS UNDER INCENTIVE MISALIGNMENT
+We evaluate CUAs on CAVEAT using the widely used BrowserUse harness M¨uller & ˇZuniˇc (2024),
+holding the agent harness fixed across model families. Our main evaluation covers five widely
+used model families on all 52 CAVEAT-Standard tasks under both matched conditions, with three
+repetitions per task. To examine how robustness changes with reasoning, model scale, and model
+generation, we evaluate additional configurations on CAVEAT-Shop while holding the environment
+and tasks fixed. We further evaluate the strongest configuration on the five CAVEAT-Hard tasks
+with ten repetitions each.
+4
+
+
+Matched
+control
+Incentive-
+misaligned
+0
+25
+50
+75
+100
+Optimal purchase rate (%)
+78.6
+17.3
+Qwen3.5
+122B
+Grok-4.3
+DeepSeek
+V4 Flash
+Kimi
+K2.6
+GPT-5.6
+Sol w/ low
+69.9
+1.9
+80.8
+1.9
+57.1
+4.5
+94.2
+24.4
+91.0
+53.8
+Matched control
+Incentive-misaligned
+Matched
+control
+Incentive-
+misaligned
+90.0
+0.0
+A
+Standard:
+five-model aggregate
+B
+Standard:
+five-model breakdown
+C
+Hard:
+GPT-5.6-Sol w/ high
+Figure 3: Incentive misalignment sharply reduces optimal purchasing. (A) Across five model
+families and all 52 CAVEAT-Standard tasks, optimal purchase rate falls from 78.6% in the matched
+control to 17.3% under incentive misalignment. (B) The degradation is consistent across model
+families. All five configurations perform worse under incentive misalignment, with drops ranging
+from 37.2 to 78.9 percentage points. (C) On CAVEAT-Hard, GPT-5.6-Sol with high reasoning
+achieves 90.0% in the matched control and 0.0% under incentive misalignment. Error bars denote
+95% Wilson confidence intervals.
+4.1
+INCENTIVES SHARPLY DEGRADE USER-OPTIMAL PURCHASING
+Activating the marketplace steering mechanisms reduces optimal purchase rate on CAVEAT-
+Standard from 78.6% to 17.3%, a drop of 61.3 percentage points (Figure 3A). The user request,
+catalog, product facts, prices, availability, and user-optimal option remain unchanged between the
+two conditions. This matched comparison therefore isolates how strongly the agents’ decisions
+change in response to the marketplace incentives surrounding the same purchasing problem.
+The effect is not concentrated in a small subset of models. All five model families decline under
+incentive misalignment (Figure 3B), with drops ranging from 37.2 to 78.9 percentage points. Even
+GPT-5.6-Sol with low reasoning, the strongest model in this comparison, falls from 91.0% in the
+matched control to 53.8% under incentive misalignment. The same degradation also occurs when
+using a different agent harness paired with a dedicated CUA model. Using Fara1.5-27B with its
+native Fara harness on CAVEAT-Shop, we observe a drop from 81.7% in the matched control to
+3.3% under incentive misalignment.
+Using the 20 tasks in CAVEAT-Shop, we further isolate each incentive family while disabling the
+other seven. With all mechanisms disabled, GPT-5.6-Sol-low makes the optimal purchase in 100%
+of episodes; activating sponsored placement alone reduces this to 63.3%, preferential ranking to
+75%, and drip pricing to 83.3%, while the remaining five families produce smaller drops.
+CAVEAT-Hard makes the separation between underlying task capability and robustness to incen-
+tives especially clear. GPT-5.6-Sol with high reasoning purchases the user-optimal product in 90.0%
+of matched-control episodes, showing that it can solve these large-catalog decisions when the steer-
+ing mechanisms are absent. With the same requests and catalogs under incentive misalignment, it
+makes no optimal purchase across 50 episodes (Figure 3C). Thus, even when the underlying deci-
+sion problem is demonstrably solvable, marketplace incentives can still induce a complete loss of
+optimal purchasing in this setting.
+4.2
+ROBUSTNESS IMPROVES WITH MODEL CAPABILITY
+The controlled comparisons in Figure 4 show that robustness improves as models receive more rea-
+soning, scale to stronger variants, and advance across generations. Reasoning produces the clearest
+gains. GPT-5.6-Sol rises from 51.7% optimal purchasing at low reasoning to 90.0% at high reason-
+ing, while GPT-5.5 improves from 12.0% at low reasoning to 50% with medium or high reasoning.
+Additional inference-time reasoning can therefore recover a substantial share of the performance
+lost under incentive misalignment.
+5
+
+
+Low
+Medium
+High
+0
+25
+50
+75
+100
+Optimal purchase rate (%)
+12.0
+50.0
+47.0
+51.7
+71.7
+90.0
+GPT-5.6-Sol
+GPT-5.5
+Small
+Medium
+Large
+0.0
+0.0
+0.0
+11.7
+51.7
+GPT-5.6
+GPT-5
+4o
+4.1
+5
+5.5
+5.6
+0.0
+0.0
+0.0
+12.0
+51.7
+A
+Scaling
+reasoning effort
+B
+Scaling
+model size
+C
+Progress across
+model generations
+Figure 4: Robustness improves with model capability. All panels evaluate CAVEAT-Shop Stan-
+dard under incentive misalignment. (A) Increasing reasoning effort raises optimal purchase rate for
+GPT-5.5 and GPT-5.6-Sol. (B) Within GPT-5.6, performance rises from Luna to Terra to Sol, while
+the tested GPT-5 scale variants remain at floor. (C) At low reasoning effort, robustness remains at
+floor through GPT-5, becomes measurable with GPT-5.5, and rises sharply with GPT-5.6-Sol.
+Scaling shows a similar upward trend within GPT-5.6. At the same low-reasoning setting, optimal
+purchase rate rises from 0.0% for Luna to 11.7% for Terra and 51.7% for Sol (Figure 4B). The
+corresponding GPT-5 nano, mini, and main configurations remain at 0.0%, indicating that greater
+scale alone is insufficient in the older generation and that the gains from scaling become visible only
+in the newer family. Model generation shows the same broader progression. At low reasoning effort,
+GPT-4o, GPT-4.1, and GPT-5 remain at floor, after which optimal purchase rate rises to 12.0% for
+GPT-5.5 and 51.7% for GPT-5.6-Sol (Figure 4C).
+Together, these comparisons show that robustness to marketplace incentives is improving with rea-
+soning, scale, and newer model generations. At the same time, it continues to lag the models’ ability
+to solve the corresponding purchasing decisions in matched controls. This gap motivates a closer
+examination of how agent behavior changes when marketplace incentives are present.
+5
+WHERE INCENTIVE MISALIGNMENT ENTERS THE DECISION PROCESS
+Section 4 shows that agents often solve a purchasing problem in the matched control but choose
+differently once marketplace incentives are introduced. We next examine where this sensitivity en-
+ters the decision process. We qualitatively review 200 randomly sampled trajectories from the user
+request through purchase while hiding the final success label, then use recurring behaviors to moti-
+vate targeted analyses. The review points to departures in how agents preserve the user’s preferences,
+decide when to stop searching, and handle information that remains uncertain or has been read incor-
+rectly. These observations identify three places in the decision process where an incentive-bearing
+environment can gain leverage through salience, visibility, and information availability.
+5.1
+OBJECTIVE DRIFT
+Observation. In several trajectories, agents begin with a faithful account of the user’s requirements
+and preferences but change their effective priorities while browsing. A highly rated product, a
+prominent feature, or another salient cue can lead the agent to favor one preference over another
+even when the user assigned them equal importance. We therefore test whether the comparison
+remains stable under a change that leaves the user objective unchanged.
+Targeted analysis and ablations. We construct matched requests with two explicitly equal-priority
+preferences and reverse only their order. The catalog, preference values, stated priorities, and user-
+optimal product remain fixed. Yet the selected product changes in all 25 matched pairs and system-
+atically shifts toward the preference mentioned first. The agent therefore introduces a priority that
+the user did not specify.
+6
+
+
+Diagnosis. We call this objective drift. In an incentive-misaligned environment, such instability
+gives recommendations, promotional framing, ratings, and other salient cues a route to change which
+parts of the user’s objective dominate the comparison.
+5.2
+PREMATURE SEARCH CLOSURE
+Observation. Failed trajectories often settle on a product that satisfies the hard requirements after
+comparing only a small set of visible options. Successful runs search more broadly, although both
+successful and failed agents frequently state that they have searched enough. This suggests that
+stopping decisions are poorly calibrated to search coverage, which becomes consequential when the
+environment controls which alternatives appear early.
+Targeted analysis and ablations.
+We run a matched placement intervention across all five
+CAVEAT-Shop product types and four comparative-preference settings, with three repetitions per
+setting and 60 runs per condition. Holding the request, catalog, and product attributes fixed, we
+move a suboptimal product from its normal position to a sponsored position near the top of the re-
+sults. Its visit rate rises from 45/60 to 60/60, but its purchase rate rises much more sharply from
+0/60 to 48/60, indicating that prominence changes how the product is treated after it is seen. This
+dependence on early visibility becomes especially damaging when the optimum requires deeper
+search. On CAVEAT-Hard, all 50 GPT-5.6-Sol-high failures stop on page 1 of an 88-page catalog
+and purchase a valid but suboptimal option while the optimum remains buried.
+Diagnosis. We call this premature search closure. Any incentive-bearing environment that con-
+trols the ordering or prominence of alternatives can exploit such a stopping rule through ranking,
+recommendations, or placement.
+5.3
+PREMATURE COMMITMENT WITH UNRESOLVED EVIDENCE
+Observation. Some failures remain even after search has succeeded. In these runs, the user-optimal
+product enters the comparison but is later rejected because a decision-relevant fact is missing, mis-
+read, or incorrectly remembered. To separate these cases from failures of discovery, we examine
+non-optimal purchases in which the optimum appears before the final decision and trace why the
+agent excludes it.
+Targeted analysis and ablations. To separate evidence failures from search failures, we examine
+non-optimal runs in which the user-optimal product had already been found. We identify 23 cases
+where the agent subsequently excludes it because a decision-relevant fact is misread, forgotten, or
+judged incorrectly, most often by confusing list and payable prices. These cases span 19 model–
+task–condition settings, and 13 contain another repetition that succeeds when the decisive fact is
+handled correctly. Thus, the failure occurs after discovery and turns on how the agent resolves the
+evidence needed for comparison. This suggests that delaying a decision-relevant fact may be enough
+to exploit the same weakness, which we test with drip pricing, where the initially displayed price can
+omit charges revealed only later in the transaction. We activate only drip pricing on CAVEAT-Shop
+while disabling the other seven steering mechanisms. Across 60 runs with GPT-5.6-Terra at low
+reasoning effort, the agent makes 35 suboptimal purchases, all selecting the drip-priced promoted
+product. Because no ranking, sponsorship, or other steering mechanism is active, these results isolate
+delayed price information as sufficient to substantially disrupt the comparison.
+Diagnosis. We call this premature commitment with unresolved evidence. The failure occurs when
+missing, delayed, conflicting, or misread information is treated as settled before the agent has enough
+evidence to support it. An incentive-misaligned environment can exploit this weakness by control-
+ling which facts appear early and which require additional inspection.
+6
+MITIGATING INCENTIVE-INDUCED FAILURES
+The three failures identified in Section 5 suggest concrete requirements for robust decision-making
+under incentive misalignment. To show these requirements are actionable, we operationalize them
+at inference time with CAVEAT-Harness, then use the same decision behaviors to post-train
+CAVEAT-27B so that a smaller model can execute them more reliably.
+7
+
+
+BrowserUse BrowserUse
++ Prompting
+CAVEAT-
+Harness
+0
+25
+50
+75
+100
+Optimal purchase rate (%)
+11.7
+30.0
+66.7
+BrowserUse BrowserUse
++ Prompting
+CAVEAT-
+Harness
+0.0
+13.3
+80.0
+Qwen3.5
+27B +
+BrowserUse
+Qwen3.5
+27B +
+CAVEAT-
+Harness
+CAVEAT
+27B +
+CAVEAT-
+Harness
+0.0
+4.2
+22.9
+A
+Shop:
+GPT-5.6-Terra w/ low
+B
+Hard:
+GPT-5.6-Sol w/ high
+C
+Held-out Shop:
+CAVEAT-27B
+Figure 5: Mitigating incentive-induced failures through inference-time structure and post-
+training.
+(A) On CAVEAT-Shop, CAVEAT-Harness substantially improves GPT-5.6-Terra-
+low over baseline BrowserUse and a prompt-only intervention. (B) The same pattern holds on
+CAVEAT-Hard with GPT-5.6-Sol-high. (C) On the 16 non-laptop CAVEAT-Shop tasks excluded
+from second-stage development, CAVEAT-27B with CAVEAT-Harness outperforms both the orig-
+inal Qwen3.5-27B with BrowserUse and the same backbone with CAVEAT-Harness. Error bars
+show 95% confidence intervals.
+6.1
+CAVEAT-HARNESS: OPERATIONALIZING THE DIAGNOSIS
+We address objective drift by asking the evaluated model to convert the user request into a struc-
+tured task specification before browsing begins. The specification records the hard and comparative
+requirements together with only the priorities explicitly stated by the user, and we keep it fixed
+throughout the episode. We address premature search closure and premature commitment with un-
+resolved evidence with an optional verification tool. Before purchase, the agent can use the tool to
+justify that search is sufficiently complete from evidence available in the marketplace and to check
+whether missing or conflicting facts could still change the comparison. CAVEAT-Harness uses
+only the user request and information obtained through ordinary browsing; it receives no benchmark
+answers, hidden catalog state, or incentive metadata.
+We compare the full harness with baseline BrowserUse and a prompt-only baseline that describes
+the same decision principles without adding the structured task specification or verification tool
+(Figure 5A–B, each task tested with three repetitions). On CAVEAT-Shop, CAVEAT-Harness
+raises GPT-5.6-Terra-low from 11.7% optimal purchasing with BrowserUse to 66.7%, compared
+with 30.0% under prompting alone. On CAVEAT-Hard, it raises GPT-5.6-Sol-high from 0.0% to
+80.0%, compared with 13.3% under prompting. We further ablate the two harness components on
+CAVEAT-Hard and find that structured objectives alone reach 6.7%, whereas the verification tool
+alone reaches 66.7%. Together with the 80.0% result from the full harness, this suggests that search
+and evidence verification account for most of the gain in this large-catalog setting. Our trajectory
+review also finds cases where simply making the verification tool available leads the model to search
+more broadly before invoking it, suggesting that the checkpoint can influence stopping behavior
+in addition to filtering the final decision. As a lightweight cross-environment check, we evaluate
+four CAVEAT-Stay tasks with three repetitions each. CAVEAT-Harness raises GPT-5.6-Terra-low
+from 16.7% to 50.0%, providing preliminary evidence that the inference-time intervention transfers
+beyond CAVEAT-Shop.
+We also measure the interaction cost of this additional robustness. CAVEAT-Harness requires 2.6×
+as much runtime, 2.3× as many steps, and 2.3× as many tool calls as baseline BrowserUse. The im-
+provement therefore comes partly from inducing more extensive search and verification, motivating
+more efficient stopping and verification strategies.
+6.2
+CAVEAT-27B: LEARNING THE DECISION PROCEDURE
+Small open models are attractive for personal CUAs that run locally or under tighter privacy and
+deployment constraints, yet simply pairing Qwen3.5-27B with CAVEAT-Harness yields only 4.2%
+8
+
+
+optimal purchasing on the transfer evaluation below. We therefore ask whether post-training can
+make the model execute the same decision procedure more reliably over long browser trajectories,
+producing CAVEAT-27B.
+We train Qwen3.5-27B in two stages. First, we use supervised examples synthesized by GPT-5.6-
+Sol-low in a separate synthetic environment to teach the behaviors required by the harness, including
+preserving the task specification, using the verification tool, and producing valid browser actions.
+We exclude all CAVEAT environments, tasks, catalogs, products, and benchmark answers from
+this stage. Second, we roll out the resulting model on CAVEAT-Shop laptop development tasks and
+train on corrected actions at states reached by its own policy. This exposes the model to navigation
+errors and recovery states that static demonstrations do not cover well. We use GPT-5.6-Sol-low
+with CAVEAT-Harness to provide corrected targets.
+We evaluate on the 16 non-laptop CAVEAT-Shop tasks, with three repetitions per task. The orig-
+inal Qwen3.5-27B achieves 0.0% with BrowserUse and 4.2% with CAVEAT-Harness, whereas
+CAVEAT-27B reaches 22.9% under the same harness (Figure 5C), an 18.7 percentage-point gain
+over the untrained backbone. To test whether this improvement transfers beyond the training envi-
+ronment, we evaluate the same models on the four CAVEAT-Stay tasks. Qwen3.5-27B remains at
+0.0% with either BrowserUse or CAVEAT-Harness, while CAVEAT-27B with the harness reaches
+16.7%, providing preliminary evidence that post-training improves the model beyond CAVEAT-
+Shop.
+7
+RELATED WORK
+Computer-use and shopping agents. Web and computer-use benchmarks evaluate navigation, tool
+use, and task completion across increasingly realistic interfaces Zhou et al. (2024); Deng et al.
+(2023); Xie et al. (2024). Shopping benchmarks extend this setting to product search, recommen-
+dation, personalization, and complex user requests Yao et al. (2022); Ling et al. (2026); Wang et al.
+(2026), while preference-following evaluations study whether agents infer and retain user prefer-
+ences during interaction Zhao et al. (2025); Jiang et al. (2025). CAVEAT goes beyond this by hold-
+ing the underlying user decision fixed and varying the incentives shaping the environment, enabling
+end-to-end measurement of whether an agent preserves the user-optimal outcome under competing
+environmental incentives.
+Agent security and deceptive interfaces. Prior work studies web agents under prompt injection,
+malicious content, and other explicit attempts to redirect agent behavior Evtimov et al. (2026);
+Debenedetti et al. (2024); Zhan et al. (2024), while recent benchmarks examine susceptibility to
+dark patterns and deceptive interfaces that alter ranking, presentation, or choice architecture Cuvin
+et al. (2026); Shi et al. (2026); Guo et al. (2026); Li et al. (2026); Bansal et al. (2025). CAVEAT
+differs from this work in both what it varies and what it measures. It varies the environment’s incen-
+tives rather than introducing adversarial or deceptive content, instantiating a taxonomy of steering
+mechanisms in complete, high-fidelity marketplace environments. Every mechanism presents only
+accurate information, so the agent is never misled about the facts it needs to decide; the observed
+degradation arises from how agents respond to the ordering, salience, and timing of true information.
+And rather than scoring whether an agent avoids a particular pattern, CAVEAT scores whether it se-
+lects the user-optimal option from a full catalog with a verifiable optimum, exposing decision-level
+failures such as premature search closure that pattern-level scoring cannot observe.
+Platform incentives and consumer choice.
+Work in economics, recommender systems, and
+human–computer interaction has examined how platform objectives shape ranking, recommenda-
+tion, sponsored placement, interface design, and consumer choice Xu et al. (2022); Mathur et al.
+(2019); Athey & Ellison (2011). This literature motivates the incentive taxonomy instantiated in
+CAVEAT. By embedding these incentives in interactive environments with verifiable user-optimal
+outcomes, we study how autonomous agents mediate the resulting conflict between users and plat-
+forms, and whether the diagnosed failures can be mitigated.
+9
+
+
+8
+LIMITATIONS AND FUTURE WORK
+Our study focuses on online marketplaces, where CAVEAT can precisely control user-optimal out-
+comes and environmental incentives; extending the same methodology to domains such as financial
+services, hiring, or information platforms would test how broadly the observed failure modes trans-
+fer. CAVEAT also uses well-specified objectives with unique optima, providing clean causal mea-
+surement while leaving open richer settings with partial, evolving, or non-unique preferences. The
+current environments instantiate fixed steering mechanisms, whereas real platforms may adapt their
+behavior to the agent over time, motivating interactive and strategic extensions. Finally, the robust-
+ness gains from CAVEAT-HARNESS come with greater interaction cost, and evidence that either
+CAVEAT-HARNESS or CAVEAT-27B generalizes beyond CAVEAT-Shop is currently limited to a
+small CAVEAT-Stay evaluation. Future work should characterize this robustness–efficiency trade-
+off and test transfer across broader environments, mechanisms, and domains.
+9
+CONCLUSION
+We introduced incentive-misaligned environments as a setting for evaluating whether CUAs pre-
+serve the user’s objective when the environment benefits from different outcomes. We instantiated
+this setting in CAVEAT and found that activating realistic marketplace steering mechanisms re-
+duces optimal purchase rate from 78.6% to 17.3% under matched decision problems. We traced this
+degradation to objective drift, premature search closure, and commitment with unresolved evidence,
+then showed that interventions derived from these failures substantially improve robustness through
+both inference-time structure and targeted post-training. Together, our results suggest that evaluating
+delegated agents should include how reliably they preserve user objectives when the environments
+in which they act have incentives of their own.
+ACKNOWLEDGMENTS
+We thank Saleema Amershi, Gagan Bansal, Solon Barocas, Adam Fourney, Eric Horvitz, Ece Ka-
+mar, Hussein Mozannar, David Rothschild, and Amanda Swearngin for their helpful discussions and
+feedback on this work.
+REFERENCES
+Susan Athey and Glenn Ellison. Position auctions with consumer search. The Quarterly Journal of
+Economics, 126(3):1213–1270, 2011.
+Gagan Bansal, Wenyue Hua, Zezhou Huang, Adam Fourney, Amanda Swearngin, Will Epperson,
+Tyler Payne, Jake M Hofman, Brendan Lucier, Chinmay Singh, et al. Magentic marketplace: An
+open-source environment for studying agentic markets. arXiv preprint arXiv:2510.25779, 2025.
+Tom Blake, Sarah Moshary, Kane Sweeney, and Steve Tadelis. Price salience and product choice.
+Marketing Science, 40(4):619–636, 2021.
+Competition and Markets Authority. Evidence review of online choice architecture and consumer
+and competition harm. Technical report, Competition and Markets Authority, April 2022. URL
+https://www.gov.uk/government/publications/online-choice-archite
+cture-how-digital-design-can-harm-competition-and-consumers/evi
+dence-review-of-online-choice-architecture-and-consumer-and-com
+petition-harm. Published 5 April 2022.
+Paul Covington, Jay Adams, and Emre Sargin. Deep neural networks for youtube recommendations.
+In Proceedings of the 10th ACM conference on recommender systems, pp. 191–198, 2016.
+Phil Cuvin, Hao Zhu, and Diyi Yang. How dark patterns manipulate web agents. In International
+Conference on Learning Representations, volume 2026, pp. 95945–95977, 2026.
+Jessica Dai, Bailey Flanigan, Nika Haghtalab, Meena Jagadeesan, and Chara Podimata. Can proba-
+bilistic feedback drive user impacts in online platforms? In International Conference on Artificial
+Intelligence and Statistics, pp. 2512–2520. PMLR, 2024.
+10
+
+
+Edoardo Debenedetti, Jie Zhang, Mislav Balunovic, Luca Beurer-Kellner, Marc Fischer, and Florian
+Tram`er. Agentdojo: A dynamic environment to evaluate prompt injection attacks and defenses
+for llm agents. Advances in neural information processing systems, 37:82895–82920, 2024.
+Xiang Deng, Yu Gu, Boyuan Zheng, Shijie Chen, Sam Stevens, Boshi Wang, Huan Sun, and Yu Su.
+Mind2web: Towards a generalist agent for the web. Advances in Neural Information Processing
+Systems, 36:28091–28114, 2023.
+Alexandre Drouin, Maxime Gasse, Massimo Caccia, Issam H. Laradji, Manuel Del Verme, Tom
+Marty, David Vazquez, Nicolas Chapados, and Alexandre Lacoste.
+WorkArena: How capa-
+ble are web agents at solving common knowledge work tasks? In Ruslan Salakhutdinov, Zico
+Kolter, Katherine Heller, Adrian Weller, Nuria Oliver, Jonathan Scarlett, and Felix Berkenkamp
+(eds.), Proceedings of the 41st International Conference on Machine Learning, volume 235 of
+Proceedings of Machine Learning Research, pp. 11642–11662. PMLR, 21–27 Jul 2024. URL
+https://proceedings.mlr.press/v235/drouin24a.html.
+European Commission. Ranking transparency guidelines in the framework of the EU regulation
+on platform-to-business relations – an explainer. Shaping Europe’s Digital Future, March 2020.
+URL https://digital-strategy.ec.europa.eu/en/library/ranking-t
+ransparency-guidelines-framework-eu-regulation-platform-busines
+s-relations-explainer. Published 13 March 2020.
+Ivan Evtimov, Arman Zharmagambetov, Aaron Grattafiori, Chuan Guo, and Kamalika Chaudhuri.
+Wasp: Benchmarking web agent security against prompt injection attacks. Advances in Neural
+Information Processing Systems, 38, 2026.
+Federal Trade Commission.
+Guides against deceptive pricing.
+16 CFR Part 233, 1967.
+URL
+https://www.ecfr.gov/current/title-16/chapter-I/subchapter-B/par
+t-233. Originally published at 32 FR 15534, November 8, 1967.
+Federal Trade Commission. Native advertising: A guide for businesses. Business Guidance, De-
+cember 2015. URL https://www.ftc.gov/business-guidance/resources/na
+tive-advertising-guide-businesses.
+Federal Trade Commission. Bringing dark patterns to light. Technical report, Federal Trade Com-
+mission, Bureau of Consumer Protection, September 2022. URL https://www.ftc.gov/
+reports/bringing-dark-patterns-light. Staff report.
+Federal Trade Commission. Trade regulation rule on the use of consumer reviews and testimonials.
+Federal Register, 89 FR 68034; 16 CFR Part 465, August 2024. URL https://www.federa
+lregister.gov/documents/2024/08/22/2024-18519/trade-regulation-r
+ule-on-the-use-of-consumer-reviews-and-testimonials. Final rule.
+Federal Trade Commission. Trade regulation rule on unfair or deceptive fees. Federal Register, 90
+FR 2066; 16 CFR Part 464, 2025. URL https://www.federalregister.gov/docume
+nts/2025/01/10/2024-30293/trade-regulation-rule-on-unfair-or-d
+eceptive-fees. Final rule; effective May 12, 2025.
+Longjie Guo, Chenjie Yuan, Mingyuan Zhong, Robert Wolfe, Ruican Zhong, Yue Xu, Bingbing
+Wen, Hua Shen, Lucy Lu Wang, and Alexis Hiniker. Susbench: An online benchmark for evalu-
+ating dark pattern susceptibility of computer-use agents. In Proceedings of the 31st International
+Conference on Intelligent User Interfaces, pp. 1917–1937, 2026.
+Hongliang He, Wenlin Yao, Kaixin Ma, Wenhao Yu, Yong Dai, Hongming Zhang, Zhenzhong Lan,
+and Dong Yu. Webvoyager: Building an end-to-end web agent with large multimodal models.
+In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics
+(Volume 1: Long Papers), pp. 6864–6890, 2024.
+Bowen Jiang, Zhuoqun Hao, Young Min Cho, Bryan Li, Yuan Yuan, Sihao Chen, Lyle Ungar,
+Camillo Jose Taylor, and Dan Roth. Know me, respond to me: Benchmarking LLMs for dynamic
+user profiling and personalized responses at scale. In Second Conference on Language Modeling,
+2025. URL https://openreview.net/forum?id=6ox8XZGOqP.
+11
+
+
+Yuxuan Li, Aoi Naito, and Hirokazu Shirado. Systematic failures in collective reasoning under
+distributed information in multi-agent llms. In Forty-third International Conference on Machine
+Learning, 2026.
+Yuan Ling, Chunqing Yuan, Shujing Dong, Yongjian Yang, Nataraj Mocherla, and Ayush Goyal.
+Shopperbench: A benchmark for personalized shopping with persona-guided simulation. In Pro-
+ceedings of the 19th Conference of the European Chapter of the Association for Computational
+Linguistics (Volume 5: Industry Track), pp. 837–846, 2026.
+Arunesh Mathur, Gunes Acar, Michael J Friedman, Eli Lucherini, Jonathan Mayer, Marshini Chetty,
+and Arvind Narayanan. Dark patterns at scale: Findings from a crawl of 11k shopping websites.
+Proceedings of the ACM on human-computer interaction, 3(CSCW):1–32, 2019.
+Magnus M¨uller and Gregor ˇZuniˇc. Browser use: Enable ai to control your browser, 2024. URL
+https://github.com/browser-use/browser-use.
+OECD. Dark commercial patterns. Technical Report 336, OECD Publishing, Paris, October 2022.
+URL https://doi.org/10.1787/44f5e846-en.
+Zijing Shi, Meng Fang, and Ling Chen. Benchmarking web agent safety under e-commerce decep-
+tive interfaces. In Proceedings of the 64th Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pp. 22090–22103, 2026.
+Indrajit Sinha and Michael F Smith.
+Consumers’ perceptions of promotional framing of price.
+Psychology & Marketing, 17(3):257–275, 2000.
+Jiangyuan Wang, Kejun Xiao, Qi Sun, Huaipeng Zhao, Tao Luo, Jian Dong Zhang, and Xiaoyi
+Zeng. Shoppingbench: A real-world intent-grounded shopping benchmark for llm-based agents.
+In Proceedings of the AAAI Conference on Artificial Intelligence, volume 40, pp. 33521–33529,
+2026.
+Yi Wu, Liwei Xin, Dahui Li, Jie Yu, and Junpeng Guo. How does scarcity promotion lead to impulse
+purchase in the online market? a field experiment. Information & Management, 58(1):103283,
+2021.
+Tianbao Xie, Danyang Zhang, Jixuan Chen, Xiaochuan Li, Siheng Zhao, Ruisheng Cao, Toh J Hua,
+Zhoujun Cheng, Dongchan Shin, Fangyu Lei, et al. Osworld: Benchmarking multimodal agents
+for open-ended tasks in real computer environments. Advances in Neural Information Processing
+Systems, 37:52040–52094, 2024.
+Renzhe Xu, Xingxuan Zhang, Bo Li, Yafeng Zhang, Xiaolong Chen, and Peng Cui. Product ranking
+for revenue maximization with multiple purchases. Advances in Neural Information Processing
+Systems, 35:25132–25145, 2022.
+Fan Yao, Chuanhao Li, Denis Nekipelov, Hongning Wang, and Haifeng Xu. How bad is top-k
+recommendation under competing content creators?
+In International conference on machine
+learning, pp. 39674–39701. PMLR, 2023.
+Shunyu Yao, Howard Chen, John Yang, and Karthik Narasimhan.
+Webshop: Towards scalable
+real-world web interaction with grounded language agents. Advances in Neural Information Pro-
+cessing Systems, 35:20744–20757, 2022.
+Qiusi Zhan, Zhixiang Liang, Zifan Ying, and Daniel Kang. Injecagent: Benchmarking indirect
+prompt injections in tool-integrated large language model agents. In Findings of the Association
+for Computational Linguistics: ACL 2024, pp. 10471–10506, 2024.
+Siyan Zhao, Mingyi Hong, Yang Liu, Devamanyu Hazarika, and Kaixiang Lin. Do llms recog-
+nize your preferences? evaluating personalized preference following in llms. In International
+Conference on Learning Representations, volume 2025, pp. 15888–15931, 2025.
+Shuyan Zhou, Frank F Xu, Hao Zhu, Xuhui Zhou, Robert Lo, Abishek Sridhar, Xianyi Cheng,
+Tianyue Ou, Yonatan Bisk, Daniel Fried, et al. Webarena: A realistic web environment for build-
+ing autonomous agents. In International Conference on Learning Representations, volume 2024,
+pp. 15585–15606, 2024.
+12

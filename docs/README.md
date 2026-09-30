@@ -51,14 +51,14 @@
       <span class="dpr-home-dashboard-kicker">2026-09-21 ~ 2026-09-30</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 23 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 52 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
-    <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>12</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>11</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>2 次</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>31</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>21</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-09-30 20:55:44 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-09-30 21:16:17 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>本期读了 23 篇 AI 研究：精读 12 篇、速读 11 篇，焦点落在模型如何回应人。</p>
-<p>最值得看的是两篇满分论文：一篇区分“积极回应”与“迎合”，一篇聚焦中文大模型回答事实问题时的迎合倾向。</p>
-<p>下次用 AI 查事实或辅助决策时，不妨核对原始来源，并留意它是在提供依据，还是只在顺着你说。</p>
+<p>9月21日至30日 AI 论文日报：收录 52 篇，精读 31 篇、速读 21 篇。</p>
+<p>最值得关注的是两篇满分精读：激励错位环境中的计算机操作智能体，以及 AI 风险变化时的人类接管时机。</p>
+<p>普通读者可先读这两篇，再从速读列表中选择“人类监督”或“智能体行动治理”继续了解。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">12 篇</strong>
+    <strong class="dpr-home-dashboard-count">31 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Receptiveness, Not Sycophancy: Distinguishing Engagement from Deference in Language Models">Receptiveness, Not Sycophancy: Distinguishing Engagement from Deference in Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="Evaluating Sycophancy in Chinese Large Language Models on Factual Questions Derived from Online Search Queries">Evaluating Sycophancy in Chinese Large Language Models on Factual Questions Derived from Online Search Queries</span></li><li><span class="dpr-home-dashboard-paper-title" title="Can LLMs identify and repair ruptures? Comparison between clinician practices and LLM behaviors">Can LLMs identify and repair ruptures? Comparison between clinician practices and LLM behaviors</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="CAVEAT: Towards Robust Computer-Use Agents in Incentive-Misaligned Environments">CAVEAT: Towards Robust Computer-Use Agents in Incentive-Misaligned Environments</span></li><li><span class="dpr-home-dashboard-paper-title" title="When Should a Human Take Back Control? Optimal Delegation under Turbulent AI Risk">When Should a Human Take Back Control? Optimal Delegation under Turbulent AI Risk</span></li><li><span class="dpr-home-dashboard-paper-title" title="Learning from Others, Acting for You: Cross-User Memory Sharing for LLM Agents">Learning from Others, Acting for You: Cross-User Memory Sharing for LLM Agents</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">ai-social-psych <strong>9</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>20</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>9</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -93,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">11 篇</strong>
+    <strong class="dpr-home-dashboard-count">21 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Annie, Are You Okay? How Style- and Context-Based Personalization Shape AI-Assisted Decision-Making">Annie, Are You Okay? How Style- and Context-Based Personalization Shape AI-Assisted Decision-Making</span></li><li><span class="dpr-home-dashboard-paper-title" title="LLM-based Conversational AI Knowledge Assistant for MyBuddy Humanoid Robot">LLM-based Conversational AI Knowledge Assistant for MyBuddy Humanoid Robot</span></li><li><span class="dpr-home-dashboard-paper-title" title="Et Tu, Brute? Economic Misalignment in Personal AI Agents">Et Tu, Brute? Economic Misalignment in Personal AI Agents</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Anticipatory Human Oversight of Agentic AI: A Philosophical Account">Anticipatory Human Oversight of Agentic AI: A Philosophical Account</span></li><li><span class="dpr-home-dashboard-paper-title" title="ActGov: Governing LLM Agent Actions via Policy-Constrained Validation">ActGov: Governing LLM Agent Actions via Policy-Constrained Validation</span></li><li><span class="dpr-home-dashboard-paper-title" title="Who Does What in AI Auditing? Designing Human-AI Collaboration for Auditing Generative AI">Who Does What in AI Auditing? Designing Human-AI Collaboration for Auditing Generative AI</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">ai-social-psych <strong>4</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>4</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>8</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>5</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span></div>
 </section>
 </div>
 
