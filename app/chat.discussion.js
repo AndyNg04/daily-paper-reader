@@ -1242,6 +1242,14 @@ window.PrivateDiscussionChat = (function () {
 	        fallbackPayload.max_tokens = primaryPayload.max_tokens;
 	      }
 
+      // DeepSeek 默认开启联网搜索：走它的 Anthropic 兼容接口并带上 web_search 服务端工具，
+      // 由模型自己决定要不要搜。接口不可用时回退到原来的 OpenAI 兼容接口（不联网）。
+      const llmUtils = window.DPRLLMConfigUtils || {};
+      const useWebSearch =
+        typeof llmUtils.supportsDeepSeekWebSearch === 'function'
+        && llmUtils.supportsDeepSeekWebSearch({ baseUrl, model });
+      let searchState = null;
+
       const doChatFetch = async (payload) => fetch(endpoint, {
           method: 'POST',
           headers: {
@@ -1253,9 +1261,40 @@ window.PrivateDiscussionChat = (function () {
         });
 
       try {
-        resp = await doChatFetch(primaryPayload);
+        if (useWebSearch) {
+          try {
+            const wsResp = await fetch(llmUtils.buildAnthropicMessagesEndpoint(baseUrl), {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey,
+                'anthropic-version': '2023-06-01',
+              },
+              signal: controller.signal,
+              body: JSON.stringify(llmUtils.buildWebSearchChatPayload({ model, messages })),
+            });
+            if (wsResp.ok && wsResp.body) {
+              resp = wsResp;
+              searchState = llmUtils.createWebSearchStreamState();
+            } else {
+              const wsText = await wsResp.text().catch(() => '');
+              console.warn(
+                '[DPR CHAT] 联网搜索接口不可用，回退普通对话：',
+                `HTTP ${wsResp.status}`,
+                (wsText || '').slice(0, 300),
+              );
+            }
+          } catch (wsError) {
+            if (wsError && wsError.name === 'AbortError') throw wsError;
+            console.warn('[DPR CHAT] 联网搜索请求失败，回退普通对话：', wsError);
+          }
+        }
+        if (!resp) {
+          resp = await doChatFetch(primaryPayload);
+        }
         if (
-          resp
+          !searchState
+          && resp
           && !resp.ok
           && (
             JSON.stringify(primaryPayload).includes('"reasoning"')
@@ -1334,14 +1373,25 @@ window.PrivateDiscussionChat = (function () {
           buffer = parts.pop() || '';
 
           for (const part of parts) {
-            const line = part.trim();
-            if (!line || !line.startsWith('data:')) continue;
+            // OpenAI 流每块只有 `data:`；Anthropic 流每块是 `event:` + `data:` 两行。
+            const line = part
+              .split('\n')
+              .map((l) => l.trim())
+              .find((l) => l.startsWith('data:'));
+            if (!line) continue;
             const jsonStr = line.replace(/^data:\s*/, '');
             if (jsonStr === '[DONE]') continue;
             let payload;
             try {
               payload = JSON.parse(jsonStr);
             } catch {
+              continue;
+            }
+            if (searchState) {
+              const piece = llmUtils.applyWebSearchStreamEvent(searchState, payload);
+              if (piece.thinking) thinkingBuffer += piece.thinking;
+              if (piece.text) answerBuffer += piece.text;
+              if (piece.thinking || piece.text) scheduleRender();
               continue;
             }
             const choice =
@@ -1363,6 +1413,14 @@ window.PrivateDiscussionChat = (function () {
               scheduleRender();
             }
           }
+        }
+      }
+
+      if (searchState) {
+        const sourcesMd = llmUtils.formatWebSearchSources(searchState);
+        if (sourcesMd && answerBuffer) {
+          answerBuffer += sourcesMd;
+          scheduleRender();
         }
       }
 
@@ -1398,7 +1456,7 @@ window.PrivateDiscussionChat = (function () {
       }
 
       if (statusEl) {
-        statusEl.textContent = `已使用模型 ${model} · ${paperContext.isFullText ? '基于论文全文' : (paperContext.unavailableReason || '全文不可用') + '，仅基于页面内容'}`;
+        statusEl.textContent = `已使用模型 ${model}${searchState ? `（联网搜索${searchState.queries.length ? ` ${searchState.queries.length} 次` : '可用，本次未搜索'}）` : ''} · ${paperContext.isFullText ? '基于论文全文' : (paperContext.unavailableReason || '全文不可用') + '，仅基于页面内容'}`;
         statusEl.style.color = paperContext.isFullText ? '#4caf50' : '#a66b00';
       }
 

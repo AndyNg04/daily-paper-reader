@@ -15,6 +15,13 @@ const {
   shouldUseXApiKeyHeader,
   buildStreamingChatPayload,
   buildConnectivityTestPayload,
+  supportsDeepSeekWebSearch,
+  buildAnthropicMessagesEndpoint,
+  toAnthropicMessages,
+  buildWebSearchChatPayload,
+  createWebSearchStreamState,
+  applyWebSearchStreamEvent,
+  formatWebSearchSources,
 } = require('../app/llm-config-utils.js');
 
 function testNormalizeBaseUrlForStorage() {
@@ -250,6 +257,82 @@ function testBuildConnectivityTestPayload() {
 
 }
 
+function testWebSearchHelpers() {
+  assert.equal(supportsDeepSeekWebSearch({ baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-pro' }), true);
+  assert.equal(supportsDeepSeekWebSearch({ baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash' }), true);
+  // 自定义代理地址不保证有 /anthropic 接口，不启用
+  assert.equal(supportsDeepSeekWebSearch({ baseUrl: 'https://proxy.example.com/v1', model: 'deepseek-v4-pro' }), false);
+  assert.equal(buildAnthropicMessagesEndpoint('https://api.deepseek.com'), 'https://api.deepseek.com/anthropic/v1/messages');
+  assert.equal(buildAnthropicMessagesEndpoint('https://api.deepseek.com/v1/'), 'https://api.deepseek.com/anthropic/v1/messages');
+  assert.equal(buildAnthropicMessagesEndpoint('https://api.deepseek.com/anthropic'), 'https://api.deepseek.com/anthropic/v1/messages');
+
+  const converted = toAnthropicMessages([
+    { role: 'system', content: 'S1' },
+    { role: 'assistant', content: 'dangling' },
+    { role: 'user', content: 'paper' },
+    { role: 'user', content: 'q1' },
+    { role: 'assistant', content: 'a1' },
+    { role: 'user', content: '' },
+    { role: 'user', content: 'q2' },
+  ]);
+  assert.equal(converted.system, 'S1');
+  assert.deepEqual(converted.messages, [
+    { role: 'user', content: 'paper\n\nq1' },
+    { role: 'assistant', content: 'a1' },
+    { role: 'user', content: 'q2' },
+  ]);
+
+  const payload = buildWebSearchChatPayload({ model: 'deepseek-v4-pro', messages: [{ role: 'system', content: 'S' }, { role: 'user', content: 'hi' }] });
+  assert.equal(payload.stream, true);
+  assert.equal(payload.system, 'S');
+  assert.ok(payload.max_tokens > 0);
+  assert.deepEqual(payload.tools, [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5 }]);
+  assert.equal(payload.tool_choice, undefined, '不强制搜索，由模型自己决定');
+}
+
+function testWebSearchStream() {
+  const state = createWebSearchStreamState();
+  const events = [
+    { type: 'message_start', message: {} },
+    { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: '想一想' } },
+    { type: 'content_block_stop', index: 0 },
+    { type: 'content_block_start', index: 1, content_block: { type: 'server_tool_use', id: 'x', name: 'web_search', input: {} } },
+    { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"query":"ELEP' } },
+    { type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: 'HANT sycophancy"}' } },
+    { type: 'content_block_stop', index: 1 },
+    { type: 'content_block_start', index: 2, content_block: { type: 'web_search_tool_result', content: [
+      { type: 'web_search_result', url: 'https://arxiv.org/abs/2505.13995', title: 'ELEPHANT [paper]' },
+      { type: 'web_search_result', url: 'javascript:alert(1)', title: 'bad' },
+    ] } },
+    { type: 'content_block_stop', index: 2 },
+    { type: 'content_block_start', index: 3, content_block: { type: 'text', text: '' } },
+    { type: 'content_block_delta', index: 3, delta: { type: 'text_delta', text: '答案' } },
+    { type: 'content_block_delta', index: 3, delta: { type: 'citations_delta', citation: { url: 'https://arxiv.org/abs/2505.13995', title: 'dup' } } },
+    { type: 'content_block_delta', index: 3, delta: { type: 'citations_delta', citation: { url: 'https://example.org/b', title: 'B' } } },
+    { type: 'content_block_stop', index: 3 },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
+    { type: 'message_stop' },
+  ];
+  let thinking = '';
+  let text = '';
+  events.forEach((e) => {
+    const piece = applyWebSearchStreamEvent(state, e);
+    thinking += piece.thinking;
+    text += piece.text;
+  });
+  assert.equal(text, '答案');
+  assert.match(thinking, /想一想/);
+  assert.match(thinking, /🔍 联网搜索：ELEPHANT sycophancy/);
+  assert.deepEqual(state.queries, ['ELEPHANT sycophancy']);
+  assert.deepEqual(state.sources.map((s) => s.url), ['https://arxiv.org/abs/2505.13995', 'https://example.org/b']);
+  const md = formatWebSearchSources(state);
+  assert.match(md, /\*\*参考来源\*\*/);
+  assert.match(md, /1\. \[ELEPHANT \\\[paper\\\]\]\(https:\/\/arxiv\.org\/abs\/2505\.13995\)/);
+  assert.equal(formatWebSearchSources(createWebSearchStreamState()), '');
+  assert.throws(() => applyWebSearchStreamEvent(state, { type: 'error', error: { message: 'overloaded' } }), /overloaded/);
+}
+
 testNormalizeBaseUrlForStorage();
 testBuildChatCompletionsEndpoint();
 testSanitizeModelList();
@@ -262,5 +345,7 @@ testResolveMaxOutputTokens();
 testShouldUseXApiKeyHeader();
 testBuildStreamingChatPayload();
 testBuildConnectivityTestPayload();
+testWebSearchHelpers();
+testWebSearchStream();
 
 console.log('llm config utils tests passed');
