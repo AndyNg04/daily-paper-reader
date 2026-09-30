@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-09-30</span>
+      <span class="dpr-home-dashboard-kicker">2026-09-21 ~ 2026-09-30</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 27 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 23 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>11</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>16</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>12</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>11</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-09-30 19:19:17 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-09-30 20:55:44 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日 AI 论文日报收录 27 篇：精读 11 篇、速读 16 篇。</p>
-<p>最值得关注的是人类引导的灵巧操作，以及 AI 风险变化时人类何时接管控制；两篇精读均获 9.0 分。</p>
-<p>普通读者可先看这两篇的摘要，再从实时受众规模估算、机器人导航和人机文学创作中挑一个感兴趣的方向速读。</p>
+<p>本期读了 23 篇 AI 研究：精读 12 篇、速读 11 篇，焦点落在模型如何回应人。</p>
+<p>最值得看的是两篇满分论文：一篇区分“积极回应”与“迎合”，一篇聚焦中文大模型回答事实问题时的迎合倾向。</p>
+<p>下次用 AI 查事实或辅助决策时，不妨核对原始来源，并留意它是在提供依据，还是只在顺着你说。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">11 篇</strong>
+    <strong class="dpr-home-dashboard-count">12 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Res-HIL: Human-Guided Residual Reinforcement Learning for Sample-Efficient Dexterous Manipulation">Res-HIL: Human-Guided Residual Reinforcement Learning for Sample-Efficient Dexterous Manipulation</span></li><li><span class="dpr-home-dashboard-paper-title" title="When Should a Human Take Back Control? Optimal Delegation under Turbulent AI Risk">When Should a Human Take Back Control? Optimal Delegation under Turbulent AI Risk</span></li><li><span class="dpr-home-dashboard-paper-title" title="Assisting for Open-Ended Tasks: Goal-Oriented Shared Autonomy as a Particle Filter">Assisting for Open-Ended Tasks: Goal-Oriented Shared Autonomy as a Particle Filter</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Receptiveness, Not Sycophancy: Distinguishing Engagement from Deference in Language Models">Receptiveness, Not Sycophancy: Distinguishing Engagement from Deference in Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="Evaluating Sycophancy in Chinese Large Language Models on Factual Questions Derived from Online Search Queries">Evaluating Sycophancy in Chinese Large Language Models on Factual Questions Derived from Online Search Queries</span></li><li><span class="dpr-home-dashboard-paper-title" title="Can LLMs identify and repair ruptures? Comparison between clinician practices and LLM behaviors">Can LLMs identify and repair ruptures? Comparison between clinician practices and LLM behaviors</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>8</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">ai-social-psych <strong>9</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -93,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">16 篇</strong>
+    <strong class="dpr-home-dashboard-count">11 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="REALMS: An AI-Assistant Conversational System for Real-Time Exact Audience Sizing over High-Dimensional Nested Profiles">REALMS: An AI-Assistant Conversational System for Real-Time Exact Audience Sizing over High-Dimensional Nested Profiles</span></li><li><span class="dpr-home-dashboard-paper-title" title="SoGuDiff: Socially Guided Diffusion for Steerable, Norm-Grounded Robot Navigation">SoGuDiff: Socially Guided Diffusion for Steerable, Norm-Grounded Robot Navigation</span></li><li><span class="dpr-home-dashboard-paper-title" title="Incipit: Axiom-Grounded Scaffolding for Human-AI Literary Creation">Incipit: Axiom-Grounded Scaffolding for Human-AI Literary Creation</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Annie, Are You Okay? How Style- and Context-Based Personalization Shape AI-Assisted Decision-Making">Annie, Are You Okay? How Style- and Context-Based Personalization Shape AI-Assisted Decision-Making</span></li><li><span class="dpr-home-dashboard-paper-title" title="LLM-based Conversational AI Knowledge Assistant for MyBuddy Humanoid Robot">LLM-based Conversational AI Knowledge Assistant for MyBuddy Humanoid Robot</span></li><li><span class="dpr-home-dashboard-paper-title" title="Et Tu, Brute? Economic Misalignment in Personal AI Agents">Et Tu, Brute? Economic Misalignment in Personal AI Agents</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>10</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>3</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">ai-social-psych <strong>4</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>4</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
 </section>
 </div>
 
