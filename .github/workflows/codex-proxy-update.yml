@@ -1,0 +1,121 @@
+name: codex-proxy-update
+
+# 每周检查 CLIProxyAPI 有没有新版本（fork 专用）。有新版本时：
+#   1. 下载 checksums.txt 和安装包，校验 sha256，改写 scripts/codex_proxy.sh 的版本号与校验和；
+#   2. 用新版本启动 proxy，跑 codex_proxy_check.py 兼容性检查（自动选出的 sol / luna 最新模型）；
+#   3. 检查通过才推送 chore/codex-proxy-v<版本> 分支并开 PR，交给人合并，不直接改 main。
+# 新模型（例如 gpt-6.1-sol）通常随 proxy 新版本一起出现；合并后各 workflow 会自动用上。
+# 开 PR 需要仓库设置里允许 GitHub Actions 创建 PR；不允许时分支照样推送，日志里给出比较链接。
+on:
+  schedule:
+    - cron: "41 3 * * 1" # 每周一 UTC 03:41
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# 会启动 proxy（可能刷新 Codex 凭证），与其他写 CODEX_AUTH_JSON 的 workflow 串行。
+concurrency:
+  group: codex-auth
+  cancel-in-progress: false
+
+jobs:
+  update:
+    if: github.repository != 'ziwenhahaha/daily-paper-reader'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Check for new CLIProxyAPI release
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python scripts/codex_proxy_update.py check
+
+      - name: Apply new version
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          NEW_VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          set -euo pipefail
+          python scripts/codex_proxy_update.py apply --version "$NEW_VERSION"
+          git diff --stat
+
+      - name: Install deps
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          python -m pip install --quiet requests
+
+      # 不传 model：用新版本 proxy 自动选出的最新模型做检查，和日报实际使用的一致。
+      - name: Start Codex proxy
+        if: steps.check.outputs.changed == 'true'
+        uses: ./.github/actions/codex-proxy
+        with:
+          auth-json: ${{ secrets.CODEX_AUTH_JSON }}
+          model: ${{ vars.CODEX_MODEL }}
+          fast-model: ${{ vars.CODEX_FAST_MODEL }}
+
+      - name: Check compatibility
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          python scripts/codex_proxy_check.py
+
+      - name: Open upgrade PR
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_VERSION: ${{ steps.check.outputs.version }}
+          OLD_VERSION: ${{ steps.check.outputs.current }}
+        run: |
+          set -euo pipefail
+          branch="chore/codex-proxy-v${NEW_VERSION}"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "[INFO] 分支 ${branch} 已存在，跳过。"
+            exit 0
+          fi
+          git config user.name "Xindi Huang"
+          git config user.email "91780429+AndyNg04@users.noreply.github.com"
+          git switch -c "$branch"
+          git add scripts/codex_proxy.sh
+          git commit -q -m "chore: 升级 CLIProxyAPI 到 v${NEW_VERSION}"
+          git push -q origin "$branch"
+          body="$RUNNER_TEMP/pr-body.md"
+          {
+            echo "## 背景"
+            echo "codex-proxy-update 检测到 CLIProxyAPI 新版本 v${NEW_VERSION}（当前 v${OLD_VERSION}）。"
+            echo
+            echo "## 改动"
+            echo "- \`scripts/codex_proxy.sh\`：\`CPA_VERSION\` / \`CPA_SHA256\` 升级到 v${NEW_VERSION}。"
+            echo
+            echo "## 本次运行实际跑过的验证"
+            echo "- 安装包 sha256 与 release 的 checksums.txt 一致。"
+            echo "- 用新版本启动 proxy，\`codex_proxy_check.py\` 兼容性检查全部通过（详见运行页 Summary）：${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            echo "## 没有验证到的部分"
+            echo "- 没有跑完整日报；release 说明请自行查看：https://github.com/router-for-me/CLIProxyAPI/releases/tag/v${NEW_VERSION}"
+          } > "$body"
+          if ! gh pr create --base "${GITHUB_REF_NAME}" --head "$branch" \
+              --title "chore: 升级 CLIProxyAPI 到 v${NEW_VERSION}" --body-file "$body"; then
+            echo "::warning::没能自动开 PR（可能是仓库设置不允许 Actions 创建 PR）。分支已推送：${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${GITHUB_REF_NAME}...${branch}"
+          fi
+
+      - name: Write back Codex auth
+        if: always()
+        uses: ./.github/actions/codex-auth-writeback
+        with:
+          write-token: ${{ secrets.CODEX_SECRET_WRITE_TOKEN }}

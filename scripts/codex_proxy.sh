@@ -11,8 +11,9 @@
 # 凭证目录在仓库之外（RUNNER_TEMP），不会被 git add、cache 或 artifact 带走。
 set -euo pipefail
 
-CPA_VERSION="7.3.20"
-CPA_SHA256="f267c31953ebf71315d5e78cd5284f2866b1ea8cc92589a00df88ff68c95d149"
+# 版本固定并校验 sha256；新版本由 codex-proxy-update workflow 每周检查、测试后开 PR 升级。
+CPA_VERSION="8.0.7"
+CPA_SHA256="e7323aae94c942c16b1f576e3e4e17111d77cc49455fac13c10824b0a55b6892"
 CPA_ASSET="CLIProxyAPI_${CPA_VERSION}_linux_amd64_no-plugin.tar.gz"
 CPA_URL="https://github.com/router-for-me/CLIProxyAPI/releases/download/v${CPA_VERSION}/${CPA_ASSET}"
 
@@ -22,6 +23,8 @@ BIN="$ROOT/cli-proxy-api"
 AUTH_DIR="$ROOT/auth"
 CONFIG="$ROOT/config.yaml"
 PORT="${CODEX_PROXY_PORT:-8317}"
+DEFAULT_STRONG_MODEL="gpt-6-sol"
+DEFAULT_FAST_MODEL="gpt-6-luna"
 
 log() { echo "[codex-proxy] $*"; }
 die() {
@@ -45,20 +48,28 @@ install_bin() {
 write_config() {
   local key="$1"
   umask 077
+  # CLIProxyAPI v8 配置格式（config-version: 8）。
   cat > "$CONFIG" <<EOF
-host: "127.0.0.1"
-port: ${PORT}
-auth-dir: "${AUTH_DIR}"
-api-keys:
-  - "${key}"
-remote-management:
+config-version: 8
+server:
+  host: "127.0.0.1"
+  port: ${PORT}
+management:
   allow-remote: false
   secret-key: ""
   disable-control-panel: true
-debug: false
-logging-to-file: false
-usage-statistics-enabled: false
-request-log: false
+access:
+  api-keys:
+    - "${key}"
+oauth:
+  auth-dir: "${AUTH_DIR}"
+observability:
+  logs:
+    debug: false
+    logging-to-file: false
+    request-log: false
+  usage:
+    usage-statistics-enabled: false
 EOF
 }
 
@@ -98,7 +109,16 @@ cmd_start() {
   fi
   log "proxy 已在 ${base} 启动"
 
-  local strong="${CODEX_MODEL:-gpt-6-sol}" fast="${CODEX_FAST_MODEL:-gpt-6-luna}"
+  # 没有指定模型（仓库变量 CODEX_MODEL / CODEX_FAST_MODEL 为空）时，从 proxy 支持的模型里
+  # 自动挑 sol / luna 系列的最新版本，例如有 gpt-6.1-sol 就用它；查不到时退回下面的默认值。
+  local models_json strong="${CODEX_MODEL:-}" fast="${CODEX_FAST_MODEL:-}"
+  models_json="$(curl -fsS -H "Authorization: Bearer ${key}" "${base}/models" 2>/dev/null || echo '{}')"
+  if [ -z "$strong" ]; then
+    strong="$(printf '%s' "$models_json" | python3 "$SCRIPT_DIR/codex_models.py" pick --family sol --fallback "$DEFAULT_STRONG_MODEL")"
+  fi
+  if [ -z "$fast" ]; then
+    fast="$(printf '%s' "$models_json" | python3 "$SCRIPT_DIR/codex_models.py" pick --family luna --fallback "$DEFAULT_FAST_MODEL")"
+  fi
   # 推理强度用 OpenAI 给 GPT-6 Sol/Luna 的官方默认值 medium，写成 CLIProxyAPI 的
   # "模型(强度)" 后缀显式指定，不依赖 proxy 自己的默认值。模型名已带后缀时不再追加。
   local effort="${CODEX_REASONING_EFFORT:-medium}"
