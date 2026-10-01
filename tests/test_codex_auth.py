@@ -3,6 +3,7 @@
 import base64
 import importlib.util
 import json
+import re
 import time
 from pathlib import Path
 
@@ -144,7 +145,9 @@ def test_codex_workflows_guarded_serialized_and_write_back(name):
 
 def test_proxy_script_pins_and_verifies_binary():
     sh = (ROOT / "scripts/codex_proxy.sh").read_text(encoding="utf-8")
-    assert 'CPA_VERSION="7.3.20"' in sh and "sha256sum -c" in sh
+    assert re.search(r'^CPA_VERSION="\d+\.\d+\.\d+"$', sh, re.M) and "sha256sum -c" in sh
+    assert re.search(r'^CPA_SHA256="[0-9a-f]{64}"$', sh, re.M)
+    assert "config-version: 8" in sh
     assert 'host: "127.0.0.1"' in sh and "::add-mask::" in sh
     assert 'ROOT="${CODEX_PROXY_ROOT:-${RUNNER_TEMP:-/tmp}/codex-proxy}"' in sh
 

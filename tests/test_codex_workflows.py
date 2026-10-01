@@ -62,8 +62,9 @@ def test_job_starts_proxy_after_checkout(name, job_id):
     proxy = steps[start]
     assert proxy["uses"] == "./.github/actions/codex-proxy"
     assert proxy["with"]["auth-json"] == "${{ secrets.CODEX_AUTH_JSON }}"
-    assert proxy["with"]["model"].startswith("${{ vars.CODEX_MODEL || '")
-    assert proxy["with"]["fast-model"].startswith("${{ vars.CODEX_FAST_MODEL || '")
+    # 只传仓库变量：为空时 codex_proxy.sh 自动选 proxy 支持的最新 sol / luna 模型
+    assert proxy["with"]["model"] == "${{ vars.CODEX_MODEL }}"
+    assert proxy["with"]["fast-model"] == "${{ vars.CODEX_FAST_MODEL }}"
     checkout = next(i for i, s in enumerate(steps) if str(s.get("uses", "")).startswith("actions/checkout"))
     assert checkout < start
 
@@ -89,12 +90,32 @@ def test_proxy_actions_and_script_exist():
         assert (ROOT / rel).exists(), rel
 
 
-def test_workflow_model_fallbacks_match_proxy_script_default():
+def test_proxy_script_auto_picks_latest_model_family():
     script = (ROOT / "scripts" / "codex_proxy.sh").read_text(encoding="utf-8")
-    m = re.search(r'strong="\$\{CODEX_MODEL:-([^}]+)\}"', script)
-    assert m, "codex_proxy.sh default model not found"
-    default_strong = m.group(1)
+    assert 'strong="${CODEX_MODEL:-}"' in script and 'fast="${CODEX_FAST_MODEL:-}"' in script
+    assert "codex_models.py\" pick --family sol" in script
+    assert "codex_models.py\" pick --family luna" in script
+    assert 'DEFAULT_STRONG_MODEL="gpt-6-sol"' in script and 'DEFAULT_FAST_MODEL="gpt-6-luna"' in script
     for name, job_id in LLM_JOBS.items():
-        steps = load(name)["jobs"][job_id]["steps"]
-        proxy = steps[step_index(steps, "Start Codex proxy")]
-        assert proxy["with"]["model"] == f"${{{{ vars.CODEX_MODEL || '{default_strong}' }}}}", name
+        text = (WORKFLOWS / name).read_text(encoding="utf-8")
+        assert "gpt-6-sol" not in text and "gpt-6-luna" not in text, name
+
+
+def test_proxy_update_workflow_contract():
+    wf = load("codex-proxy-update.yml")
+    assert wf["concurrency"]["group"] == "codex-auth"
+    assert wf["permissions"] == {"contents": "write", "pull-requests": "write"}
+    job = wf["jobs"]["update"]
+    assert "ziwenhahaha/daily-paper-reader" in job["if"]
+    steps = job["steps"]
+    names = [s["name"] for s in steps]
+    # 先检查兼容性，通过后才开 PR；最后一步 always() 写回凭证
+    assert names.index("Start Codex proxy") < names.index("Check compatibility") < names.index("Open upgrade PR")
+    assert steps[-1]["name"] == "Write back Codex auth" and steps[-1]["if"] == "always()"
+    pr = steps[names.index("Open upgrade PR")]["run"]
+    assert "git push -q origin \"$branch\"" in pr and "--force" not in pr and " -f " not in pr
+    assert 'user.email "91780429+AndyNg04@users.noreply.github.com"' in pr
+    assert "Co-Authored-By" not in pr and "Claude" not in pr
+    for step in steps:
+        assert "${{" not in str(step.get("run", "")), step["name"]
+
