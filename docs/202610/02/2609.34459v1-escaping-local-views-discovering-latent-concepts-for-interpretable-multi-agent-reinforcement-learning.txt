@@ -1,0 +1,2355 @@
+Preprint
+ESCAPING LOCAL VIEWS:
+DISCOVERING LATENT
+CONCEPTS FOR INTERPRETABLE MULTI-AGENT RE-
+INFORCEMENT LEARNING
+Yijie Sun1, Sanquan Sun2, Yanda Zhu1, Yuanyang Zhu1, Yaohua Hu3, Chunlin Chen1 ∗
+1 Nanjing University
+2 Hong Kong Polytechnic University
+3 Shenzhen University
+2796624556qw@gmail.com
+sanquan.sun@connect.polyu.hk
+yandazhu@smail.nju.edu.cn
+mayhhu@szu.edu.cn
+yuanyangzhu@nju.edu.cn
+clchen@nju.edu.cn
+ABSTRACT
+Efficient cooperation is challenging due to the usual partial observability of each
+agent in multi-agent reinforcement learning. Recurrent networks encode local
+interaction histories, but their hidden representations provide limited insight into
+the information underlying individual decisions. To address these challenges,
+we propose a novel interpretable framework, called escaping local views (ELV),
+which introduces semantically structured latent concepts to render policy decisions
+transparent. Specifically, each agent extracts low-dimensional semantic concepts
+from its local observation and action-observation trajectory. These concepts are
+jointly encoded into a contextual latent variable via a variational autoencoder (VAE),
+which builds a bridge between local views and global semantics. To explicitly
+model the decision of each agent, we employ a dual-path attention mechanism
+in which one module estimates the salience of individual concepts relative to the
+global context, while the other captures higher-order cooperative patterns with
+pairwise concept interactions. Furthermore, we incorporate a concept prediction
+module that derives an intrinsic reward from next-concept prediction errors, which
+incentivizes agents to explore regions of semantic novelty. Experiments in multiple
+environments verify that ELV not only achieves competitive performance but also
+explicitly provides how agents reason about their decisions.
+1
+INTRODUCTION
+Cooperative multi-agent reinforcement learning (MARL) has demonstrated strong empirical per-
+formance on a range of complex decision-making problems, from multi-robot coordination and
+large-scale fleet management to autonomous driving (Cao et al., 2012; Liu et al., 2024) and real-time
+strategy games (Vinyals et al., 2019; Geng et al., 2025). However, the policies learned by modern
+deep MARL algorithms are typically parameterized by high-capacity neural networks, whose in-
+herently opaque representations pose significant barriers to interpretability and hinder adoption in
+high-stakes applications (Boggess et al., 2023). In addition, many cooperative MARL problems
+are naturally modeled as partially observable Markov decision processes (POMDPs), where each
+agent has access only to its own local observations while the environment’s global state remains
+hidden. To address the resulting non-stationarity and information asymmetry, the centralized training
+with decentralized execution (CTDE) paradigm has become the de facto standard: agents leverage
+centralized information during training but act solely based on local observations at execution time.
+While CTDE mitigates some optimization challenges, the split between centralized training and
+decentralized execution can fragment local representations and coordination, degrading generalization
+and destabilizing learned policies (Du et al., 2025; Barde et al., 2024).
+A natural response is to equip MARL with interpretability, which largely falls into two categories.
+The first class provides post-hoc explanations for already-trained policies, typically by constructing
+∗Correspondence to Chunlin Chen.
+1
+arXiv:2609.34459v1  [cs.AI]  28 Sep 2026
+
+
+Preprint
+local approximations of the decision function, e.g., via Shapley-style attributions (Wang et al.,
+2020), trajectory clustering (Zahavy et al., 2016), or saliency-based visualizations (Ghorbani et al.,
+2019). While useful, such explanations are inherently approximate and could be computationally
+expensive (Slack et al., 2021), and they may lead to incorrect explanations due to compounding
+error (Ghorbani et al., 2019), raising concerns about faithfulness and reliability. A second line aims
+for intrinsically interpretable policies by replacing a black-box agent with a simpler, human-readable
+surrogate (e.g., rule lists or decision trees), yielding a global summary of behavior. They generally
+explain decisions by inspecting inputs and outputs by visualizing intermediate weights (Liu et al.,
+2025) or credit assignment (Liu et al., 2023; Yang et al., 2020; Wang et al., 2022) through value
+decomposition. However, their explanations based on observation-level activations may not provide
+the most intuitive form of explanations for humans.
+The quest for intrinsic explanations has led to a renewed interest in concept learning (Koh et al., 2020;
+Stammer et al., 2022; Havasi et al., 2022). In particular, concept bottleneck models (CBMs) (Koh
+et al., 2020) factorize prediction through an explicit concept layer: the model first infers a set of
+human-specified concepts and then maps these concepts to the final output, which yields a global,
+semantically grounded account of what drives decisions and enables test-time interventions by directly
+editing incorrect concepts (Ramaswamy et al., 2023). Subsequent studies sharpen this view by (i)
+analyzing and mitigating concept leakage, where the network bypasses the bottleneck (Kim et al.,
+2023), and (ii) formalizing interactive intervention mechanisms that improve controllability and
+reliability of concept edits (Vandenhirtz et al., 2024). These advances motivate a natural question
+in MARL: can agents discover and share concept-level abstractions that support coordination under
+partial observability, while retaining the intervention and inspection benefits of CBMs?
+We answer this question with ELV, a concept-bottleneck framework for cooperative MARL that
+addresses both interpretability and the local view limitation of CTDE. Each agent extracts a small
+set of latent concepts from its action–observation history, and uses these concepts as the sole input
+to value estimation. To align semantics across agents, ELV aggregates the distributed concept set
+and learns a variational semantic bridge that reconstructs the global state during centralized training,
+thereby shaping the concept space to retain globally coherent information. The resulting latent context
+serves as a global query that reweights concepts through (i) first-order contextual salience and (ii)
+second-order interaction salience, so value estimation reflects not only what matters globally, but
+also what matters for coordination. Finally, ELV augments exploration with a concept-prediction
+intrinsic reward, which measures novelty in the learned concept dynamics and is less sensitive to
+task-irrelevant variation in raw observations.
+Our contributions are: 1) We propose ELV, a plug-and-play concept-bottleneck module for CTDE
+MARL that computes individual value of each agent in a structured concept space, with explicit
+concept presence and a variational semantic bridge to align local concepts across agents. 2) We
+improve interpretability by grounding concepts to local semantics via an auxiliary observation
+reconstruction objective, enabling concept–feature attribution and semantic analysis. 3) We evaluate
+ELV on the Level-based foraging (LBF) (Papoudakis et al., 2021), StarCraft Multi-Agent Challenge
+(SMAC) (Samvelyan et al., 2019), and SMACv2 (Ellis et al., 2023) benchmarks, where it achieves
+strong performance while learning coherent concepts that support interpretable coordination analysis.
+2
+PRELIMINARIES
+Dec-POMDP. A fully cooperative multi-agent task is typically formulated as a Decentralized Partially
+Observable Markov Decision Process (Dec-POMDP), consisting of a tuple ⟨N, S, U, P, r, O, Ω, γ⟩,
+where N is a finite set of n agents, s ∈S is the global state of the environment. At each timestep
+t, every agent i ∈N chooses an action ui ∈U to formulate a joint action u = [ui]n
+i=1 ∈Un
+by its own observation oi ∈Ωreceived from the environment. The environment returns a shared
+reward with the reward function r(s, u) : S × Un →R, and transits to the next state s′ with
+the transition function P (s′ | s, u) : S × Un →S. The action-observation history of agent i
+is denoted as τi ∈T ≡(Ω× U)∗and the joint action-observation history is τ ∈T n. Agent i
+learns its own policy πi (ui | τi) : T × U →[0, 1] conditions on its local action-observation history.
+The objective in a Dec-POMDP is to find a joint policy π = ⟨π1, . . . , πn⟩, which maximizes the
+expected cumulative discounted reward. The joint action-value function under a joint policy π is
+2
+
+
+Preprint
+Concept Extractor
+Global State s
+Decoder
+VAE
+Concept Set
+Concept Pair
+Latent z
+Agent
+Concept
+MLP
+Query q
+MLP
+Scalar
+Product
+MLP
+Agent
+Concept
+Concept
+Concept Reconstruction
+Joint Concept Reconstruction
+Concept Interaction
+Scalar
+Product
+Intrinsic Reward
+Concept
+Predictor
+...
+Concept Extractor & Intrinsic Reward
+ 
+Figure 1: At each timestep t, agent i encodes its local history τ t
+i into a hidden state ht
+i, from which
+ELV extracts concept embeddings {ct
+i,k}K
+k=1 and keys {ki,k} via shared projections. The concepts of
+all agents are aggregated and passed through a VAE to infer a global context z, which yields a query
+vector q. First-order weights αi,k are obtained by softmax-normalizing dot-product scores q⊤ki,k.
+To improve coordination, a second-order module scores concept pairs (ci,k, cj,m) (j̸ = i) against q,
+aggregates over other agents to form βi,k, and normalizes across k. Finally, ELV reweights concepts
+with αi,k + βi,k and takes a linear head to sum the individual value Qi(τ t
+i , ut
+i).
+Qπ(s, u) = r(s, u) + γEs′ [Rt | s, u], where γ ∈[0, 1) is the discount factor and Rt = P∞
+t=0 γtrt
+is the cumulative return.
+Concept Bottleneck Models (CBMs). Concept bottleneck models (CBMs) introduce an explicit
+intermediate representation to separate concept extraction from prediction. A concept extractor g
+maps an input representation (e.g., a recurrent history state hi) to a concept vector ci = g(hi), and a
+predictor f maps concepts to task outputs. In our setting, this yields the action values of agent i
+Q(τi, ui) = f(g(hi)).
+(1)
+This factorization mediates decisions through structured variables rather than opaque latent features.
+Variational Autoencoders (VAEs). VAEs define a latent-variable model pθ(s) =
+R
+pθ(s | z)p(z) dz,
+where s ∈S denotes observed data and z ∈Rd is a latent variable with prior p(z) = N(0, I). Since
+the marginal likelihood log pθ(s) is intractable in general, VAEs introduce an approximate posterior
+qϕ(z | s) and maximize the evidence lower bound (ELBO):
+log pθ(x) ≥Eqϕ(z|s) [log pθ(s | z)] −KL (qϕ(z | s)∥p(z)) .
+(2)
+It balances accurate reconstruction of o with a regularizer that keeps qϕ(z | o) close to the prior.
+Equivalently, the standard VAE objective is obtained by minimizing the negative ELBO:
+LVAE(s) = −Eqϕ(z|s)[log pθ(s | z)] + KL(qϕ(z | s)∥p(z)).
+(3)
+The introduction of related works is presented in Appendix E.
+3
+METHOD
+In this section, we detail the formulation of the Escaping Local Views (ELV) framework within
+POMDP, which is designed to induce interpretable decision behaviors from opaque observation
+streams. As illustrated in Figure 1, to handle the partial observability, ELV seeks to reconcile the
+inherent conflict between local partial observability and the necessity for global coordination. The
+framework is built upon three pillars: (1) establishing an interpretable semantic bottleneck that
+extracts disentangled concepts from local histories; (2) inducing a global latent bridge via a VAE to
+align disparate local views; and (3) incorporating a forward semantic dynamics model that utilizes
+prediction errors as intrinsic motivation, ensuring exploration is guided by prediction errors in the
+learned concept space rather than stochastic noise.
+3
+
+
+Preprint
+3.1
+AGENT CONCEPTS NETWORK DESIGN
+At each timestep t, each agent i takes its local observation ot
+i and the hidden state ht−1
+i
+, and generates
+a compact set of semantic concepts bottleneck C that outputs the local action values Qi. We maintain
+a recurrent history state ht
+i = MLP(ht−1
+i
+, ot
+i, ut−1
+i
+), where ut−1
+i
+is the last action. This recurrent
+mechanism allows the agent to retain information from experience, which is helpful for agents in
+non-stationary and partially observable environments.
+The generated history state ht
+i is then projected into K concept slots, where each slot generates
+separate embeddings for the presence and absence of a semantic concept denoted by ˆc+
+i (h) and ˆc−
+i (h)
+using lightweight MLP heads ϕ+
+i and ϕ−
+i . To link the learned semantics with the target concept signal,
+we introduce a differentiable and learnable scoring function ψ : C2d →[0, 1] that maps the joint
+dual-state embedding to a scalar existence probability. Specifically, the probability pi is computed as:
+pi ≜ψ(ˆc+
+i (h), ˆc−
+i (h))T = σ(wh(ˆc+
+i (h), ˆc−
+i (h))T + bh),
+(4)
+where d denotes the concept dimension, σ is the Sigmoid function, and wh, bh are shared across all
+K concepts to promote consistent scoring behavior and parameter efficiency. Conditioned on pi, the
+final concept embedding ci is obtained as a continuous mixture of the active and inactive embeddings:
+ci = pi c+
+i (h) + (1 −pi) c−
+i (h).
+(5)
+This formulation implements a soft gating mechanism in which pi functions as a differentiable
+switch that interpolates between active and inactive embeddings, yielding semantically distinct
+representations while preserving end-to-end differentiability for joint optimization.
+To compensate for limited local views caused by partial observability, ELV constructs a global
+semantic bridge that distills the aggregated concept set c = [c1; . . . ; cn] across all agents into a
+compact latent context vector z. We approximate the posterior over this context with a variational
+distribution parameterized by neural networks qϕ(z | c) = N
+ µ(c), diag(σ2(c))
+
+, and maximize
+the ELBO by reconstructing the global state s from z via pθ(s | z) during centralized training:
+Lvae = Eqϕ(z|c)[log pθ(s | z)] −β DKL(qϕ(z | c) ∥p(z)),
+(6)
+with a standard normal prior p(z) = N(0, I). At execution, z is inferred solely from c, providing
+the agent with global semantic context. Appendix C provides an information-theoretic analysis.
+First- and Second-Order Concept Importance. Given the inferred global context z, we compute
+1-order concept importance via scaled dot-product attention between z and each concept embedding:
+αk =
+exp((w1
+zz + bz)⊤(w1
+cck + b1))
+P
+j exp((w1zz + bz)⊤(w1ccj + b1)),
+(7)
+where w1
+z, bz, w1
+c, b1 are learnable parameters. The scalar αk ∈(0, 1) quantifies how strongly
+the latent context activates concept k. However, first-order attention alone may miss cross-concept
+dependencies critical for cooperation. To address this, we introduce a second-order interaction
+mechanism that aggregates interaction affinities between a given concept and all external concepts ˜c:
+βk =
+exp
+ P
+cm∈˜c(w2
+zz + bz)⊤(w2
+c[ck∥cm] + b2)
+
+P
+j exp
+ P
+cm∈˜c(w2zz + bz)⊤(w2c[cj∥cm] + b2)
+,
+(8)
+where [ ·∥· ] denotes concatenation and w2, b2 are learnable parameters. The 2-order weight βk
+highlights concepts that are not only globally relevant but also beneficial for coordination. 1-order
+and 2-order signals are fused to reweight concept embeddings, and the action value is computed as:
+Qi(τi, ui) = wQ(
+X
+k(αk
+i + βk
+i ) ck
+i ) + bQ,
+(9)
+where wQ and b are learnable parameters that map the aggregated concepts to Q-values. In this
+formulation, the combined importance scores αi,k + βi,k allow the model to attend dynamically to
+both contextual relevance and interaction relevance, which can help improve coordination and value
+estimation in cooperative MARL. The theoretical analysis for the concept importance with α and
+interaction-aware importance with β is provided in Appendix A.
+4
+
+
+Preprint
+3.2
+RECONSTRUCTION LOSS
+While the concept bottleneck supports compact, interpretable representations, unconstrained concept
+embeddings may drift into arbitrary latent codes which lack meaningful observational grounding. To
+counteract this, we introduce an auxiliary reconstruction objective that explicitly anchors each agent’s
+concept embedding to its local observation space. A lightweight decoder D predicts the original
+observation ot
+i from the corresponding concept embedding ct
+i, effectively constraining the learned
+concepts to retain task-relevant perceptual information and preventing representational collapse:
+Lrec = Et[|D(ct
+i) −ot
+i|2
+2].
+(10)
+3.3
+INTRINSIC REWARD BY PREDICTING CONCEPTS
+Efficient exploration remains a central challenge in reinforcement learning, particularly in complex
+multi-agent environments where rewards are sparse or delayed. To address this, we propose a concept-
+driven exploration mechanism that generates intrinsic rewards based on semantic dynamics rather
+than raw perceptual signals. Unlike intrinsic rewards defined directly on observations, which are
+prone to irrelevant perceptual noise, our method evaluates novelty in a structured concept space to
+drive exploration toward semantically meaningful transitions.
+We instantiate a forward dynamics model fθ over concept embeddings. At each timestep t, given
+agent i’s concept embedding ct
+i and executed action at
+i, we predict the next concept embedding:
+ˆct+1
+i
+= fθ(ct
+i, at
+i).
+(11)
+And the forward model is trained to minimize the forward prediction loss
+Lpred = Et[|ˆct+1
+i
+−ct+1
+i
+|2
+2],
+(12)
+which helps the predictor models temporal dependencies of concept evolution. The overall grounding
+objective LGw jointly minimizes the variational semantic loss Lvae and the reconstruction loss Lrec:
+LGw = λ1Lvae + λ2Lrec + λ3Lpred,
+(13)
+where λ1 encourages the latent context z to preserve global semantics via state reconstruction, λ2
+ensures that local concepts remain predictive of perceptual inputs, and λ3 governs the learning of
+the forward dynamics model, ensuring the concept representation captures the temporal evolution
+and causal structure of the environment. In information-theoretic terms, minimizing Lrec serves to
+maximize a lower bound on the mutual information between the concept embedding ct
+i and the local
+observation ot
+i. Mutual information quantifies the shared information between two variables, i.e.,
+how much knowing one reduces uncertainty about the other, and is widely used in representation
+learning to encourage representations to retain informative, task-relevant structure rather than noise.
+Maximizing this dependency drives concept embeddings to more faithfully encode semantically
+meaningful features of the observation. A formal derivation showing that reducing the reconstruction
+loss increases this mutual information lower bound is provided in Appendix B.
+Semantic Novelty as Intrinsic Reward. We interpret the prediction error as a measure of semantic
+novelty: large prediction residuals indicate transitions that are unfamiliar or poorly understood.
+Formally, we define the intrinsic reward as the next-concept prediction error across all agents:
+rint
+t = |ˆct+1 −ct+1|2
+2.
+(14)
+This formulation aligns with prediction-error-based intrinsic motivation, where the prediction error
+of a learned forward predictor functions as a novelty signal that encourages exploration of under-
+modeled dynamics. Such curiosity-driven rewards have been widely shown to improve exploration
+efficiency by pushing agents to sample transitions with high prediction error, especially under sparse
+extrinsic feedback. By deriving intrinsic rewards in the learned concept space rather than the raw
+observation space, the exploration signal encourages exploration through concept-space prediction
+errors and remains focused on semantically meaningful transitions that are aligned with task structure.
+To balance exploration and exploitation, we anneal the intrinsic component over the course of training
+rt = renv
+t
++ βt · rint
+t , with βt = β0 · exp(−λt), where β0 and λ control the initial scale and decay rate
+of the intrinsic signal, respectively. This schedule biases early learning toward structured semantic
+exploration when the model’s uncertainty is high and progressively shifts emphasis to maximizing
+extrinsic task rewards as the dynamics become better learned.
+5
+
+
+Preprint
+3.4
+OVERALL LEARNING OBJECTIVE
+Under CTDE, we derive each agent’s individual value from its concept representations and aggregate
+them using a value factorisation network (e.g., QMIX (Rashid et al., 2020) or VDN (Sunehag et al.,
+2018)) to form the joint action-value function Qtot. We optimise the value estimator by minimizing
+squared temporal-difference (TD) error over samples from a replay buffer B:
+LT D(θ) = E(τ,u,r,τ ′)∼B[(y −Qtot(τ, u; θ))2],
+(15)
+where y = r + γ maxu′ Qtot(τ ′, u′; θ−) is the one-step Bellman target computed with the target
+network parameters θ−copied from θ periodically. The overall loss jointly optimises value estimation
+and semantic representation learning as
+L(θ, w) = LT D + LGw.
+(16)
+This joint optimisation aligns accurate value estimation with semantically informed concept learning,
+ensuring that the learned representations meaningfully support coordinated decision making. We
+summarize the pseudo-code of our training procedure in Appendix D.
+4
+EXPERIMENTS
+We evaluate ELV on three challenging benchmarks: SMAC, SMACv2, and Level-Based Foraging
+(LBF). Baselines include (i) classic value decomposition methods (VDN, QMIX, QPLEX (Wang
+et al., 2021), QTRAN (Son et al., 2019), CDS (Li et al., 2021)) and (ii) recent CTDE approaches
+that strengthen per-agent value estimation and credit assignment via architectural or objective-level
+enhancements (NA2Q (Liu et al., 2023), ReBorn (Qin et al., 2024), MA2E (Kang et al., 2025),
+SHAQ (Wang et al., 2022)). Implementation details and benchmark configurations are provided in
+Appendix F. All performance curves report the mean ± standard deviation over five random seeds.
+4.1
+PERFORMANCE ON LBF
+0
+0.25
+0.50
+0.75
+1.00
+T (mil)
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Test Return Mean
+lbf with 4-players & 2-foods
+0
+0.25
+0.50
+0.75
+1.00
+T (mil)
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Test Return Mean
+lbf with 6-players & 4-foods
+VDN
+QMIX
+QPLEX
+SHAQ
+QTRAN
+CDS
+NA2Q
+MA2E
+ReBorn
+ELV (Ours)
+Figure 2: Performance comparison on two tasks of LBF.
+We first evaluate ELV on two constructed
+LBF settings.
+We instantiate ELV on
+top of the QMIX value-factorisation back-
+bone—keeping the QMIX mixing network
+unchanged and replacing only the individ-
+ual value module with ELV. As shown
+in Figure 2, ELV achieves better test re-
+turns with competitive sample efficiency
+and stable learning dynamics. VDN ex-
+hibits delayed progress, which may be con-
+sistent with its limited capacity to represent
+complex joint action-values under coupled
+credit assignment. CDS plateaus at a substantially lower return, suggesting that encouraging diver-
+sity at the individual level may come at the expense of coherent team strategies in tightly coupled
+coordination. ReBorn also converges late, indicating inefficient exploration in the expanded joint
+strategy space. Compared with QMIX, ELV yields a clear performance gain while keeping the same
+mixing network fixed. This indicates that the improvement primarily comes from the individual-value
+architecture: replacing the GRU-based utility with a concept-based representation of ELV better
+mitigates partial observability and leads to more consistent coordination.
+4.2
+PERFORMANCE ON SMAC
+For the SMAC benchmark, we evaluate ELV on a diverse set of maps spanning easy, hard, and super-
+hard scenarios. As shown in Figure 3, ELV achieves consistently stronger win rates, with the clearest
+margins on super-hard tasks where partial observability and long-horizon coordination are most
+limiting. For example, on 3s5z vs 3s6z and 6h vs 8z, ELV continues improving after QMIX or VDN
+largely plateau and stabilises at a high win rate, matching the visual trend that ELV both converges
+faster and sustains better asymptotic performance in tightly coupled fights. These patterns are
+consistent with known limitations of value factorisation baselines: VDN’s additive form and QMIX’s
+6
+
+
+Preprint
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+2c_vs_64zg
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+5m_vs_6m
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+8m_vs_9m
+0
+1.00
+2.00
+3.00
+4.00
+5.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+3s5z_vs_3s6z
+0
+1.00
+2.00
+3.00
+4.00
+5.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+6h_vs_8z
+0
+1.00
+2.00
+3.00
+4.00
+5.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+corridor
+VDN
+QMIX
+QPLEX
+SHAQ
+QTRAN
+CDS
+NA2Q
+MA2E
+ReBorn
+ELV (Ours)
+Figure 3: Performance comparison on hard and super-hard scenarios.
+0
+1.00
+2.00
+3.00
+4.00
+5.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+3s5z_vs_3s6z
+0
+1.00
+2.00
+3.00
+4.00
+5.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+6h_vs_8z
+0
+1.00
+2.00
+3.00
+4.00
+5.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+corridor
+QMIX
+ELV-w/o-ir
+ELV-w/o-dec
+ELV (Ours)
+Figure 4: Ablation of intrinsic reward and concept decoder for ELV.
+monotonic mixing can limit the expressivity of Qtot in highly coupled settings, often leading to early
+saturation on harder maps. QTRAN relaxes these constraints but depends on stricter optimisation
+objectives that can be brittle at scale, which aligns with its weaker performance in the challenging
+regime. CDS promotes behavioural diversity, but on maps requiring precise team-level coordination,
+this does not necessarily translate into coherent joint strategies and can plateau below top methods.
+While MA2E outperforms most baselines, it still trails ELV, with the gap most pronounced on the
+super-hard tasks. It suggests that each agent has the ability to infer the information of other agents
+from partial observations. Compared to VDN and QMIX, ELV yields larger gains, which we attribute
+to its semantically structured individual-value estimator: the concept bottleneck together with the
+variational semantic bridge mitigates information fragmentation under partial observability, enabling
+more consistent coordination than a GRU-based individual value function while keeping the same
+mixing network. More results of plugging ELV into VDN and QMIX backbones are reported in
+Appendix G.1 and G.2. Additional experiments on SMACv2 are provided in Appendix G.3.
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+3s5z
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+5m_vs_6m
+0
+1.00
+2.00
+3.00
+4.00
+5.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+3s5z_vs_3s6z
+QMIX
+ELV-w/o-inter
+ELV (Ours)
+Figure 5: Ablation of the concept interaction module for ELV.
+7
+
+
+Preprint
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+5m_vs_6m
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+3s5z
+0
+1.00
+2.00
+3.00
+4.00
+5.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+3s5z_vs_3s6z
+QMIX
+ELV (K=8)
+ELV (K=24)
+ELV (Ours)
+Figure 6: Ablation study with different numbers of concepts for ELV.
+4.3
+ABLATION STUDY
+We perform ablations on the three core components of ELV—concept-dynamics intrinsic reward
+(ir), reconstruction-based grounding (dec), and concept-level interactions (inter)—by evaluating the
+corresponding variants without each component (ELV-w/o-ir, ELV-w/o-dec, and ELV-w/o-inter).
+As shown in Figure 4, when removing the concept-dynamics intrinsic reward causes a sharp drop
+on 3s5z vs 3s6z, ELV-w/o-ir gets stuck in poor local solutions, whereas the full model exceeds 90%
+win rate. A similar effect appears on Corridor, where dropping ir slows learning and lowers final
+performance, supporting the role of concept-space prediction error as an effective exploration signal
+under sparse or misleading rewards. In contrast, the reconstruction grounding mainly matters under
+heterogeneity on 6h vs 8z. ELV without dec degrades the most, which suggests that grounding
+stabilizes concept semantics across diverse unit types, while on the navigation-heavy Corridor, its
+impact is minor. To isolate the effect of interaction from task difficulty, we compare the interaction-
+removed variant with the full model as shown in Figure 6. The benefit is that the interaction module
+yields only minor gains on the simpler 3s5z map, but the gap grows markedly on the super-hard
+3s5z vs 3s6z. This pattern suggests that explicit concept-level coordination becomes more important
+as the joint strategy space expands and tighter cooperation is required.
+We finally study how concept capacity interacts with scalability by varying the number of concepts
+k ∈8, 16, 24 across scenarios. As shown in Figure 6, we can find that higher concept capacity is
+required to maintain both final performance and sample efficiency as the number of agents grows.
+The compact setting (k = 8) forms a clear bottleneck on complex maps such as 3s5z vs 3s6z, where
+performance drops sharply, whereas the larger setting (k = 24) shows better scalability: it brings
+little benefit on small maps but yields markedly more robust returns in high-complexity environments.
+These results indicate that a sufficient number of concept slots is crucial for representing the rich joint
+strategies needed in large-scale multi-agent coordination.
+4.4
+INTERPRETABILITY
+150
+100
+50
+0
+50
+100
+150
+t-SNE dim 1
+150
+100
+50
+0
+50
+100
+150
+t-SNE dim 2
+Agent
+agent 0
+agent 1
+agent 2
+0
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+Concept ID
+Figure 7:
+The t-SNE visualization of
+learned concept embeddings.
+Concept Space Visualization. To examine the structure
+of the learned concepts, we visualize their embeddings
+with t-SNE (Maaten & Hinton, 2008) in Figure 7. The
+embeddings form well-separated, compact clusters (col-
+ors), indicating that ELV disentangles the state space
+into distinct semantic factors. Moreover, points from dif-
+ferent agents (shapes) are well-mixed within each cluster,
+which suggests that the concepts are agent-invariant and
+can be shared across the team.
+Grounding Concepts via Gradient-based Attribution.
+To further clarify concept semantics, we adopt a gradient-
+based attribution scheme at evaluation time to relate
+each concept to structured observation modalities (e.g.,
+movement directions, ally/enemy states, self attributes).
+Concretely, we compute the attribution of concept ci to
+observation modality fj, which yields a concept–feature attribution matrix G ∈RC×F with entries
+Gij := ∥
+∂Reconfj
+∂ci
+∥1. It measures how sensitive the reconstruction of feature fj is to perturbations in
+concept ci and thus serves as a proxy for their semantic influence.
+8
+
+
+Preprint
+Figure 8: Dependency strength over health and concept assignment heatmap.
+1
+2
+3
+Figure 9: Visualization of agent collaboration dynamics.
+To obtain a concise and human-readable assignment, we then solve a maximum-attribution matching
+problem that assigns each observation modality to a single concept maxπ
+PF
+j=1 Gπ(j),j, s.t. π :
+{1, . . . , F} →{1, . . . , C} injective , where Gij denotes the attribution strength from concept i to
+feature j, and the injective mapping π ensures that each feature is assigned to exactly one concept.
+Figure 8 (right) illustrates the resulting heatmap. The clear high-intensity blocks indicate that ELV
+disentangles the raw observation space, mapping different latent concepts to distinct semantic groups
+(e.g., specific allies or enemies) rather than learning an entangled representation.
+Qualitative Case Study. To quantify how ELV models cooperative coupling between agents, we
+define an agent dependency strength Dij based on the learned concept–interaction scores. For
+each pair of agents i̸ = j, we first aggregate interaction weights over all pairs of latent concepts
+Mij = P P m(ck1
+i , ck2
+j ), m(ck1
+i , ck2
+j ) = (wzz + bz)⊤(w2[ck1
+i ∥ck2
+j ] + b2), and then normalize
+via a row-wise softmax to get a relative dependency distribution Dij =
+exp(Mij)
+P
+j exp(Mij). Here, Dij
+measures how agent i depends on agent j as it aggregates concept-level interactions.
+Figure 9 illustrates three representative phases from a SMAC rollout. At the beginning of the episode,
+concept activations are relatively uniform, and no specific tactical target stands out. Accordingly,
+dependency scores between agents remain close to a balanced split (e.g., Agent 1 allocates its attention
+to teammates roughly 0.502/0.498), suggesting that only a relatively balanced allocation of attention
+across teammates is required for simple coordinated retreat. In the middle phase, an abrupt increase
+in the activation of a particular concept (Concept 9, associated in this run with a specific enemy
+unit) coincides with the onset of a coordinated counter-attack. Although the agents move into a
+tightly clustered formation, the dependency matrix stays relatively stable, indicating that once a
+common tactical focus emerges, ELV maintains coherent group behavior without needing large shifts
+in pairwise attention. In the final phase, agents split spatially: Agent 3 chases ‘Enemy 3’ while
+Agent 1 provides support from a distance. Here, we observe a clear dependency asymmetry: the
+dependency of Agent 1 on Agent 3 rises to 0.541, while its dependency on nearby agents decreases.
+This pattern shows that ELV prioritizes concept-level interaction (who engages the key target) over
+mere spatial proximity, enabling consistent joint tactics under physical dispersion. Tracking Dij
+over time further reveals that dependencies on a given teammate tend to decrease as that agent’s
+health drops, consistent with Figure 8, suggesting that ELV gradually down-weights coordination
+with vulnerable agents to stabilize the overall policy.
+5
+CONCLUSION
+We presented an interpretable cooperative MARL framework with a shared concept bottleneck. ELV
+decomposes local observations and histories into semantically structured latent concepts and aligns
+9
+
+
+Preprint
+them via a variational semantic bridge, thereby mitigating partial observability and improving global
+coordination. Dual-path attention captures context-dependent salience and higher-order concept
+interactions, while reconstruction-based grounding and concept-dynamics intrinsic rewards regularise
+representations and promote exploration. Across a range of MARL benchmarks, ELV consistently
+attains competitive or superior performance relative to strong baselines and yields concept-level
+explanations of coordination strategies. By coupling value estimation with explicit semantic structure,
+ELV advances transparent, data-efficient multi-agent systems in complex domains.
+AI USE STATEMENT
+In preparing this manuscript, we used generative AI tools to improve the readability and concision of
+the text and to assist with LaTeX formatting checks. All AI-assisted revisions were reviewed by the
+authors, who take full responsibility for the final content of this work.
+REFERENCES
+Paul Barde, Jakob Foerster, Derek Nowrouzezahrai, and Amy Zhang. A model-based solution
+to the offline multi-agent reinforcement learning coordination problem. In Proceedings of the
+International Conference on Autonomous Agents and Multiagent Systems, pp. 141–150, 2024.
+Osbert Bastani, Yewen Pu, and Armando Solar-Lezama. Verifiable reinforcement learning via policy
+extraction. In Advances in Neural Information Processing Systems, 2018.
+Kayla Boggess, Sarit Kraus, and Lu Feng. Explainable multi-agent reinforcement learning for
+temporal queries. In Proceedings of the International Joint Conference on Artificial Intelligence,
+2023.
+Yuri Burda, Harrison Edwards, Amos Storkey, and Oleg Klimov. Exploration by random network
+distillation. In Proceedings of the International Conference on Learning Representations, 2019.
+Yongcan Cao, Wenwu Yu, Wei Ren, and Guanrong Chen. An overview of recent progress in the
+study of distributed multi-agent coordination. IEEE Transactions on Industrial Informatics, 9(1):
+427–438, 2012.
+Eric Chen, Zhang-Wei Hong, Joni Pajarinen, and Pulkit Agrawal. Redeeming intrinsic rewards via
+constrained optimization. In Advances in neural information processing systems, pp. 4996–5008,
+2022.
+Quentin Delfosse, Sebastian Sztwiertnia, Mark Rothermel, Wolfgang Stammer, and Kristian Kersting.
+Interpretable concept bottlenecks to align reinforcement learning agents. In Advances in Neural
+Information Processing Systems, pp. 66826–66855, 2024.
+Wei Du, Shifei Ding, Wei Guo, Yuqing Sun, Guoxian Yu, and Lizhen Cui. Multi-agent communication
+with information preserving graph contrastive learning. In Proceedings of the International Joint
+Conference on Artificial Intelligence, pp. 64–71, 2025.
+Benjamin Ellis, Jonathan Cook, Skander Moalla, Mikayel Samvelyan, Mingfei Sun, Anuj Mahajan,
+Jakob Foerster, and Shimon Whiteson. Smacv2: An improved benchmark for cooperative multi-
+agent reinforcement learning. In Advances in Neural Information Processing Systems, pp. 37567–
+37593, 2023.
+Mateo Espinosa Zarlenga, Pietro Barbiero, Gabriele Ciravegna, Giuseppe Marra, Francesco Giannini,
+Michelangelo Diligenti, Zohreh Shams, Frederic Precioso, Stefano Melacci, Adrian Weller, et al.
+Concept embedding models: Beyond the accuracy-explainability trade-off. In Advances in Neural
+Information Processing Systems, pp. 21400–21413, 2022.
+Minghong Geng, Shubham Pateria, Budhitama Subagdja, Lin Li, Xin Zhao, and Ah-Hwee Tan.
+L2m2: A hierarchical framework integrating large language model and multi-agent reinforcement
+learning. In Proceedings of the International Joint Conference on Artificial Intelligence, 2025.
+Amirata Ghorbani, Abubakar Abid, and James Zou. Interpretation of neural networks is fragile. In
+Proceedings of the AAAI Conference on Artificial Intelligence, pp. 3681–3688, 2019.
+10
+
+
+Preprint
+Samuel Greydanus, Anurag Koul, Jonathan Dodge, and Alan Fern. Visualizing and understanding
+atari agents. In Proceedings of the International Conference on Machine learning, pp. 1792–1801,
+2018.
+Marton Havasi, Sonali Parbhoo, and Finale Doshi-Velez. Addressing leakage in concept bottleneck
+models. In Advances in Neural Information Processing Systems, pp. 23386–23397, 2022.
+Sehyeok Kang, Yongsik Lee, Gahee Kim, Song Chong, and Se-Young Yun. MA2E: Addressing partial
+observability in multi-agent reinforcement learning with masked auto-encoder. In Proceedings of
+the International Conference on Learning Representations, 2025.
+Eunji Kim, Dahuin Jung, Sangha Park, Siwon Kim, and Sungroh Yoon. Probabilistic concept
+bottleneck models. In Proceedings of the International Conference on Machine Learning, pp.
+16521–16540, 2023.
+Pang Wei Koh, Thao Nguyen, Yew Siang Tang, Stephen Mussmann, Emma Pierson, Been Kim, and
+Percy Liang. Concept bottleneck models. In Proceedings of the International Conference on
+Machine Learning, pp. 5338–5348, 2020.
+Chenghao Li, Tonghan Wang, Chengjie Wu, Qianchuan Zhao, Jun Yang, and Chongjie Zhang. Cele-
+brating diversity in shared multi-agent reinforcement learning. In Advances in Neural Information
+Processing Systems, pp. 3991–4002, 2021.
+Haochen Liu, Li Chen, Yu Qiao, Chen Lv, and Hongyang Li. Reasoning multi-agent behavioral
+topology for interactive autonomous driving. In Advances in Neural Information Processing
+Systems, pp. 92605–92637, 2024.
+Zichuan Liu, Yuanyang Zhu, and Chunlin Chen.
+NA2Q: Neural attention additive model for
+interpretable multi-agent Q-learning. In Proceedings of the International Conference on Machine
+Learning, pp. 22539–22558, 2023.
+Zichuan Liu, Yuanyang Zhu, Zhi Wang, Yang Gao, and Chunlin Chen. Mixrts: Toward interpretable
+multi-agent reinforcement learning via mixing recurrent soft decision trees. IEEE Transactions on
+Pattern Analysis and Machine Intelligence, 47(5):4090–4107, 2025.
+Laurens van der Maaten and Geoffrey Hinton. Visualizing data using t-sne. Journal of machine
+learning research, 9(Nov):2579–2605, 2008.
+Augustine Mavor-Parker, Kimberly Young, Caswell Barry, and Lewis Griffin. How to stay curious
+while avoiding noisy tvs using aleatoric uncertainty estimation. In International conference on
+machine learning, pp. 15220–15240, 2022.
+Alexander McCaffrey, Eduardo Alonso, and Esther Mondragon. Predictive improvement through
+latent space optimisation. In Proceedings of International Conference on Autonomous Agents and
+Multiagent Systems, pp. 2669–2671, 2025.
+Tuomas Oikarinen, Subhro Das, Lam Nguyen, and Lily Weng. Label-free concept bottleneck models.
+In Proceedings of the International Conference on Learning Representations, 2023.
+Yiyuan Pan, Zhe Liu, and Hesheng Wang. Wonder wins ways: Curiosity-driven exploration through
+multi-agent contextual calibration. In Advances in Neural Information Processing Systems, 2025.
+Georgios Papoudakis, Filippos Christianos, Lukas Sch¨afer, and Stefano V. Albrecht. Benchmarking
+multi-agent deep reinforcement learning algorithms in cooperative tasks. In Proceedings of the
+Neural Information Processing Systems Track on Datasets and Benchmarks, 2021.
+Deepak Pathak, Pulkit Agrawal, Alexei A Efros, and Trevor Darrell. Curiosity-driven exploration by
+self-supervised prediction. In Proceedings of the International Conference on Machine Learning,
+pp. 2778–2787, 2017.
+Haoyuan Qin, Chennan Ma, Deng Deng, Zhengzhu Liu, Songzhu Mei, Xinwang Liu, Cheng Wang,
+and Siqi Shen. The dormant neuron phenomenon in multi-agent reinforcement learning value
+factorization. In Advances in Neural Information Processing Systems, pp. 35727–35759, 2024.
+11
+
+
+Preprint
+Vikram V Ramaswamy, Sunnie SY Kim, Ruth Fong, and Olga Russakovsky. Overlooked factors
+in concept-based explanations: Dataset choice, concept learnability, and human capability. In
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pp.
+10932–10941, 2023.
+Tabish Rashid, Mikayel Samvelyan, Christian Schroeder De Witt, Gregory Farquhar, Jakob Foerster,
+and Shimon Whiteson. Monotonic value function factorisation for deep multi-agent reinforcement
+learning. Journal of Machine Learning Research, 21(178):1–51, 2020.
+Mikayel Samvelyan, Tabish Rashid, Christian Schroeder de Witt, Gregory Farquhar, Nantas Nardelli,
+Tim G. J. Rudner, Chia-Man Hung, Philip H. S. Torr, Jakob Foerster, and Shimon Whiteson. The
+starcraft multi-agent challenge. In Proceedings of the International Conference on Autonomous
+Agents and MultiAgent Systems, pp. 2186–2188, 2019.
+Dylan Slack, Anna Hilgard, Sameer Singh, and Himabindu Lakkaraju. Reliable post hoc explanations:
+Modeling uncertainty in explainability. In Advances in Neural Information Processing Systems, pp.
+9391–9404, 2021.
+Kyunghwan Son, Daewoo Kim, Wan Ju Kang, David Earl Hostallero, and Yung Yi. Qtran: Learning
+to factorize with transformation for cooperative multi-agent reinforcement learning. In Proceedings
+of the International Conference on Machine Learning, pp. 5887–5896, 2019.
+Wolfgang Stammer, Marius Memmel, Patrick Schramowski, and Kristian Kersting. Interactive disen-
+tanglement: Learning concepts by interacting with their prototype representations. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern Recognition, pp. 10317–10328,
+2022.
+Peter Sunehag, Guy Lever, Audrunas Gruslys, Wojciech Marian Czarnecki, Vinicius Zambaldi, Max
+Jaderberg, Marc Lanctot, Nicolas Sonnerat, Joel Z Leibo, Karl Tuyls, et al. Value-decomposition
+networks for cooperative multi-agent learning based on team reward. In Proceedings of the
+International Conference on Autonomous Agents and MultiAgent Systems, pp. 2085–2087, 2018.
+Moritz Vandenhirtz, Sonia Laguna, Riˇcards Marcinkeviˇcs, and Julia Vogt. Stochastic concept
+bottleneck models. In Advances in Neural Information Processing Systems, pp. 51787–51810,
+2024.
+Oriol Vinyals, Igor Babuschkin, Wojciech M Czarnecki, Micha¨el Mathieu, Andrew Dudzik, Junyoung
+Chung, David H Choi, Richard Powell, Timo Ewalds, Petko Georgiev, et al. Grandmaster level in
+starcraft ii using multi-agent reinforcement learning. nature, 575(7782):350–354, 2019.
+Jianhao Wang, Zhizhou Ren, Terry Liu, Yang Yu, and Chongjie Zhang. Qplex: Duplex dueling
+multi-agent q-learning. In International Conference on Learning Representations, 2021.
+Jianhong Wang, Yuan Zhang, Tae-Kyun Kim, and Yunjie Gu. Shapley q-value: A local reward
+approach to solve global reward games. In Proceedings of the AAAI Conference on Artificial
+Intelligence, pp. 7285–7292, 2020.
+Jianhong Wang, Yuan Zhang, Yunjie Gu, and Tae-Kyun Kim. Shaq: Incorporating shapley value
+theory into multi-agent q-learning. In Advances in Neural Information Processing Systems, pp.
+5941–5954, 2022.
+Xuefei Wu, Yuanyang Zhu, Caihua Chen, and Chunlin Chen.
+Gcm: Interpretable multiagent
+reinforcement learning via graph cooperation modeling. IEEE Transactions on Neural Networks
+and Learning Systems, 2025. doi: 10.1109/TNNLS.2025.3626000.
+Yaodong Yang, Jianye Hao, Ben Liao, Kun Shao, Guangyong Chen, Wulong Liu, and Hongyao Tang.
+Qatten: A general framework for cooperative multiagent reinforcement learning. arXiv preprint
+arXiv:2002.03939, 2020.
+Changmin Yu, Neil Burgess, Maneesh Sahani, and Samuel J Gershman. Successor-predecessor
+intrinsic exploration. In Advances in neural information processing systems, pp. 73021–73038,
+2023.
+12
+
+
+Preprint
+Mert Yuksekgonul, Maggie Wang, and James Zou. Post-hoc concept bottleneck models. In Proceed-
+ings of the International Conference on Learning Representations, 2023.
+Tom Zahavy, Nir Ben-Zrihem, and Shie Mannor. Graying the black box: Understanding dqns. In
+Proceedings of the International Conference on Machine Learning, pp. 1899–1908, 2016.
+13
+
+
+Preprint
+A
+THEORETICAL JUSTIFICATION FOR HIERARCHICAL CONCEPT MODELING
+In this section, we provide theoretical grounding for explicitly modeling first-order concept importance
+(individual semantics) and second-order concept interactions (pairwise synergies) within the ELV
+framework. Our justification is based on the functional ANOVA (Hoeffding-style) decomposition
+together with a second-order truncation as an inductive bias. This perspective clarifies that our
+architecture is not merely heuristic: it corresponds to a structured approximation of a general value
+(or policy) function defined over a learned concept space.
+A.1
+FUNCTIONAL ANOVA–STYLE DECOMPOSITION
+Consider the learned action-value function as a multivariate function defined on the joint concept
+variables. Let C = (C1, . . . , CM) denote the set of all concepts extracted across agents (under the
+data distribution induced by the environment and the current policy), and let f(C, a) represent the
+target function (e.g., a per-agent Q-function or a utility component) conditioned on action a.
+A classical result in functional ANOVA (often attributed to Hoeffding) states that, for f(·, a) ∈
+L2(PC), one can express f as a sum of components of increasing order,
+f(C, a) = f0(a) +
+M
+X
+i=1
+fi(Ci, a) +
+X
+1≤i<j≤M
+fij(Ci, Cj, a) + · · · ,
+(17)
+where f0(a) is a global baseline and fi, fij, etc., capture effects attributable to individual concepts
+and their interactions, respectively. To make these components identifiable, a common choice is to
+impose centering (purification) constraints, e.g.,
+E[fi(Ci, a)] = 0,
+E[fij(Ci, Cj, a) | Ci] = 0,
+E[fij(Ci, Cj, a) | Cj] = 0,
+(18)
+with expectations taken under PC. Under additional conditions (e.g., a product measure over inputs),
+these components are orthogonal in L2; in general, we adopt this decomposition as a modeling lens
+and structural prior that separates main semantic effects from pairwise semantic synergies.
+Within this view, fi(Ci, a) corresponds to the first-order (main) effect of concept Ci on the decision,
+aligning with our first-order attention branch. The term fij(Ci, Cj, a) corresponds to the second-
+order interaction effect, capturing the residual dependence on (Ci, Cj) beyond what is explained by
+the individual main effects, aligning with our interaction branch.
+A.2
+SECOND-ORDER TRUNCATION AS AN INDUCTIVE BIAS
+While the full expansion includes higher-order interactions up to order M, explicitly modeling all
+terms is statistically and computationally prohibitive: the number of possible components grows
+exponentially with M (on the order of 2M), and higher-order components are typically harder to
+estimate reliably from finite data.
+ELV therefore truncates the expansion at second order and approximates f by
+f(C, a) ≈f0(a) +
+M
+X
+i=1
+fi(Ci, a) +
+X
+1≤i<j≤M
+fij(Ci, Cj, a).
+(19)
+This choice should be interpreted as a deliberate inductive bias: it enforces a transparent hierarchy in
+which (i) individual concepts provide interpretable semantic evidence for an action, and (ii) pairwise
+interactions capture salient synergies that cannot be expressed by purely additive effects. Importantly,
+we do not claim that higher-order interactions are absent in principle; rather, the second-order
+truncation provides a favorable trade-off between expressivity, robustness, and interpretability, which
+we validate empirically. This is particularly appropriate for coordination patterns that are naturally
+pairwise (e.g., complementary roles or two-factor conditions that jointly trigger a behavior).
+A.3
+CONNECTION TO COORDINATION GRAPHS
+Our decomposition is also conceptually aligned with coordination-graph-based factorization in
+cooperative MARL, where a joint utility function is expressed as a sum of unary and pairwise
+14
+
+
+Preprint
+potentials over graph nodes and edges. ELV instantiates an analogous unary + pairwise structure, but
+crucially applies it in the latent semantic (concept) space rather than directly over agent identities.
+As a result, ELV can capture semantic interactions (e.g., “low health” interacting with “enemy
+proximity”) regardless of which agent expresses these concepts, supporting improved interpretability
+while retaining sufficient capacity for complex decision-making.
+B
+THEORETICAL JUSTIFICATION FOR CONCEPT-BASED RECONSTRUCTION
+In this section, we provide the theoretical justification for the auxiliary reconstruction objective. We
+demonstrate that minimizing the reconstruction loss is equivalent to maximizing a variational lower
+bound of the Mutual Information (MI) between the local observation and the extracted concept, under
+the empirical distribution induced by the current policy.
+B.1
+PROBLEM FORMULATION
+Let O be the continuous random variable representing the local observation, and C be the continuous
+random variable for the concept representation. The concept extractor defines a (possibly stochastic)
+conditional distribution pϕ(c|o) (e.g., by injecting noise or outputting a parametric distribution), and
+we aim to maximize the Mutual Information I(O; C):
+I(O; C) = H(O) −H(O|C),
+(20)
+where H(·) denotes the differential entropy.
+B.2
+ADDRESSING NON-STATIONARITY IN RL
+In Reinforcement Learning, the distribution of observations pπ(o) is non-stationary as it depends on
+the evolving policy π. However, at any given training step t, we optimize the representation with
+respect to the empirical distribution pemp(o) (e.g., sampled from a replay buffer or a fixed minibatch).
+Conditioned on this empirical distribution, the marginal entropy term H(O) can be treated as a
+constant with respect to the representation parameters within each optimization step. Our goal thus
+simplifies to minimizing the conditional differential entropy H(O|C).
+B.3
+DERIVATION OF THE LOWER BOUND
+The conditional differential entropy is defined as:
+H(O|C) = −Epemp(o,c)[log pemp(o|c)],
+(21)
+where pemp(o, c) = pemp(o)pϕ(c|o).
+Here, pemp(o|c) denotes the conditional distribution induced by the empirical joint distribution, which
+is generally not available in closed form. To approximate it, we introduce a variational decoder
+qθ(o|c).
+Using the non-negativity of the Kullback-Leibler (KL) divergence, we have:
+DKL(pemp(·|c) ∥qθ(·|c)) ≥0,
+(22)
+where
+DKL(pemp(·|c) ∥qθ(·|c)) = Epemp(o|c)
+
+log pemp(o|c)
+qθ(o|c)
+
+= Epemp(o|c)[log pemp(o|c)] −Epemp(o|c)[log qθ(o|c)].
+(23)
+Therefore, DKL(·) ≥0 implies Epemp(o|c)[log pemp(o|c)] ≥Epemp(o|c)[log qθ(o|c)]. Taking the expecta-
+tion over concepts c extends this inequality to the joint distribution pemp(o, c):
+Epemp(o,c)[log pemp(o|c)] ≥Epemp(o,c)[log qθ(o|c)].
+(24)
+15
+
+
+Preprint
+Substituting this inequality into the MI equation yields:
+I(O; C) = H(O) + Epemp(o,c)[log pemp(o|c)]
+≥H(O) + Epemp(o,c)[log qθ(o|c)].
+(25)
+We define the variational lower bound objective LMI as:
+LMI ≜H(O) + Epemp(o,c)[log qθ(o|c)].
+(26)
+Maximizing LMI maximizes a lower bound on I(O; C).
+B.4
+EQUIVALENCE TO RECONSTRUCTION LOSS
+Since our decoder is a deterministic neural network ˆo = gθ(c), we interpret it probabilistically by
+assuming qθ(o|c) follows a fixed-variance Gaussian distribution centered at ˆo:
+qθ(o|c) = N(o; gθ(c), σ2I),
+(27)
+where σ2 is a fixed constant and I is the identity matrix. The log-likelihood term becomes:
+log qθ(o|c) = −1
+2σ2 ∥o −gθ(c)∥2 + const.
+(28)
+Consequently, maximizing the MI lower bound is equivalent (up to an additive constant and a positive
+scaling factor) to minimizing the Mean Squared Error (MSE) reconstruction loss:
+Lrec = Epemp(o,c)
+
+∥o −gθ(c)∥2
+.
+(29)
+Conclusion The reconstruction loss serves as a proxy for maximizing a variational lower bound on the
+mutual information between observations and concepts under the current empirical data distribution.
+This promotes faithful concept extraction by encouraging the concepts to retain information sufficient
+for reconstructing the local observations (while additional bottlenecks or regularizers, when used, can
+further discourage trivial copying and encourage compact representations).
+C
+ENFORCING CONCEPT SUFFICIENCY VIA VARIATIONAL INFORMATION
+BOTTLENECK
+In this appendix, we justify our auxiliary global-state reconstruction objective. We consider the
+architecture where extracted concepts c are compressed into a latent bottleneck z, which is then
+used to reconstruct the global state s. We show that minimizing the reconstruction loss maximizes
+a variational lower bound of I(s; z), and by the Data Processing Inequality (DPI) this pushes up a
+certified lower bound of I(s; c).
+C.1
+GRAPHICAL MODEL AND ASSUMPTIONS
+Let s ∈S denote the global state and c ∈C denote the aggregated concept representation (e.g.,
+c = {ci}N
+i=1). We introduce a bottleneck latent z ∈Z sampled from an encoder qϕ(z | c), and
+reconstruct s using a decoder pθ(s | z).
+Assumption 1 (Markov property). Since z is generated solely from c, the induced variables satisfy
+the Markov chain
+S →C →Z,
+(30)
+equivalently qϕ(z | c, s) = qϕ(z | c) (i.e., Z ⊥S | C). Denote the encoder-induced joint distribution
+by
+q(s, c, z) = penv(s) qψ(c | s) qϕ(z | c),
+q(s, z) =
+Z
+q(s, c, z) dc.
+(31)
+16
+
+
+Preprint
+C.2
+CONNECTING RECONSTRUCTION TO MUTUAL INFORMATION
+Our goal is to encourage the concepts c to preserve information about the global state s, i.e., to
+increase I(S; C). We first show that reconstruction maximizes a variational lower bound of I(S; Z).
+Proposition 1 (Variational information maximization). Maximizing the expected log-likelihood
+Eq(s,z)[log pθ(s | z)] maximizes a variational lower bound of Iq(S; Z).
+Proof. By definition,
+Iq(S; Z) = Hq(S) −Hq(S | Z) = Hq(S) + Eq(s,z)[log q(s | z)].
+(32)
+Introduce a variational decoder pθ(s | z). Using the non-negativity of KL divergence,
+Eq(s|z)[log q(s | z)] ≥Eq(s|z)[log pθ(s | z)],
+(33)
+we obtain the Barber–Agakov lower bound:
+Iq(S; Z) ≥Hq(S) + Eq(s,z)[log pθ(s | z)].
+(34)
+Since Hq(S) is constant w.r.t. (ϕ, θ), maximizing Eq(s,z)[log pθ(s | z)] (or minimizing the negative
+log-likelihood reconstruction loss) maximizes this lower bound.
+□
+C.3
+ENFORCING CONCEPT SUFFICIENCY VIA DPI
+Proposition 2 (Sufficiency propagation via DPI). Increasing Iq(S; Z) pushes up a certified lower
+bound of Iq(S; C).
+Proof. From the Markov chain S →C →Z, the Data Processing Inequality (DPI) implies
+Iq(S; C) ≥Iq(S; Z).
+(35)
+Combining Eq. (34) and Eq. (35) yields
+Iq(S; C) ≥Iq(S; Z) ≥Hq(S) + Eq(s,z)[log pθ(s | z)].
+(36)
+Therefore, improving reconstruction from z increases a guaranteed lower bound on Iq(S; C): since
+Z is computed solely from C, Z cannot contain information about S that is not already present in C.
+Thus, demanding accurate reconstruction Z →S forces the upstream concept representation C to
+preserve globally predictive information.
+□
+C.4
+ROLE OF THE BOTTLENECK AND KL REGULARIZATION (VARIATIONAL IB)
+We optimize a bottlenecked objective of the form
+Laux = Eq(s,c)Eqϕ(z|c)[log pθ(s | z)] −β Eq(c)KL
+ qϕ(z | c) ∥p(z)
+
+,
+(37)
+where p(z) is a simple prior. The KL term imposes an information bottleneck on the channel C →Z.
+In particular, under q(c)qϕ(z | c), we have the decomposition
+Eq(c)KL
+ qϕ(z | c) ∥p(z)
+
+= Iq(C; Z) + KL
+ q(z) ∥p(z)
+
+,
+(38)
+showing that the regularizer controls the information capacity Iq(C; Z) and aligns the aggregated
+posterior q(z) with the prior. Hence, the auxiliary objective implements a Variational Information
+Bottleneck for predicting S from C: it encourages Z (and thus C) to retain compressible, robust
+information that is maximally predictive of the global state.
+17
+
+
+Preprint
+D
+PSEUDO CODE
+Algorithm 1 Escaping Local Views (ELV)
+Initialize a set of agents N = {1, . . . , n}
+Initialize concept networks and policy networks Qi(τi, ui; θ), target networks parameterized by
+ˆθ ←θ
+Initialize VAE components, concept predictor and concept decoder with parameters ϕ
+Initialize a replay buffer B for storing episodes
+repeat
+Initialize a history state h0
+i and previous action u0
+i for each agent
+Observe each agent’s partial observation [o1
+i ]n
+i=1
+for t = 1 : T do
+Get current history ht
+i and extract latent concepts ct
+i
+Infer global latent context z from concepts and calculate value function Qi(τ t
+i , ut
+i)
+Select action ut
+i via ϵ-greedy exploration based on Qi
+Execute joint action ut to receive reward rt and next state st+1
+end for
+Store the episode trajectory to B
+Sample a batch of episode trajectories with batch size b from B
+for t = 1 : T do
+Predict next concepts ˆct+1 and calculate intrinsic reward rint
+t
+via prediction error in Eq. (14)
+Calculate augmented reward rt = renv
+t
++ βt · rint
+t
+Get reconstructed observation ˜ot
+i from concepts and calculate grounding loss Lrec via Eq. (10)
+Construct global latent variable z ∼qϕ(z|c) and calculate VAE loss Lvae via Eq. (6)
+Calculate concept importance weights αk, βk using dual-path attention in Eq. (7) and (8)
+Compute individual Q-values incorporating order-2 concept interactions via Eq. (9)
+end for
+Construct the total loss function defined in Eq. (16)
+Update θ and ϕ by minimizing the total loss
+Periodically update target parameters ˆθ ←θ
+until Qi converges
+E
+RELATED WORK
+Interpretability in MARL. The opacity of deep MARL policies has traditionally been addressed
+via post-hoc explanations, such as saliency-based analyses (Greydanus et al., 2018) or Shapley-style
+attributions for value decomposition (Wang et al., 2020). While informative, post-hoc explanations
+can be sensitive to perturbations and may provide primarily correlational evidence rather than a
+structured account of multi-agent coordination (Slack et al., 2021). This motivates intrinsically
+interpretable architectures that expose intermediate decision structure, e.g., differentiable trees or
+symbolic distillation (Bastani et al., 2018; Liu et al., 2025). However, such designs may struggle to
+simultaneously maintain readability and expressiveness when coordination is high-dimensional and
+nontrivial. Graph-based interpretability methods can reveal who interacts (Wu et al., 2025), but may
+not directly ground what semantic content is exchanged. In contrast, ELV emphasizes cross-agent
+semantic coherence by training concepts to be globally informative under a VAE-style reconstruction
+objective, mitigating fragmented local views.
+Concept Bottleneck Models (CBMs). Concept Bottleneck Models (CBMs) introduce an inter-
+pretable intermediate layer where input features are first mapped to human-understandable concepts
+before making final predictions (Koh et al., 2020). While early CBMs suffered from a “performance-
+interpretability trade-off,” Concept Embedding Models (CEMs) (Espinosa Zarlenga et al., 2022)
+mitigated this by representing concepts as high-dimensional vectors. To bypass the need for exhaus-
+tive manual annotations, Post-hoc CBMs (Yuksekgonul et al., 2023) and Label-free CBMs (Oikarinen
+et al., 2023) leveraged pre-trained vision-language models like CLIP to automatically define concept
+spaces. Recent advances, such as Probabilistic CBMs (Kim et al., 2023) and Soft-CBMs (Havasi
+18
+
+
+Preprint
+et al., 2022), further enhance robustness by modeling concept uncertainty, ensuring that semantic
+abstractions remain reliable even under distribution shifts or noisy inputs. Recent research has sought
+to bridge such semantic abstractions with reinforcement learning. For instance, SCoBots (Delfosse
+et al., 2024) successfully utilizes hierarchical concepts to align single-agent policies, yet extending
+this transparency to decentralized coordination remains non-trivial.
+Semantic Exploration and Intrinsic Motivation. Efficient exploration in sparse-reward MARL
+remains challenging. Classic intrinsic motivation methods such as curiosity or RND (Pathak et al.,
+2017; Burda et al., 2019) often operate in raw observation spaces and can be distracted by task-
+irrelevant stochasticity. Beyond this, recent studies observe that na¨ıvely mixing intrinsic and extrinsic
+objectives may bias optimization and cause “over-exploration”; accordingly, constrained or adaptive
+schemes have been proposed to automatically regulate intrinsic reward strength and reduce such
+interference (Chen et al., 2022). To further improve robustness, uncertainty-aware curiosity explic-
+itly down-weights inherently unpredictable (aleatoric) transitions, mitigating the noisy-TV failure
+mode (Mavor-Parker et al., 2022). Meanwhile, structure-aware intrinsic rewards leverage transition
+regularities (e.g., successor–predecessor representations) to encourage bottleneck-seeking exploration
+beyond purely local novelty (Yu et al., 2023). Recent methods also incorporate social context or
+calibration to stabilize intrinsic signals (Pan et al., 2025). ELV is complementary: it computes
+prediction errors in a learned latent concept space, encouraging exploration towards semantically
+uncertain transitions rather than pixel-level noise (McCaffrey et al., 2025).
+(a) Level Based Foraging (b) StarCraft Multi-Agent Challenge (c) StarCraft Multi-Agent Challenge v2
+Figure 10: Three benchmarks used in our experiments.
+F
+EXPERIMENTAL DETAILS
+F.1
+BENCHMARK AND SETTINGS
+The majority of our experiments are carried out on Level Based Foraging (LBF), StarCraft Multi-
+Agent Challenge (SMAC) and SMACv2, as shown in Fig. 10. We describe the details and settings of
+these benchmarks in this section. Comprehensive experimental details are enumerated in Table 1 and
+Table 2.
+Table 1: Experimental Settings of Level-Based Foraging.
+HYPERPARAMETER
+VALUE
+DESCRIPTION
+MAX PLAYER LEVEL
+3
+MAXIMUM AGENT LEVEL ATTRIBUTE
+MAX EPISODE LENGTH
+50
+MAXIMUM TIMESTEPS PER EPISODE
+BATCH SIZE
+32
+NUMBER OF EPISODES PER UPDATE
+TEST INTERVAL
+10,000
+FREQUENCY OF EVALUATING PERFORMANCE
+TEST EPISODES
+32
+NUMBER OF EPISODES TO TEST
+REPLAY BATCH SIZE
+5000
+MAXIMUM NUMBER OF EPISODES STORED IN MEMORY
+DISCOUNT FACTOR γ
+0.99
+DEGREE OF IMPACT OF FUTURE REWARDS
+TOTAL TIMESTEPS
+1,050,000
+NUMBER OF TRAINING STEPS
+START ϵ
+1.0
+THE START ϵ VALUE TO EXPLORE
+FINISH ϵ
+0.05
+THE FINISH ϵ VALUE TO EXPLORE
+ANNEAL STEPS FOR ϵ
+50,000
+NUMBER OF STEPS OF LINEAR ANNEALING
+TARGET UPDATE INTERVAL
+200
+THE TARGET NETWORK UPDATE CYCLE
+19
+
+
+Preprint
+Table 2: Experimental settings of SMAC and SMACv2.
+HYPERPARAMETER
+VALUE
+DESCRIPTION
+DIFFICULTY
+7
+ENEMY UNITS WITH BUILT-IN AI DIFFICULTY
+BATCH SIZE (SMAC)
+32
+NUMBER OF EPISODES PER UPDATE
+BATCH SIZE (SMACV2)
+128
+NUMBER OF EPISODES PER UPDATE
+TEST INTERVAL
+10,000
+FREQUENCY OF EVALUATING PERFORMANCE
+TEST EPISODES
+32
+NUMBER OF EPISODES TO TEST
+REPLAY BATCH SIZE
+5000
+MAXIMUM NUMBER OF EPISODES IN MEMORY
+DISCOUNT FACTOR γ
+0.99
+DEGREE OF IMPACT OF FUTURE REWARDS
+START ϵ
+1.0
+THE START ϵ VALUE TO EXPLORE
+FINISH ϵ
+0.05
+THE FINISH ϵ VALUE TO EXPLORE
+ANNEAL STEPS FOR EASY & HARD
+50,000
+NUMBER OF STEPS OF LINEAR ANNEALING ϵ
+ANNEAL STEPS FOR SUPER HARD
+100,000
+NUMBER OF STEPS OF LINEAR ANNEALING ϵ
+TARGET UPDATE INTERVAL
+200
+THE TARGET NETWORK UPDATE CYCLE
+Table 3: The detailed specifications of SMAC scenarios used in our evaluation.
+MAP NAME
+ALLY UNITS
+ENEMY UNITS
+TIMESTEPS
+SCENARIO TYPE
+2s3z
+2 STALKERS & 3 ZEALOTS
+2 STALKERS & 3 ZEALOTS
+2M
+EASY
+3s5z
+3 STALKERS & 5 ZEALOTS
+3 STALKERS & 5 ZEALOTS
+2M
+EASY
+1c3s5z
+1 COLOSSUS, 3 STALKERS & 5 ZEALOTS
+1 COLOSSUS, 3 STALKERS & 5 ZEALOTS
+2M
+EASY
+2s vs 1sc
+2 STALKERS
+1 SPINE CRAWLER
+2M
+EASY
+5m vs 6m
+5 MARINES
+6 MARINES
+2M
+HARD
+8m vs 9m
+8 MARINES
+9 MARINES
+2M
+HARD
+3s vs 5z
+3 STALKERS
+5 ZEALOTS
+2M
+HARD
+2c vs 64zg
+2 COLOSSI
+64 ZERGLINGS
+2M
+HARD
+MMM2
+1 MEDIVAC, 2 MARAUDERS & 7 MARINES
+1 MEDIVAC, 3 MARAUDERS & 8 MARINES
+2M
+SUPER HARD
+3s5z vs 3s6z
+3 STALKERS & 5 ZEALOTS
+3 STALKERS & 6 ZEALOTS
+5M
+SUPER HARD
+6h vs 8z
+6 HYDRALISKS
+8 ZEALOTS
+5M
+SUPER HARD
+corridor
+6 ZEALOTS
+24 ZERGLINGS
+5M
+SUPER HARD
+Level-Based Foraging (LBF). LBF simulates a cooperative multi-agent task on a 10×10 grid, where
+agents with initialized skill levels must coordinate to collect food items under partial observability
+(restricted to a 5 × 5 local view). The core challenge lies in its enforced cooperation mechanism: a
+food item with difficulty Lf can only be consumed if the sum of the levels of participating agents
+meets the threshold (P li ≥Lf), necessitating dynamic subgroup formation. To encourage efficient
+exploration, the environment applies a step penalty of −0.002 at each timestep, and we evaluate our
+method on two specific configurations: 4-Players & 2-Foods and 6-Players & 4-Foods.
+StarCraft Multi-Agent Challenge. The StarCraft Multi-Agent Challenge (SMAC) (Samvelyan
+et al., 2019) based on StarCraft II (version SC2.4.10), which provides a suite of cooperative multi-
+agent reinforcement learning (MARL) tasks where a team of allied units is trained to defeat enemy
+units controlled by the built-in StarCraft II AI. The enemy AI operates at difficulty level 7 in all
+scenarios.Each allied unit is controlled by an individual decentralized agent, which observes the
+environment locally and learns to act cooperatively through reinforcement learning. Agents are
+trained to maximize cumulative rewards by dealing as much damage as possible to enemy units
+while avoiding unnecessary damage to themselves. These tasks demand a wide range of cooperative
+behaviors, including focus fire, kiting, flanking, and spatial coordination. The evaluation is performed
+across multiple challenging combat scenarios with varying levels of complexity, agent types, and
+asymmetry. Some scenarios involve homogeneous units, while others include heterogeneous unit
+compositions. A summary of the selected scenarios is provided in Table 3.
+StarCraft Multi-Agent Challenge v2. StarCraft Multi-Agent Challenge v2 (SMACv2) (Ellis et al.,
+2023) is a significant evolution of the original benchmark designed to rigorously test the generalization
+capabilities of MARL algorithms. Unlike the static scenarios in v1, SMACv2 introduces a high degree
+of stochasticity through randomized initial configurations, where enemy positions, unit attributes, and
+quantities vary across episodes. Furthermore, the inclusion of dynamic environmental features—such
+as map alterations and fluctuating objectives—adds a layer of unpredictability. All experiments are
+performed using the SC2.4.10 environment with uniform training step limits to ensure a fair and
+robust assessment of scalability and adaptability. Table 4 summarizes the detailed specifications for
+each scenario.
+20
+
+
+Preprint
+Table 4: The SMACv2 scenarios used in our evaluation.
+SCENARIO NAME
+ALLIES
+ENEMIES
+TIMESTEPS
+UNIT COMPOSITION (RANDOMIZED)
+Terran 5 vs 5
+5
+5
+1M
+MARINES, MARAUDERS, MEDIVACS
+Terran 10 vs 10
+10
+10
+2M
+Zerg 5 vs 5
+5
+5
+1M
+ZERGLINGS, HYDRALISKS, BANELINGS
+Zerg 10 vs 10
+10
+10
+2M
+Protoss 5 vs 5
+5
+5
+1M
+STALKERS, ZEALOTS, COLOSSI
+Protoss 10 vs 10
+10
+10
+2M
+F.2
+HYPERPARAMETERS OF BASELINES
+We implement a diverse set of baselines using the PyMARL framework (Samvelyan et al., 2019).
+These include five classic value-decomposition methods—such as QMIX (Rashid et al., 2020),
+VDN (Sunehag et al., 2018), QPLEX (Wang et al., 2021), CDS (Li et al., 2021) and QTRAN (Son
+et al., 2019)—as well as recent approaches focusing on exploration and communication, including
+NA2Q (Liu et al., 2023), ReBorn (Qin et al., 2024), MA2E (Kang et al., 2025), and SHAQ (Wang
+et al., 2022). For fair comparison, all baselines adhere to the default hyperparameters provided in
+their respective official implementations or the PyMARL codebase.
+During evaluation, we employ decentralized greedy action selection, testing the policy every 20, 000
+environment steps over 20 episodes. To ensure statistical robustness, all experiments are conducted
+across five random seeds in environments characterized by clear success/failure dynamics. The metric
+test win rate is defined as the percentage of episodes where allied agents successfully eliminate all
+enemies within the time limit. Optimization is performed using RMSprop with a learning rate of
+5 × 10−4, with target networks updated every 200 training episodes.
+F.3
+HYPERPARAMETERS OF ELV
+We implement ELV based on the PyMARL framework and optimize the entire ELV architecture using
+the Adam optimizer with a learning rate of 5 × 10−4. The target networks are updated every 200
+training episodes to stabilize value estimation. For a detailed listing of the structural hyperparameters
+and loss coefficients specific to ELV, please refer to Table 5.
+Table 5: Hyper-parameters of ELV.
+COMPONENT
+HYPER-PARAMETERS
+VALUE
+CONCEPT NUMBER (K)
+16
+CONCEPT
+CONCEPT DIMENSION (d)
+16
+EXTRACTION
+HISTORY HIDDEN DIM
+64
+LATENT CONTEXT DIM (z)
+32
+VARIATIONAL
+VAE LOSS WEIGHT λ1
+0.1
+AUTOENCODER
+REC. LOSS WEIGHT λ2
+0.1
+PRED. LOSS WEIGHT λ3
+0.05
+INTRINSIC
+INITIAL SCALE β0
+1
+REWARD
+DECAY COEFFICIENT λ
+9.2 × 10−8
+DECAY SCHEDULE
+Exponential
+DUAL-PATH
+QUERY DIMENSION
+16
+CONCEPT IMPORTANCE
+KEY DIMENSION
+16
+21
+
+
+Preprint
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+2s_vs_1sc
+0
+50
+100
+150
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+2s3z
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+3s5z
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+3s_vs_5z
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+1c3s5z
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+2c_vs_64zg
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+MMM2
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+8m_vs_9m
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+5m_vs_6m
+0
+1.00
+2.00
+3.00
+4.00
+5.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+6h_vs_8z
+0
+1.00
+2.00
+3.00
+4.00
+5.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+corridor
+0
+1.00
+2.00
+3.00
+4.00
+5.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+3s5z_vs_3s6z
+VDN
+QMIX
+QPLEX
+SHAQ
+QTRAN
+CDS
+NA2Q
+MA2E
+ReBorn
+ELV-VDN
+Figure 11: Median test win rate % on ELV with VDN mixing network.
+G
+ADDITIONAL EXPERIMENTAL RESULTS
+G.1
+GENERALITY ACROSS MIXING ARCHITECTURES.
+Since the proposed ELV framework focuses on restructuring the local agent’s policy network via
+latent concept extraction, it is theoretically compatible with arbitrary global mixing networks. To
+empirically validate this architectural flexibility, we integrated ELV with Value-Decomposition
+Networks (VDN), which employs a simple linear summation for value aggregation, contrasting with
+the non-linear mixing of QMIX used in our main experiments. As illustrated in Figure 11, ELV-VDN
+demonstrates remarkable performance improvements over the vanilla VDN baseline. This advantage
+is particularly evident in super-hard scenarios such as 6h vs 8z and corridor. In these tasks, the
+standard VDN fails to learn effective policies due to its limited representational capacity, hovering
+near a 0% win rate. In stark contrast, ELV-VDN achieves high win rates competitive with distinctively
+more complex architectures like QMIX and QPLEX. This result underscores that the semantic
+concepts learned by ELV provide a robust inductive bias, enabling simple mixing mechanisms to
+solve complex coordination problems. It confirms that ELV is a generalizable framework compatible
+with diverse value factorization backbones.
+22
+
+
+Preprint
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+2s_vs_1sc
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+2s3z
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+3s5z
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+3s_vs_5z
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+1c3s5z
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+MMM2
+VDN
+QMIX
+QPLEX
+SHAQ
+QTRAN
+CDS
+NA2Q
+MA2E
+ReBorn
+ELV (Ours)
+Figure 12: Test win rate % for six extra scenarios of SMAC benchmark.
+0
+0.25
+0.50
+0.75
+1.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+5gen_protoss
+0
+0.25
+0.50
+0.75
+1.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+5gen_terran
+0
+0.25
+0.50
+0.75
+1.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+5gen_zerg
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+10gen_protoss
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+10gen_terran
+0
+0.50
+1.00
+1.50
+2.00
+T (mil)
+0
+20
+40
+60
+80
+100
+Test Win Rate %
+10gen_zerg
+VDN
+QMIX
+QPLEX
+SHAQ
+QTRAN
+CDS
+NA2Q
+MA2E
+ReBorn
+ELV (Ours)
+Figure 13: Median test win rate % on SMACv2.
+G.2
+ADDITIONAL EXPERIMENTAL RESULTS ON SMAC EXTRA SCENARIOS.
+To verify the stability of ELV across varying difficulty levels, we further evaluate its performance on
+six easy SMAC scenarios. As illustrated in Figure 12, most baselines, such as QMIX and QPLEX,
+achieve near-saturated win rates in these environments due to the lower coordination threshold.
+ELV consistently matches this optimal performance, converging rapidly to a 100% win rate. This
+result is crucial as it confirms that the introduction of the latent concept bottleneck and the auxiliary
+reconstruction objectives does not induce performance regression or instability in simpler tasks.
+The learned semantic concepts efficiently collapse into simple heuristic policies when complex
+coordination is unnecessary, demonstrating the robustness of the ELV framework.
+23
+
+
+Preprint
+QMIX
+QMIX
+ELV-w/o-ir
+ELV-w/o-ir
+ELV
+ELV
+Map
+Corridor
+3s5z_vs_3s6z
+Figure 14: Visualization of exploration coverage via spatial heatmaps.
+G.3
+PERFORMANCE ON SMACV2.
+Performance on SMACv2. We further assess the generalization capability of ELV under the high
+stochasticity of SMACv2, where unit compositions and start positions are randomized. As shown in
+Figure 13, ELV consistently achieves superior win rates across all scenarios, establishing a significant
+performance margin in the more complex 10-unit tasks (e.g., 10gen terran and 10gen zerg). Notably,
+CDS, despite being designed for heterogeneous agents, exhibits high variance and suboptimal
+convergence. This failure suggests that merely encouraging behavioral diversity is insufficient
+to adapt to dynamic tactical shifts without grounded semantic understanding. Similarly, ReBorn
+struggles in large-scale settings (10gen), implying that its exploration mechanism may be inefficient
+in handling the exponentially growing state space of randomized scenarios. In contrast, QMIX and
+QPLEX require significantly more samples to reach competitive performance, struggling with the
+non-stationarity of the environment. ELV’s success stems from its ability to extract invariant semantic
+concepts from variable observations, effectively filtering out stochastic noise and enabling robust
+coordination where baselines falter.
+G.4
+QUALITATIVE ANALYSIS OF EXPLORATION.
+To intuitively verify how the proposed concept-based intrinsic reward facilitates exploration, we
+visualize the spatial heatmaps of agent trajectories throughout the training process in Figure 14. In the
+super-hard scenario 3s5z vs 3s6z, which demands complex kiting and positioning, QMIX exhibits a
+highly concentrated visitation pattern, indicating that agents tend to stagnate in local optima with
+limited movement. Although removing the intrinsic reward (ELV-w/o-ir) slightly expands the range,
+it still fails to cover the map effectively. In contrast, the full ELV model demonstrates significantly
+broader spatial coverage, suggesting that agents actively utilize the entire terrain to execute superior
+micro-tactics. In the navigation-heavy Corridor map (Bottom Row), the disparity is even more
+pronounced. Agents must pass through a narrow bottleneck to reach enemies. Baselines like QMIX
+and ELV-w/o-ir show high-density clustering at the bottom-left entry, failing to effectively penetrate
+the choke point. ELV, however, not only successfully traverses the narrow passage but also achieves a
+more even and widespread distribution within the top-right target area relative to the baselines. This
+indicates that the intrinsic reward effectively drives agents to break through bottlenecks and explore
+the task-critical region more thoroughly, rather than clustering at the entrance.
+24
+
+
+Preprint
+H
+ADDITIONAL ANALYSIS OF CONCEPTS AND PARTIAL OBSERVABILITY
+We further examine the learned concept representations from three complementary perspectives:
+their semantic roles and influence on policy behavior, their evolution along an episode, and their
+effectiveness under different degrees of partial observability.
+H.1
+SEMANTIC ROLES AND TEST-TIME CONCEPT INTERVENTIONS
+Semantic roles of learned concepts. ELV learns concept representations without ground-truth
+concept annotations. To interpret the resulting slots, we use the concept–feature attribution matrix G
+from Section 4.4, which measures the sensitivity of each observation modality’s reconstruction to
+each concept. The maximum-attribution matching yields a semantic assignment of concept slots to
+structured observation features. Table 6 presents the resulting assignments for a representative model
+on 3s vs 5z. The assigned concepts cover movement, individual enemies, teammates, self-state,
+unit type, and action history, providing a concrete interpretation of the concept–feature structure
+visualized in Figure 8. For example, C2 is associated with tracking enemy unit 1, while C11 and C14
+are associated with self-state and movement direction, respectively.
+Table 6: Attribution-based semantic assignments of learned concept slots on 3s vs 5z. Concept IDs
+refer to slots in the analyzed model.
+Concept ID
+Dominant feature
+Semantic label
+C14
+move
+Movement direction
+C2
+enemy1
+Enemy unit 1 tracking
+C13
+enemy2
+Enemy unit 2 tracking
+C9
+enemy3
+Enemy unit 3 tracking
+C5
+enemy4
+Enemy unit 4 tracking
+C0
+enemy5
+Enemy unit 5 tracking
+C15
+ally1
+Teammate 1 monitoring
+C6
+ally2
+Teammate 2 monitoring
+C11
+self
+Self-state
+C12
+type
+Unit type recognition
+C4
+last action
+Action history
+Influence on policy behavior. We next perform test-time interventions on a trained ELV model on
+3s vs 5z by setting the existence probability of one concept slot to either 0 or 1 during evaluation.
+Under the concept mixture defined in Section 3.1, these settings select the slot’s absence or presence
+embedding, respectively. Each intervention setting is evaluated over 10 episodes; the unmodified
+policy achieves a win rate of 1.00. Table 7 reports the results for all 11 assigned slots.
+The effects differ substantially across concepts. Setting the existence probability of C9 or C11 to
+0 reduces the win rate to 0.00, while the same intervention on C14 or C2 reduces it to 0.10. In
+contrast, interventions on C15 and C6 have smaller effects, with win rates remaining between 0.80
+and 0.90. Fixing a concept’s probability to 1 also changes performance: for example, C2 yields a
+win rate of 0.20, compared with 0.90 for C4 and C6. These results show that the concept variables
+materially influence policy behavior and contribute unequally to coordination. The reductions under
+both intervention settings further highlight the importance of context-dependent concept gating rather
+than keeping a slot permanently present or absent.
+H.2
+TEMPORAL EVOLUTION OF A SEMANTICALLY ASSIGNED CONCEPT
+To examine how an assigned concept evolves with its corresponding semantic factor, we follow Agent
+0’s Concept 2 together with enemy unit 1 over a full episode. Figure 15 shows the agent–enemy
+distance and enemy visibility, concept activation, and enemy health on a shared time axis. The
+activation decreases as the agent–enemy distance grows during approximately t = 15–30, then
+returns to a higher level when the enemy is nearby during approximately t = 30–63. At the marked
+enemy death event (t = 64), activation drops sharply and remains lower for the rest of the episode.
+This temporal pattern connects C2’s attribution-based assignment to changes in the tracked enemy’s
+25
+
+
+Preprint
+Table 7: Test-time concept interventions on 3s vs 5z. Each setting uses 10 evaluation episodes. The
+unmodified policy’s win rate is 1.00; all values are proportions.
+Concept ID
+Win rate (p = 0)
+Win rate (p = 1)
+C9
+0.00
+0.30
+C11
+0.00
+0.60
+C14
+0.10
+0.70
+C2
+0.10
+0.20
+C13
+0.60
+0.60
+C4
+0.60
+0.90
+C5
+0.60
+0.70
+C0
+0.70
+0.80
+C12
+0.80
+0.70
+C15
+0.90
+0.80
+C6
+0.90
+0.90
+state. Together with the semantic assignment and intervention results, it illustrates how learned
+concept slots provide a meaningful interface for inspecting policy behavior over time.
+0.0
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+distance (state coords)
+agent enemy distance
+enemy1 dies (t=64)
+0.054
+0.056
+0.058
+0.060
+0.062
+0.064
+concept activation
+agent0 concept 2
+enemy1 dies (t=64)
+0
+10
+20
+30
+40
+50
+60
+70
+timestep
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+health ratio
+enemy1 health
+enemy1 dies (t=64)
+hidden
+visible
+Concept Assignment Validation
+Figure 15: Temporal validation of the assignment of Agent 0’s Concept 2 to enemy unit 1. The panels
+show agent–enemy distance with enemy visibility (top), concept activation (middle), and enemy
+health (bottom). The dotted vertical line marks the enemy death event at t = 64.
+H.3
+PERFORMANCE UNDER RESTRICTED LOCAL OBSERVATIONS
+We evaluate the effect of partial observability in LBF by varying the local observation radius,
+sight ∈{2, 4, 8}, in the 6-players and 4-foods setting on a 10 × 10 grid. Figure 16 compares
+ELV with MA2E over one million environment steps using the mean test return. Both methods
+use the same QMIX mixing network, allowing the comparison to focus on their individual-value
+representations under restricted observations.
+ELV maintains similar final returns across all three observation radii, including the most restrictive
+setting, sight = 2. In contrast, MA2E achieves substantially lower final returns at radii 2 and 4,
+while the two methods reach similar final performance at radius 8. ELV also learns faster in the two
+more restricted settings. The concentration of its advantage at smaller observation radii supports the
+26
+
+
+Preprint
+role of the concept-based representation in handling limited local information, rather than attributing
+the improvement to a stronger global mixer.
+0
+0.25
+0.50
+0.75
+1.00
+T (mil)
+0.2
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Test Return Mean
+6-players & 4-foods sight=2
+0
+0.25
+0.50
+0.75
+1.00
+T (mil)
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Test Return Mean
+6-players & 4-foods sight=4
+0
+0.25
+0.50
+0.75
+1.00
+T (mil)
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Test Return Mean
+6-players & 4-foods sight=8
+ELV (Ours)
+MA2E
+Figure 16: Mean test return on LBF with 6 players and 4 foods on a 10 × 10 grid, using observation
+radii of 2, 4, and 8. ELV and MA2E use the same QMIX mixing network.
+27

@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-09-23 ~ 2026-10-02</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-02</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 41 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 51 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
-    <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>2 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>21</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>31</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-02 01:31:58 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-02 19:24:25 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>本期（9月23日—10月2日）完成41篇论文筛读：精读21篇、速读20篇，聚焦AI如何模拟社会与参与真实协作。</p>
-<p>最值得看的是两篇10分推荐：人工社会基准如何验证合成研究，以及直觉式提示如何改善LLM对个体社交媒体反应的模拟。</p>
-<p>建议先读这两篇抓住“模拟是否可信”的主线，再按兴趣速读直播助手或文档多智能体讨论，了解AI协作的具体场景。</p>
+<p>今日 AI 研究日报收录 51 篇：精读 31 篇、速读 20 篇，重点看人机协作与 AI 风险。</p>
+<p>最值得关注的是满分精读《Human-AI Collaboration: From Paradoxes to Patterns》，以及探讨对话中用户秘密泄露的《PrivDrift》；速读可留意 AI 对齐失效检测和监控规避。</p>
+<p>普通读者不妨先读人机协作，再带着“对话中的隐私如何保护”这个问题看《PrivDrift》。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">21 篇</strong>
+    <strong class="dpr-home-dashboard-count">31 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Artificial Societies Benchmark: A Validation Framework for Synthetic Research">Artificial Societies Benchmark: A Validation Framework for Synthetic Research</span></li><li><span class="dpr-home-dashboard-paper-title" title="Thinking Less to Simulate Better: Intuitive Prompting Improves LLM Agents Simulating Individual Social Media Reactions, Including Unfamiliar Content">Thinking Less to Simulate Better: Intuitive Prompting Improves LLM Agents Simulating Individual Social Media Reactions, Including Unfamiliar Content</span></li><li><span class="dpr-home-dashboard-paper-title" title="Simulating Respondents, Not Single Questions: Coherent Survey Generation with Large Language Models">Simulating Respondents, Not Single Questions: Coherent Survey Generation with Large Language Models</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Human-AI Collaboration: From Paradoxes to Patterns">Human-AI Collaboration: From Paradoxes to Patterns</span></li><li><span class="dpr-home-dashboard-paper-title" title="PrivDrift: Auditing User-Secret Leakage Under Topic Drift in Active LLM Conversations">PrivDrift: Auditing User-Secret Leakage Under Topic Drift in Active LLM Conversations</span></li><li><span class="dpr-home-dashboard-paper-title" title="Evaluating Sycophancy in Chinese Large Language Models on Factual Questions Derived from Online Search Queries">Evaluating Sycophancy in Chinese Large Language Models on Factual Questions Derived from Online Search Queries</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">llm-social-sim <strong>9</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>6</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>4</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>9</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>9</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>6</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>2</strong></span><span class="dpr-home-dashboard-tag">ba <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -96,9 +96,9 @@
     <strong class="dpr-home-dashboard-count">20 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Live Assistant: Learning Whether, When, and Whom to Assist in Real-World Live Social Streams">Live Assistant: Learning Whether, When, and Whom to Assist in Real-World Live Social Streams</span></li><li><span class="dpr-home-dashboard-paper-title" title="DocuTeam: Mixed-Initiative Multi-Agent Discussions around Evolving Documents">DocuTeam: Mixed-Initiative Multi-Agent Discussions around Evolving Documents</span></li><li><span class="dpr-home-dashboard-paper-title" title="What Will Remain Human in Software Architecture? A Focus Group Report">What Will Remain Human in Software Architecture? A Focus Group Report</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="How People Use ChatGPT in Australia: A WildChat Analysis">How People Use ChatGPT in Australia: A WildChat Analysis</span></li><li><span class="dpr-home-dashboard-paper-title" title="Just Ask Jev: Reinforcement Learning for Calibrated Decisions as a Zero-Shot Detector of AI Alignment Failures">Just Ask Jev: Reinforcement Learning for Calibrated Decisions as a Zero-Shot Detector of AI Alignment Failures</span></li><li><span class="dpr-home-dashboard-paper-title" title="Instrumental Monitor Evasion Emerges Under Ordinary Task Pressure">Instrumental Monitor Evasion Emerges Under Ordinary Task Pressure</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>6</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>4</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>5</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>4</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span></div>
 </section>
 </div>
 
