@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-09-21 ~ 2026-09-30</span>
+      <span class="dpr-home-dashboard-kicker">2026-09-23 ~ 2026-10-02</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 52 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 21 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
-    <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>2 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>31</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>21</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>10</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>11</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-09-30 21:16:17 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-02 00:59:42 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>9月21日至30日 AI 论文日报：收录 52 篇，精读 31 篇、速读 21 篇。</p>
-<p>最值得关注的是两篇满分精读：激励错位环境中的计算机操作智能体，以及 AI 风险变化时的人类接管时机。</p>
-<p>普通读者可先读这两篇，再从速读列表中选择“人类监督”或“智能体行动治理”继续了解。</p>
+<p>9月23日至10月2日论文推荐已完成：共整理21篇，精读10篇、速读11篇，聚焦AI社会模拟与个性化交互。</p>
+<p>最值得看的是两篇10分推荐：一篇关注合成研究的验证框架，另一篇探讨直觉式提示如何改善LLM对个体社交媒体反应的模拟。</p>
+<p>建议先读这两篇的摘要，再按兴趣选读8分推荐中的VR共情交互或个性化价值对齐，了解AI如何更贴近人的反应与偏好。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">31 篇</strong>
+    <strong class="dpr-home-dashboard-count">10 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="CAVEAT: Towards Robust Computer-Use Agents in Incentive-Misaligned Environments">CAVEAT: Towards Robust Computer-Use Agents in Incentive-Misaligned Environments</span></li><li><span class="dpr-home-dashboard-paper-title" title="When Should a Human Take Back Control? Optimal Delegation under Turbulent AI Risk">When Should a Human Take Back Control? Optimal Delegation under Turbulent AI Risk</span></li><li><span class="dpr-home-dashboard-paper-title" title="Learning from Others, Acting for You: Cross-User Memory Sharing for LLM Agents">Learning from Others, Acting for You: Cross-User Memory Sharing for LLM Agents</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Artificial Societies Benchmark: A Validation Framework for Synthetic Research">Artificial Societies Benchmark: A Validation Framework for Synthetic Research</span></li><li><span class="dpr-home-dashboard-paper-title" title="Thinking Less to Simulate Better: Intuitive Prompting Improves LLM Agents Simulating Individual Social Media Reactions, Including Unfamiliar Content">Thinking Less to Simulate Better: Intuitive Prompting Improves LLM Agents Simulating Individual Social Media Reactions, Including Unfamiliar Content</span></li><li><span class="dpr-home-dashboard-paper-title" title="Simulating Respondents, Not Single Questions: Coherent Survey Generation with Large Language Models">Simulating Respondents, Not Single Questions: Coherent Survey Generation with Large Language Models</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>20</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>9</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">llm-social-sim <strong>7</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>3</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -93,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">21 篇</strong>
+    <strong class="dpr-home-dashboard-count">11 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Anticipatory Human Oversight of Agentic AI: A Philosophical Account">Anticipatory Human Oversight of Agentic AI: A Philosophical Account</span></li><li><span class="dpr-home-dashboard-paper-title" title="ActGov: Governing LLM Agent Actions via Policy-Constrained Validation">ActGov: Governing LLM Agent Actions via Policy-Constrained Validation</span></li><li><span class="dpr-home-dashboard-paper-title" title="Who Does What in AI Auditing? Designing Human-AI Collaboration for Auditing Generative AI">Who Does What in AI Auditing? Designing Human-AI Collaboration for Auditing Generative AI</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Listening and Mirroring: The Effects of Verbal Attunement and Behavioral Mimicry on Social and Empathic Perceptions of Embodied AI Agents in VR">Listening and Mirroring: The Effects of Verbal Attunement and Behavioral Mimicry on Social and Empathic Perceptions of Embodied AI Agents in VR</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Static Personal Values to Contextualized Personalization: Bayesian Personalized Value Alignment for LLMs">From Static Personal Values to Contextualized Personalization: Bayesian Personalized Value Alignment for LLMs</span></li><li><span class="dpr-home-dashboard-paper-title" title="Sampling Safe Futures: Multimodal Trajectory Planning for Personalized Safety in Anthropomorphic AI">Sampling Safe Futures: Multimodal Trajectory Planning for Personalized Safety in Anthropomorphic AI</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>8</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>5</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span></div>
 </section>
 </div>
 
