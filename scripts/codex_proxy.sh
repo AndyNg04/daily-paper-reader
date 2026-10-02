@@ -133,6 +133,8 @@ cmd_start() {
     for name in DEEPSEEK_BASE_URL SUMMARY_BASE_URL LLM_PRIMARY_BASE_URL; do echo "${name}=${base}"; done
     # 精读/速读总结（Step 6）用强模型；筛选、查询改写等量大的环节用快模型。
     echo "SUMMARY_MODEL=${strong}"
+    # 标题/摘要翻译用快模型；速览和精读长总结仍用 SUMMARY_MODEL（强模型）。
+    echo "DPR_TRANSLATE_MODEL=${fast}"
     # Codex 写精读长总结常要 2–10 分钟，项目默认的 120 秒读超时会反复超时重来、白白消耗额度。
     echo "LLM_REQUEST_TIMEOUT=${CODEX_REQUEST_TIMEOUT:-600}"
     # Codex 单篇生成慢（输出速度低），多开几篇并发来缩短 Step 6 总时长。

@@ -66,6 +66,19 @@ def create_llm_client() -> DeepSeekClient | None:
 
 LLM_CLIENT = create_llm_client()
 
+# 标题/摘要翻译可单独指定一个更快的模型（例如 Codex 下用 luna），速览与精读总结仍用 SUMMARY_MODEL。
+TRANSLATE_MODEL = (os.getenv("DPR_TRANSLATE_MODEL") or "").strip()
+
+
+def create_translate_client() -> DeepSeekClient | None:
+    if not DEEPSEEK_API_KEY or not TRANSLATE_MODEL:
+        return None
+    return DeepSeekClient(
+        api_key=DEEPSEEK_API_KEY,
+        model=TRANSLATE_MODEL,
+        base_url=DEEPSEEK_BASE_URL,
+    )
+
 DEFAULT_DOCS_CONCURRENCY = 4
 
 
@@ -318,7 +331,8 @@ def translate_title_and_abstract_to_zh(
     abstract: str,
     client: DeepSeekClient | None = None,
 ) -> Tuple[str, str]:
-    active_client = client or LLM_CLIENT
+    # 每次新建翻译客户端：client.kwargs 会被逐次改写，多线程共用同一个实例不安全。
+    active_client = create_translate_client() or client or LLM_CLIENT
     if active_client is None:
         return "", ""
     title = title.strip() if title else ""
