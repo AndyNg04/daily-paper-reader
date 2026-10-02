@@ -110,3 +110,17 @@ class DailyPushRetryTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DailyCheckoutLatestHeadTest(unittest.TestCase):
+    def test_checkout_uses_branch_head_not_trigger_sha(self):
+        # 排队的手动运行若检出触发时的旧提交，看不到前一次刚提交的 _daily_state.json，
+        # 同一日期块会被整块覆盖（两个方向先后手动运行时出现过）。
+        workflow = yaml.safe_load(
+            (ROOT / ".github/workflows/daily-paper-reader.yml").read_text(encoding="utf-8")
+        )
+        checkout = next(
+            s for s in workflow["jobs"]["run"]["steps"] if s.get("name") == "Checkout"
+        )
+        self.assertEqual(checkout["with"]["ref"], "${{ github.ref_name }}")
+        self.assertEqual(checkout["with"]["fetch-depth"], 0)
