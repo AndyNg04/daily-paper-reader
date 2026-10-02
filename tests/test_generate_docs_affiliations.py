@@ -122,3 +122,33 @@ class AffiliationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TranslateModelTest(unittest.TestCase):
+    def test_translation_uses_dedicated_model_when_configured(self):
+        import os
+        from unittest.mock import patch
+        mod = load_module()
+        used = []
+
+        def fake_structured(client, messages, **kwargs):
+            used.append(client)
+            return {"title_zh": "标题", "abstract_zh": "摘要"}
+
+        class FakeClient:
+            def __init__(self, api_key, model, base_url):
+                self.model = model
+
+        summary_client = object()
+        with patch.object(mod, "call_llm_structured_json", fake_structured), \
+                patch.object(mod, "DeepSeekClient", FakeClient), \
+                patch.object(mod, "TRANSLATE_MODEL", "gpt-6-luna(medium)"), \
+                patch.object(mod, "DEEPSEEK_API_KEY", "k"):
+            mod.translate_title_and_abstract_to_zh("T", "A", client=summary_client)
+        self.assertIsNot(used[-1], summary_client)
+        self.assertEqual(used[-1].model, "gpt-6-luna(medium)")
+
+        with patch.object(mod, "call_llm_structured_json", fake_structured), \
+                patch.object(mod, "TRANSLATE_MODEL", ""):
+            mod.translate_title_and_abstract_to_zh("T", "A", client=summary_client)
+        self.assertIs(used[-1], summary_client)

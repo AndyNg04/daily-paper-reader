@@ -163,3 +163,9 @@ def test_proxy_script_sets_long_request_timeout_and_docs_concurrency():
     sh = (ROOT / "scripts/codex_proxy.sh").read_text(encoding="utf-8")
     assert 'echo "LLM_REQUEST_TIMEOUT=${CODEX_REQUEST_TIMEOUT:-600}"' in sh
     assert 'echo "DPR_DOCS_CONCURRENCY=${CODEX_DOCS_CONCURRENCY:-6}"' in sh
+
+
+def test_proxy_script_routes_translation_to_fast_model():
+    sh = (ROOT / "scripts/codex_proxy.sh").read_text(encoding="utf-8")
+    assert 'echo "DPR_TRANSLATE_MODEL=${fast}"' in sh
+    assert 'echo "SUMMARY_MODEL=${strong}"' in sh
