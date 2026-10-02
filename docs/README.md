@@ -51,14 +51,14 @@
       <span class="dpr-home-dashboard-kicker">2026-09-23 ~ 2026-10-02</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 21 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 22 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>10</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>11</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>11</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-02 00:59:42 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-02 01:11:40 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>9月23日至10月2日论文推荐已完成：共整理21篇，精读10篇、速读11篇，聚焦AI社会模拟与个性化交互。</p>
-<p>最值得看的是两篇10分推荐：一篇关注合成研究的验证框架，另一篇探讨直觉式提示如何改善LLM对个体社交媒体反应的模拟。</p>
-<p>建议先读这两篇的摘要，再按兴趣选读8分推荐中的VR共情交互或个性化价值对齐，了解AI如何更贴近人的反应与偏好。</p>
+<p>本期（9月23日—10月2日）完成22篇论文推荐，精读与速读各11篇，聚焦AI如何融入工作与社交互动。</p>
+<p>最值得关注的是两篇9.0分精读：AI智能体作为“队友”进入组织后的协作问题，以及实时AI面试辅助对社交动态的影响。</p>
+<p>普通读者可先从这两篇入手，再选读8.0分的《Live Assistant》，进一步了解AI该不该、何时以及帮助谁的问题。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">10 篇</strong>
+    <strong class="dpr-home-dashboard-count">11 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Artificial Societies Benchmark: A Validation Framework for Synthetic Research">Artificial Societies Benchmark: A Validation Framework for Synthetic Research</span></li><li><span class="dpr-home-dashboard-paper-title" title="Thinking Less to Simulate Better: Intuitive Prompting Improves LLM Agents Simulating Individual Social Media Reactions, Including Unfamiliar Content">Thinking Less to Simulate Better: Intuitive Prompting Improves LLM Agents Simulating Individual Social Media Reactions, Including Unfamiliar Content</span></li><li><span class="dpr-home-dashboard-paper-title" title="Simulating Respondents, Not Single Questions: Coherent Survey Generation with Large Language Models">Simulating Respondents, Not Single Questions: Coherent Survey Generation with Large Language Models</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Working with Agentic `Teammates&#x27;: When a New Organizational Actor Collides with the Human Ecosystem of Work">Working with Agentic `Teammates&#x27;: When a New Organizational Actor Collides with the Human Ecosystem of Work</span></li><li><span class="dpr-home-dashboard-paper-title" title="The Interviewer&#x27;s Perspective: Unpacking the Impact of Real-Time AI Interviewing Assistance on Social Dynamics">The Interviewer&#x27;s Perspective: Unpacking the Impact of Real-Time AI Interviewing Assistance on Social Dynamics</span></li><li><span class="dpr-home-dashboard-paper-title" title="Thinking Less to Simulate Better: Intuitive Prompting Improves LLM Agents Simulating Individual Social Media Reactions, Including Unfamiliar Content">Thinking Less to Simulate Better: Intuitive Prompting Improves LLM Agents Simulating Individual Social Media Reactions, Including Unfamiliar Content</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">llm-social-sim <strong>7</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>3</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">social-computing <strong>5</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -96,9 +96,9 @@
     <strong class="dpr-home-dashboard-count">11 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Listening and Mirroring: The Effects of Verbal Attunement and Behavioral Mimicry on Social and Empathic Perceptions of Embodied AI Agents in VR">Listening and Mirroring: The Effects of Verbal Attunement and Behavioral Mimicry on Social and Empathic Perceptions of Embodied AI Agents in VR</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Static Personal Values to Contextualized Personalization: Bayesian Personalized Value Alignment for LLMs">From Static Personal Values to Contextualized Personalization: Bayesian Personalized Value Alignment for LLMs</span></li><li><span class="dpr-home-dashboard-paper-title" title="Sampling Safe Futures: Multimodal Trajectory Planning for Personalized Safety in Anthropomorphic AI">Sampling Safe Futures: Multimodal Trajectory Planning for Personalized Safety in Anthropomorphic AI</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Live Assistant: Learning Whether, When, and Whom to Assist in Real-World Live Social Streams">Live Assistant: Learning Whether, When, and Whom to Assist in Real-World Live Social Streams</span></li><li><span class="dpr-home-dashboard-paper-title" title="Agent-based Modeling: Equilibrium, Echo Chambers, and Efficiency in Hybrid Coevolutionary Opinion Games">Agent-based Modeling: Equilibrium, Echo Chambers, and Efficiency in Hybrid Coevolutionary Opinion Games</span></li><li><span class="dpr-home-dashboard-paper-title" title="Beyond Surface Style: Aligning Multi-Turn User Simulators with Behavioral Consistency">Beyond Surface Style: Aligning Multi-Turn User Simulators with Behavioral Consistency</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">social-computing <strong>4</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>3</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>1</strong></span></div>
 </section>
 </div>
 
