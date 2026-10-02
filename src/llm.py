@@ -27,6 +27,24 @@ def resolve_max_output_tokens(default: int = DEFAULT_MAX_OUTPUT_TOKENS) -> int:
         return default
 
 
+DEFAULT_REQUEST_TIMEOUT = 120
+
+
+def resolve_request_timeout(default: int = DEFAULT_REQUEST_TIMEOUT) -> int:
+    """单次 Chat Completions 请求的读超时（秒）。
+
+    超时后会重新发起整次请求，而服务端那次生成并不会停止、照样消耗额度；生成慢的模型
+    （例如经 Codex proxy 写 4k token 的精读长总结）应调大，避免反复超时重来。
+    """
+    raw = os.getenv("LLM_REQUEST_TIMEOUT")
+    if not raw:
+        return default
+    try:
+        return max(10, int(raw))
+    except Exception:
+        return default
+
+
 GLOBAL_TOKENS = {
     'prompt': 0,    # 提示词（prompt）部分 token
     'thinking': 0,  # 推理/思维链部分 token（reasoning_tokens）
@@ -541,7 +559,7 @@ class LLMClient:
         for attempt_idx, req_base in enumerate(request_bases, start=1):
             request_url = self._build_chat_completions_url(req_base)
             try:
-                response = requests.post(request_url, headers=headers, json=payload, timeout=120)
+                response = requests.post(request_url, headers=headers, json=payload, timeout=resolve_request_timeout())
                 response.raise_for_status()
                 try:
                     response_data = response.json()
