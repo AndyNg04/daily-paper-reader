@@ -107,3 +107,37 @@ class LlmBaseUrlTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LlmRequestTimeoutTest(unittest.TestCase):
+    def _ok(self):
+        resp = MagicMock()
+        resp.raise_for_status.return_value = None
+        resp.json.return_value = {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        }
+        return resp
+
+    @patch("llm.requests.post")
+    def test_default_timeout_is_120(self, mock_post):
+        mock_post.return_value = self._ok()
+        with patch.dict("os.environ", {}, clear=False):
+            import os
+            os.environ.pop("LLM_REQUEST_TIMEOUT", None)
+            LLMClient(api_key="k", model="m", base_url="http://127.0.0.1:1/v1").chat([{"role": "user", "content": "hi"}])
+        self.assertEqual(mock_post.call_args.kwargs["timeout"], 120)
+
+    @patch("llm.requests.post")
+    def test_timeout_from_env(self, mock_post):
+        mock_post.return_value = self._ok()
+        with patch.dict("os.environ", {"LLM_REQUEST_TIMEOUT": "600"}):
+            LLMClient(api_key="k", model="m", base_url="http://127.0.0.1:1/v1").chat([{"role": "user", "content": "hi"}])
+        self.assertEqual(mock_post.call_args.kwargs["timeout"], 600)
+
+    def test_bad_values_fall_back(self):
+        import llm
+        with patch.dict("os.environ", {"LLM_REQUEST_TIMEOUT": "abc"}):
+            self.assertEqual(llm.resolve_request_timeout(), 120)
+        with patch.dict("os.environ", {"LLM_REQUEST_TIMEOUT": "1"}):
+            self.assertEqual(llm.resolve_request_timeout(), 10)

@@ -69,6 +69,17 @@ LLM_CLIENT = create_llm_client()
 DEFAULT_DOCS_CONCURRENCY = 4
 
 
+def resolve_docs_concurrency(default: int = DEFAULT_DOCS_CONCURRENCY) -> int:
+    """step6 并发篇数：环境变量 DPR_DOCS_CONCURRENCY 可覆盖默认值（生成慢的模型靠并发提速）。"""
+    raw = os.getenv("DPR_DOCS_CONCURRENCY")
+    if not raw:
+        return default
+    try:
+        return min(16, max(1, int(raw)))
+    except ValueError:
+        return default
+
+
 def call_llm_text(
     client: DeepSeekClient,
     messages: List[Dict[str, str]],
@@ -3049,8 +3060,8 @@ def main() -> None:
     parser.add_argument(
         "--docs-concurrency",
         type=int,
-        default=DEFAULT_DOCS_CONCURRENCY,
-        help="step6 每篇论文并发生成数量。",
+        default=resolve_docs_concurrency(),
+        help="step6 每篇论文并发生成数量（默认 4，可用环境变量 DPR_DOCS_CONCURRENCY 覆盖）。",
     )
     args = parser.parse_args()
 
