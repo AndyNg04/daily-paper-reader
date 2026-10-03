@@ -1,0 +1,2534 @@
+AirLog: Store-Level Indoor Life Logging Made Easy
+Zihui Yun
+University of Georgia
+Athens, Georgia, USA
+ayucharon666@gmail.com
+Jiaying Du
+University of Georgia
+Athens, Georgia, USA
+msz@uga.edu
+Yue Yu
+University College London
+London, United Kingdom
+ucfnyul@ucl.ac.uk
+Zhewei Liu
+University of Toronto Mississauga
+Mississauga, Ontario, Canada
+zwei.liu@utoronto.ca
+Zhen Xiang
+University of Georgia
+Athens, Georgia, USA
+zxiangaa@uga.edu
+Longfei Shangguan
+University of Pittsburgh
+Pittsburgh, Pennsylvania, USA
+longfei@pitt.edu
+Zhenlin An∗
+University of Georgia
+Athens, Georgia, USA
+zhenlin.an@uga.edu
+Abstract
+This paper presents AirLog, a smartphone-based life jour-
+naling system that automatically reconstructs users’ store
+visits in shopping malls and summarizes them into human-
+readable journals. Unlike conventional indoor localization
+systems, AirLog avoids labor-intensive radio-map construc-
+tion and dedicated wireless localization infrastructure and
+algorithm calibrations. Instead, it repurposes two cues al-
+ready available in commercial spaces: semantic information
+exposed by ambient Wi-Fi SSIDs and indoor directory im-
+ages. AirLog converts directory images into spatial maps and
+fuses Wi-Fi semantic anchors with inertial dead reckoning to
+recover store-level trajectories, which are then summarized
+into journals by an LLM. Such store-level life logs can sup-
+port applications such as personal memory recall, activity
+reflection, and automated diary generation without requiring
+users to manually record where they have been. We imple-
+ment AirLog on commodity smartphones and evaluate it on
+both a large-scale public dataset and a self-collected dataset.
+The results demonstrate that AirLog substantially improves
+store-level region recovery, semantic matching, trajectory
+reconstruction, and journal quality over existing baselines. A
+human evaluation further shows that the generated journals
+are coherent and faithful to users’ visits.
+1
+Introduction
+Automatically recording daily experiences has long been a
+goal of mobile sensing and context-aware computing [17, 24].
+In this paper, we focus on store-level indoor life logging: au-
+tomatically reconstructing which stores or venues a user
+visited in a shopping mall, in what order, and for how long,
+∗Corresponding author.
+and summarizing these visits into a human-readable jour-
+nal. Such logs can support personal memory recall, visit
+retrospection, and context-aware assistants. As illustrated
+in Figure 1, instead of merely recording that a user spent
+two hours at a mall, a useful log could report that the user
+visited Macy’s, then Uniqlo, had lunch at the Cheesecake
+Factory, and later stopped by the Apple Store, together with
+the temporal order and dwell time of these visits. When users
+cannot remember the details of a past visit, they can also
+directly query the life log, e.g., “Where did I go for lunch
+after visiting Uniqlo?”
+At first glance, this task appears to be a straightforward ex-
+tension of existing mobile lifelogging systems where coarse-
+grained mobility context is often obtained directly from GPS
+traces, digital maps, and nearby points of interest (POIs),
+after which an LLM can interpret or summarize the resulting
+context [45, 47, 62, 63, 69]. Indoors, however, the store-level
+trajectory itself is not readily available, largely because GPS
+is unreliable while conventional Wi-Fi localization typically
+requires site-specific surveys, fingerprint databases, or dedi-
+cated localization pipelines [4, 5, 25, 37, 68, 71]. Such require-
+ments make store-level life logging difficult to scale across
+large and frequently changing commercial spaces.
+Our key observation is that commercial indoor environ-
+ments already expose two useful spatial cues: (i): ambient
+Wi-Fi SSIDs, which often reveal semantic information about
+nearby stores [30, 52, 72]; and (ii): indoor directory images,
+which expose region locations and readable labels. This leads
+to our central question: Can these readily available but weak
+semantic cues be combined with smartphone motion sensing to
+recover store-level trajectories without relying on traditional
+Wi-Fi radio map or localization infrastructures?
+Answering this question introduces two challenges:
+arXiv:2609.31864v1  [cs.NI]  25 Sep 2026
+
+
+Yun et al.
+Yesterday (Nov 12, 2024)
+Ross Park Mall
+What did I do after 
+Macy's?
+You went to The 
+Cheesecake 
+Factory for lunch 
+after visiting 
+Uniqlo.
+After Macy's, you 
+visited Uniqlo, then 
+had lunch at The 
+Cheesecake 
+Factory.
+After I went to 
+Uniqlo yesterday, 
+where did I go for 
+lunch?
+Wi-Fi
+IMU
+Floor-plan
+A day in the mall (Passive 
+sensing)
+User carries a smartphone while
+visiting stores in a shopping mall.
+Automatically generated
+life journal
+Airlog  reconstructs store-level visits
+and summarizes them into a journal.
+Querying the life log
+Users can ask retrospective 
+questions about their past 
+visits.
+Entrance
+Macy's
+Browsed clothing 
+and accessories.
+Uniqlo
+Looked at jackets 
+and tried.
+Apple Store
+Explored products 
+and left the mall.
+10:02 - 
+10:20 
+(18 min)
+10:24~ 
+10:48
+(24 min)
+11:15~ 
+11:58
+(43 min)
+12:05~ 
+12:25 
+(20 min)
+Cheesecake 
+Factory
+Had lunch.
+——— More examples ———
+10:02 AM
+10:24 AM
+11:15 AM
+12:05 PM
+Total time in mall: ~2 h 23 min
+Visited 4 stores
+Figure 1: AirLog turns passive smartphone sensing into a
+store-level indoor life log. (A) While the user visits a shopping
+mall, the smartphone passively collects Wi-Fi scans and inertial
+measurements, and a publicly available floor-plan image is used
+as spatial context. (B) AirLog reconstructs the store-level trajec-
+tory—what stores were visited, in what order, and for how long—and
+summarizes it into a human-readable journal. (C) The life log is
+queryable: users can ask retrospective questions, such as where
+they went for lunch after visiting a specific store.
+(1) public indoor maps are rarely available as machine-readable
+region layers. While outdoor map services provide struc-
+tured roads, venue boundaries, and POIs, indoor floor-
+level information often exists only as directory images
+rather than labeled region geometry that downstream
+modules can query [21, 22, 38, 39]. Direct reasoning
+over these images is unreliable because current vision-
+language models (VLMs) still struggle with dense map
+text and fine-grained spatial relationships [61].
+(2) Ambient Wi-Fi provides semantic but inherently ambigu-
+ous location evidence. An SSID may reveal that a partic-
+ular store is nearby, but it does not uniquely determine
+whether the user is inside that store, walking past it, or
+located in an adjacent venue. RSSI further varies with
+multipath, crowd blockage, device orientation, and het-
+erogeneous AP placement. Thus, Wi-Fi should be treated
+as a probabilistic semantic anchor rather than a direct
+location estimate.
+In this paper, we propose AirLog, a smartphone-based
+system for store-level indoor life journaling. As shown in
+Fig. 3, given passive smartphone Wi-Fi scans, inertial motion
+recordings, and a crowd-accessible floor-plan image, AirLog
+infers which stores a user likely visited, in what order, and
+for how long, and then summarizes these visits into a life
+journal. Rather than asking an LLM to infer the entire jour-
+nal from raw sensor traces and a floor-plan image, AirLog
+decomposes the task into three structured tasks.
+• First, the map layer converts a human-facing indoor direc-
+tory image into a labeled region map. The parser serializes
+AutoLife (Prior Work)
+AirLog (Ours)
+Wild Indoor Commercial Life
+Context-level
+Store-level Semantic Trajectory
+LLM/ VLM Context Fusion
+General Daily Life
+Multi-Agent + Map Constraints
+Location
+Context
+Wi-Fi
+Context
+Motion
+Context
+Wi-Fi
+IMU
+Map/POI
+LLM/VLM 
+Fusion
+Life
+Journal
+Store A
+(Visit)
+Corridor
+(Pass)
+Store B
+(Visit)
+Waiting Area
+(Wait)
+Store C
+(Visit)
+Wi-Fi
+Semantic
+Agent
+Motion
+Agent
+Map
+Context
+Agent
+Review
+Agent
+Planning
+Agent
+Store-level Trajectory
+GRANULARITY
+SCOPE
+TECHNICAL
+DESIGN
+Agentic System
+GPS / GIS + Online Maps
+Fine Grained Floor Plan Image
+Figure 2: From general daily life logging to store-level in-
+door life journaling. AutoLife captures coarse multimodal context,
+while AirLog uses structured indoor maps and map-constrained
+multi-agent reasoning to reconstruct store-level trajectories.
+this map as a GeoJSON FeatureCollection1, allowing later
+modules to query region geometry and labels instead of
+reasoning over raw pixels. The parser itself does not emit
+corridor polygons, walkable areas, or connectivity. A sepa-
+rate deterministic map-preparation stage derives the corridor
+mask and trajectory graph used by the fusion layer.
+However, indoor directory images are designed for hu-
+man viewing rather than machine parsing. VLMs can miss
+dense labels or distort region boundaries, while generic seg-
+mentation and traditional CV methods are brittle to text,
+icons, reflections, and perspective distortion [8, 55]. AirLog
+therefore uses a geometry-first map parser: GPT Image 2
+canonicalizes the visual layout into a clean region mask, de-
+terministic CV aligns and vectorizes the regions, and GPT-4o
+labels one polygon-masked crop at a time before writing the
+returned label set directly to the source GeoJSON feature.
+• Second, the trajectory layer grounds Wi-Fi and motion ob-
+servations onto the map to recover store visits. Wi-Fi provides
+useful semantic hints: an SSID such as Uniqlo_Guest may
+suggest a nearby Uniqlo. However, the SSID names can be
+ambiguous, abbreviated, and do not reveal whether the user
+actually entered the store, walked past it, or visited a neigh-
+boring store.
+AirLog therefore treats SSIDs as probabilistic semantic
+anchors rather than direct location estimates. It filters and
+aggregates Wi-Fi scans, derives pedestrian dead reckoning
+(PDR) motion from inertial measurements, and jointly eval-
+uates candidate store sequences against map connectivity,
+walking distance, and motion continuity. The decoded se-
+mantic trajectory is then reviewed against these tool outputs;
+1GeoJSON is an industry-standard JSON-based format for encoding map
+features and their geometry [7]. In AirLog, each parser-produced feature
+represents one region using Polygon or MultiPolygon geometry and stores
+its readable strings in properties.labels.
+
+
+AirLog : Store-Level Indoor Life Logging Made Easy
+detected semantic or physical inconsistencies are fed back
+into the loop to improve the final trajectory.
+• Third, the journal layer converts the validated trajectory
+and motion sensor data into a human-readable account of
+the visit. A store trajectory alone does not distinguish, for
+example, spending 25 minutes shopping inside a store from
+briefly passing its entrance. AirLog therefore combines dwell
+time, POI type, motion-derived activity cues, and trajectory
+confidence to derive a sequence of supported behavior events.
+An LLM then summarizes this validated sequence into a
+journal, rather than generating entries directly from raw
+Wi-Fi or sensor observations.
+We evaluate AirLog with two main data sources: large-
+scale Microsoft public indoor traces containing over 19.7k
+labeled Wi-Fi scan samples [35], and a self-collected six-city
+corpus containing 374,567 Wi-Fi observations over 603.0 ac-
+tive hours. From the latter, we construct 185,140 candidate
+SSID–POI pairs for semantic analysis. The public traces sup-
+port quantitative semantic trajectory recovery, while the
+self-collected data support SSID semantic validation and
+end-to-end journal generation validation. We test AirLog’s
+local deployment on edge devices, where sensing data can
+be collected during the day and processed locally afterward.
+On-device execution takes longer than cloud, but it preserves
+privacy by keeping raw data and journals on the user’s de-
+vice, while smaller models still achieve comparable accuracy.
+In summary, this paper makes the following contributions:
+• We propose AirLog, a novel agentic platform for survey-
+free, site services-free indoor life journaling in wild envi-
+ronments using smartphone sensing and crowd-accessible
+map artifacts.
+• We design a geometry-first map parser that converts human-
+facing indoor directory images into labeled region maps
+serialized as GeoJSON, making region polygons and their
+readable labels directly queryable by downstream mod-
+ules.
+• We introduce a grounded semantic trajectory and jour-
+naling layer that treats ambient Wi-Fi SSIDs as semantic
+landmarks, fuses them with PDR and floor-plan topol-
+ogy through graph-constrained inference, and generates
+third-person journals from validated visits rather than raw
+sensor context.
+2
+Related Works
+2.1
+Life Journaling
+Lifelogging systems transform daily observations into records
+for behavior understanding [6, 13, 17, 24]. Existing approaches
+broadly use either vision-based or non-visual sensing. Wear-
+able cameras and smart glasses capture rich egocentric con-
+text [23, 28, 32, 58, 65], but incur high processing costs and
+privacy concerns, while smartphone-based approaches ex-
+ploit motion, wireless, audio, and location signals [31, 54,
+56, 70]. Recent LLM-based systems further translate hetero-
+geneous sensor data into open-vocabulary event descrip-
+tions [2, 11, 29, 36, 45, 51, 62, 63], but largely rely on prompt-
+level context and target outdoor mobility or coarse activities.
+As illustrated in Fig. 2, AirLog instead grounds Wi-Fi and mo-
+tion evidence on indoor map structure to recover store-level
+semantic trajectories before journal generation.
+2.2
+Indoor Localization
+Existing indoor localization methods [1, 12, 25, 48, 71] broadly
+follow fingerprinting- or model-based paradigms. Finger-
+printing methods require site-specific radio measurements
+and machine learning [4, 5, 26, 68], while ranging- or AoA-
+based methods depend on calibrated infrastructure and as-
+sumptions specific to each deployment [60, 71], making both
+costly to deploy across changing commercial environments.
+Prior survey-free localization systems avoid manual site sur-
+veys through crowdsourcing, PDR, map constraints, and
+opportunistic landmarks, but still primarily target metric
+coordinates and typically benefit from observations accumu-
+lated across users or visits [50, 53, 57, 66]. AirLog instead
+targets site-free semantic localization, inferring visited stores
+from a single visit without site-specific fingerprints or accu-
+mulated crowdsourced observations. Wi-Fi SSIDs provide
+a promising survey-free semantic signal by encoding busi-
+ness names and location-related tokens [30, 52, 72]; AirLog
+revalidates this signal at scale and fuses it with PDR and
+map topology to recover store-level trajectories rather than
+isolated place labels.
+2.3
+Map Understanding with VLMs
+Recent work uses VLMs for map reading, landmark reason-
+ing, and navigation from floor-plan images [9, 33, 74], yet
+current LVLMs struggle to jointly handle OCR, topology, and
+route planning [61]. Meanwhile, public indoor-map services
+rarely expose floor-level geometry and topology as queryable
+layers [21, 22, 38, 39], and recovering queryable regions and
+labels from human-facing maps remains challenging. AirLog
+addresses these gaps by converting directory images into
+labeled GeoJSON region maps for reasoning over explicit
+polygons and labels. Existing map-parsing pipelines com-
+bine OCR and classical segmentation [34, 55, 64], but remain
+brittle on photographed directories with text, icons, legends,
+reflections, and perspective distortion; AirLog instead canon-
+icalizes region geometry with image generation, vectorizes
+polygons using deterministic CV, and labels each region with
+a per-region semantic subagent [16].
+3
+A Glimpse of AirLog
+Imagine Bob visiting Rose Park Mall on a Saturday afternoon.
+Before entering, he photographs the mall directory. He first
+enters Uniqlo and browses, then walks past KFC, and later
+
+
+Yun et al.
+Map
+Parsing
+Trajectory
+Construction
+Journal
+Generation
+Floor Plan
+(image)
+In the late morning,
+the user enters a
+shopping mall…
+Life journal
+…
+✓Dining (Eating)
+POI: McDonald's     
+Duration: 1,200s
+✓Retail (Shopping)
+…
+Behavior Inference
+Floor Plan
+Generation
+Semantic
+Trajectory
+Journal
+Generation
+GeoJson
+Sensors
+Readable
+Map
+Trajectory
+Figure 3: AirLog overview. AirLog decomposes life logging into
+three structured layers: (1) Labeled Region Map Construction: a
+geometry-first parser converts an indoor directory image into a
+labeled region map serialized as GeoJSON. (2) Trajectory Reconstruc-
+tion: a trajectory agent grounds sensor data and Wi-Fi semantics
+using downstream map constraints to infer store-level movement.
+(3) Journal Generation: a journal agent summarizes the validated
+trajectory into a third-person life journal.
+spends about 25 minutes at Starbucks. Bob never checks in
+or labels these visits; during the trip, his phone records only
+passive Wi-Fi scans and IMU readings.
+To reconstruct Bob’s path, AirLog must first convert this
+directory photo into a labeled region map (§4). Although
+readable to Bob, the raw image cannot directly serve as map
+context for the trajectory agents, which need explicit store
+geometry and POI labels. The resulting GeoJSON stores la-
+beled region polygons for Uniqlo, KFC, and Starbucks so
+later modules can combine the map with Bob’s Wi-Fi and
+motion observations.
+As Bob walks, his phone periodically observes SSIDs, in-
+cluding Uniqlo_WiFi, KFC_FREE_WiFi, and Starbucks_WiFi.
+However, these SSID observations are sometimes ambigu-
+ous: seeing KFC_FREE_WiFi, for example, does not imply that
+Bob entered KFC: he may simply be walking past it. AirLog
+therefore treats Wi-Fi observations as probabilistic seman-
+tic anchors, uses PDR to estimate how Bob moves between
+observations, and jointly decodes them under the floor-plan
+topology. Said differently, the Wi-Fi SSIDs indicate where
+Bob may be, motion sensing indicates how Bob moved, and
+the map constrains where Bob can move. These cues together
+can help distinguish a brief pass near KFC from sustained
+visits to Uniqlo and Starbucks (§5).
+Finally, AirLog aggregates the reconstructed trajectory
+into store-level visits using dwell time and motion cues, and
+summarizes the validated sequence into a human-readable
+journal, e.g., “In the afternoon, Bob visited Uniqlo, walked
+through the dining area, and later spent about 25 minutes at
+Starbucks.” (§6).
+4
+Constructing Labeled Region Maps from
+Floor-Plan Images
+We begin with the map-representation bottleneck in Bob’s
+example. His floor-plan image contains the store-level in-
+formation needed to reconstruct his visit—where Uniqlo,
+KFC, Starbucks, and other POIs are located—but exposes
+this information only as pixels. As shown in Figure 4(a)–
+(b), a public map may identify the mall while providing no
+queryable floor-level POI geometry, whereas the floor-plan
+image visually encodes both store regions and their names.
+For the trajectory reconstruction in the next section, how-
+ever, AirLog needs more than an image: it needs an explicit
+mapping from each POI label to its polygon so that down-
+stream modules can query where stores are and reason about
+their spatial relationships.
+Challenge: recovering both region geometry and
+readable labels. Turning a human-facing floor-plan im-
+age into such a representation requires solving two coupled
+problems. First, region geometry must be recovered from a
+visually cluttered image. Store boundaries are mixed with
+text, logos, icons, legends, decorative backgrounds, and weak
+separators. Second, each recovered region must be associated
+with the correct readable label set. Recognizing a store name
+alone is insufficient: the system must know exactly which
+region that name describes. A mistake in either geometry
+or semantic association produces an incorrect map and can
+subsequently mislead trajectory reconstruction.
+Why conventional and direct approaches fall short.
+The closest prior work on this problem is the shopping-mall-
+plan parser of Su et al. [55]. Their pipeline first recognizes
+a mall directory, applies threshold/edge preprocessing and
+two-stage region growing to segment individual rooms, and
+then uses OCR-recognized room identifiers to retrieve the
+corresponding room names. This work establishes that ex-
+plicitly coupling segmentation and recognition can recover
+both geometry and semantics from structured shopping-mall
+plans.
+AirLog advances this line of work to more heterogeneous
+human-facing floor-plan images, where text, logos, icons, leg-
+ends, reflections, weak separators, and perspective distortion
+make classical region growing and OCR-based matching brit-
+tle. Rather than requiring an OCR-readable room identifier
+that can be matched back to a directory, AirLog canonical-
+izes the visual layout into explicit region geometry and then
+assigns semantics directly to each recovered region with a
+per-region semantic subagent.
+Other direct alternatives expose complementary limita-
+tions. Classical color-filling methods can merge neighboring
+stores or retain non-POI structures when colors and back-
+grounds vary, while edge detection can mistake text strokes
+
+
+AirLog : Store-Level Indoor Life Logging Made Easy
+(a) Public Map
+(b) Floor-plan regions (GT)
+14
+12
+11
+15
+8-9
+16
+17
+(c) SAM 3
+14
+(d) Color Filling
+14
+12
+11
+15
+17
+(e) Boundary Detection
+12
+11
+15
+16
+14
+(c) AirLog (Ours)
+14
+12
+11
+15
+16
+8-9
+17
+Background
+wrongly recognized
+Multiple
+Stores Merged
+Icons Wrong
+Recognized
+Sensitive
+to noise
+Stores
+missing
+Sensitive
+to noise
+Figure 4: From public maps to labeled region maps. (a) The
+public map provides venue-level context but lacks floor-level region
+geometry. (b) The floor-plan image contains the annotated regions
+and readable labels. (c) SAM 3 absorbs background structures and
+merges adjacent regions. (d) Color Filling is distracted by icons and
+other visual structures. (e) Boundary Detection extracts text and
+noise as candidate boundaries. (f) AirLog more closely recovers the
+annotated region geometry and labels. This example is qualitative;
+aggregate results appear in Table 1.
+and decorations for region boundaries. Generic segmenta-
+tion models such as SAM 3 [8] face a different mismatch:
+they are designed primarily for object-like regions in natural
+images rather than tenant-scale graphic regions, and can
+therefore absorb background structures or merge adjacent
+POIs. Semantic extraction alone does not solve the problem
+either. Standalone OCR can miss small, stylized, rotated, or
+low-resolution labels, and even a correctly recognized string
+does not specify which region polygon it belongs to. A full-
+map VLM faces a related coupling problem: it must recognize
+every POI, predict each label’s position, and bind that posi-
+tion to a region. A correctly recognized name can therefore
+still be omitted, misplaced, or attached to the wrong polygon.
+Figure 4 illustrates representative geometry failures. Appen-
+dix A.4 pairs two exact-region OCR failures in Figure 18 and
+places the coordinate-binding and geometry-to-semantics
+mechanisms together in Figure 19, beside the claims that
+they support.
+These observations motivate a geometry-first, sequential
+factorization. Instead of asking one model to jointly recover
+region boundaries, recognize readable labels, predict label
+coordinates, and bind labels to regions, AirLog first recov-
+ers explicit region polygons and then uses each polygon to
+define one constrained semantic task. As shown in Figure 5,
+the geometry stages in (a)–(d) produce a geometry-only re-
+gion map serialized as GeoJSON. Each recovered polygon is
+then projected onto the original floor-plan image to produce
+the polygon-masked crop in (e). The per-region semantic
+subagent processes one crop at a time in (f), and its returned
+label set is written directly to the same GeoJSON feature
+(a)Input 
+floor-plan crop
+(A) Geometry pass
+(b) Clean 
+region mask
+(c) CV based Mask 
+Alignment
+(d) CV based 
+Region polygons
+(B) Semantic pass
+(g) Labeled
+GeoJSON output
+FeatureCollection
+{
+"properties": {
+"labels": 
+["Nordstrom"]
+}
+"geometry": 
+{"type":"Polygon"
+, ...
+}}}
+Apply each 
+polygon 
+as a mask
+pandora
+Phone Mania
+LUNA
+(f) Semantic 
+subagent
+VLM
+(e) Polygon-masked 
+crop
+Figure 5: Geometry-first map-parsing pipeline. From (a) an
+input floor-plan crop, AirLog generates (b) a clean region mask,
+performs (c) mask alignment, and extracts (d) region polygons. Each
+polygon produces (e) a polygon-masked crop for (f) the per-region
+semantic subagent. The returned label set is written directly to its
+source feature, producing (g) a labeled region map in GeoJSON.
+in (g). The current pipeline therefore predicts no label co-
+ordinate and requires no separate polygon–label binding
+stage.
+4.1
+Geometry Pass: Recovering Regions
+The geometry pass addresses the first question: where are
+the regions? Directly extracting boundaries from Figure 5(a)
+is unreliable because region geometry is entangled with text,
+logos, icons, and background variation. AirLog therefore
+first canonicalizes the map’s visual appearance before ex-
+tracting precise geometry. Starting from the input crop in (a),
+AirLog uses GPT Image 2 [43] to generate the clean region
+mask in (b). The model redraws floor-plan regions as solid
+regions over a uniform background while suppressing text,
+icons, legends, and other visual clutter. The generated colors
+carry no POI semantics; they only make individual spatial
+regions explicit. This use of image generation is intentional:
+the generative model handles heterogeneous appearance,
+while deterministic processing remains responsible for spa-
+tial precision.
+The generated mask cannot be used directly because image
+generation may introduce a small global translation or scale
+change relative to the source floor-plan image. AirLog there-
+fore aligns structural gradients between the generated mask
+and source image under a restricted transformation consist-
+ing of uniform scaling and horizontal and vertical transla-
+tion, producing (c). Rotation and non-rigid deformation are
+excluded, and the system falls back to the identity trans-
+formation when reliable alignment cannot be established.
+Deterministic CV then separates the uniform background
+from foreground blocks, extracts 4-connected components,
+traces exterior contours and holes, and converts them into
+valid Polygon or MultiPolygon features. Candidates with
+insufficient support in the original image are removed. The
+output in (d) is a geometry-only map that explicitly repre-
+sents the floor-plan regions but does not yet label them.
+
+
+Yun et al.
+4.2
+Per-Region Semantic Subagent
+Once the region polygons are fixed, AirLog uses them to
+constrain semantic labeling. Here, per-region describes the
+invocation unit: the subagent processes one recovered region
+at a time, while the region polygon is used only to construct
+its input crop. For each polygon, the system rasterizes its
+exact geometry over the original floor-plan image, retains
+source pixels inside the polygon, suppresses pixels outside
+the polygon and inside any holes, and crops the result to the
+polygon’s bounding box. This produces one polygon-masked
+crop per GeoJSON feature while preserving the printed POI
+name and excluding neighboring labels, legends, and deco-
+rations.
+The current system invokes this GPT-4o semantic sub-
+agent once for each polygon-masked crop. Under the shared
+visible-label policy, the subagent returns "labels":[...]
+containing all readable strings in the target region. Because
+each crop is generated from a known polygon, the returned
+labels are written directly to that same feature. In contrast to
+the earlier full-map baseline, the current method predicts no
+label coordinates and requires no point-in-polygon, nearest-
+neighbor, or learned cross-region binding stage.
+4.3
+Generate GeoJSON
+After all recovered regions are labeled, AirLog exports a Geo-
+JSON FeatureCollection. Each feature contains Polygon
+or MultiPolygon geometry, along with a canonical label
+field, properties.labels, containing the recognized strings.
+The parser does not emit name, category, confidence, cor-
+ridor polygons, walkable areas, traversability, or connectivity
+fields. The result is a machine-queryable labeled region map.
+For Bob’s example, Uniqlo, KFC, and Starbucks become la-
+beled region polygons that later modules can query directly.
+A separate deterministic map-preparation stage derives the
+corridor mask and navigability graph used in the next sec-
+tion; these downstream artifacts are not part of the parser’s
+GeoJSON output.
+5
+Semantic Trajectory Reconstruction
+Given the labeled region map obtained from §4, AirLog next
+reconstructs the user’s store-level trajectory from Wi-Fi and
+inertial sensing. Rather than asking an agent to directly pre-
+dict locations, in AirLog we propose a multi-agent pipeline
+(§5.1) that coordinates semantic Wi-Fi anchoring (§5.2), PDR-
+based motion estimation (§5.3), and map-constrained infer-
+ence (§5.4) to construct a trajectory that is both semantically
+plausible and physically feasible.
+Observation / Inference Result 
+Feedback for
+Re-planning 
+Motion Context 
+Map Constraints 
+Location
+Context 
+Planning Agent
+(Re-planning & Active Sensing)  
+1. Wi-Fi Semantic Agent 
+(Location Context) 
+2. Motion Agent 
+(Motion Context) 
+3. Map Context Agent 
+(Spatial Constraints) 
+4. Context Fusion & Review Agent 
+(Review, Reasoning & Fusion) 
+Wi-Fi
+Scans 
+LLM 
+Reasoning   
+Semantic 
+Location 
+Context 
+IMU
+Data 
+Motion 
+Estimation 
+Motion
+Context 
+GeoJSON 
+Map
+Navigability 
+Graph
+Review &
+Understand
+Viterbi 
+Inference Tool 
+Trajectory 
+Estimate 
+Set Next 
+Goal / Path 
+Collect Data 
+Supporting 
+Data / Tools 
+POI / Store 
+Database 
+Venue 
+Information
+Time & 
+Calendar
+Figure 6: Trajectory Reconstruction in AirLog. The framework
+organizes three complementary contexts for indoor trajectory re-
+covery: Wi-Fi Semantic Agent derives semantic location context,
+Motion Agent derives motion context, and Map Context Agent
+derives GeoJSON map constraints. The Context Fusion & Review
+Agent integrates these inputs and invokes structured inference to
+recover a geometrically consistent, store-level trajectory.
+5.1
+Agent-Orchestrated Trajectory
+Reconstruction
+Figure 6 illustrates the agent-orchestrated context-fusion
+pipeline. Before processing each episode, a Planning Agent
+selects and schedules the required modules in a ReAct-style
+loop [67], revising the plan when evidence is missing or con-
+flicting. AirLog organizes the resulting evidence into three
+complementary context streams: Wi-Fi semantic context for
+location candidates, motion context for relative displacement
+and heading changes, and map context for physically admis-
+sible transitions. A structured fusion decoder combines these
+contexts to recover a globally consistent trajectory, while a
+review stage detects failures and triggers targeted replanning
+when necessary.
+5.2
+Wi-Fi Semantic Agent
+Validating SSID semantics in the wild. Prior work has
+shown that Wi-Fi SSIDs can encode location and service
+information [52]. We re-evaluate their usefulness in cur-
+rent commercial environments using Wi-Fi observations col-
+lected across six major cities (Table 6). Associating business-
+class SSIDs with nearby OpenStreetMap POIs yields 185,140
+candidate SSID–POI pairs. As summarized in Table 7, SSID
+semantics remain observable at scale, but lexical matching
+alone is too sparse and noisy to serve as a direct signal (repre-
+sentative failure cases in Table 8). We therefore treat SSIDs as
+weak semantic evidence and jointly reason over SSID strings,
+RSSI rank, POI names, and map context. We further verify
+that SSID distributions are venue- and floor-specific using
+cross-session observations from a public benchmark [35],
+spanning over 5.5 hours of data across 2 venues and 14 floors.
+Simple SSID-set Jaccard matching achieves 87.88% accuracy
+in identifying the correct site–floor pair, suggesting that
+
+
+AirLog : Store-Level Indoor Life Logging Made Easy
+SSIDs provide a useful cue for automatic floor identification
+without site-specific surveys.
+5.2.1
+SSID Semantic-noise filtering. Although SSID strings
+provide useful place-level cues, raw Wi-Fi scans contain
+substantial semantic noise that can mislead the anchoring
+agent and inflate the LLM context. We make two observations
+from our traces.
+• Generic infrastructure SSIDs (e.g., T-mobile, China-mobile)
+are prevalent but they provide less location information.
+Many visible SSIDs correspond to carrier hotspots, venue-
+wide guest networks, or router-default names. These net-
+works provide little store-specific evidence and would
+increase LLM input length, so we remove them with a
+keyword blocklist.
+• The strongest RSSI is not necessarily the nearest or most
+useful POI cue. Indoor RSSI is unstable under multipath
+propagation, wall attenuation, crowd blockage, AP place-
+ment, and transmit-power variation [25, 71].
+Therefore, AirLog does not assign location using the strongest
+SSID alone. After filtering, we aggregate scans into sliding
+windows, represent each SSID by its maximum RSSI within
+the window, and pass the top-ranked SSID-RSSI pairs to the
+LLM as soft semantic evidence. This allows the model to
+reason over multiple possible store cues instead of relying
+on a single nearest-signal rule. Empty windows are dropped,
+and gaps longer than 600 s are flagged to avoid incorrect PDR
+integration across disconnected sessions.
+5.2.2
+LLM-based semantic anchoring. After semantic-noise
+filtering, each Wi-Fi window is represented by a compact
+set of top-ranked SSID–RSSI pairs. AirLog then converts
+this evidence into store-level semantic anchors. We formu-
+late SSID-to-POI grounding as a language understanding
+task [30]: the model must interpret noisy SSID strings, abbre-
+viations, guest-network names, and RSSI ranks in the con-
+text of the venue’s POI list and floor-plan topology. For each
+window, AirLog constructs a structured prompt containing
+three inputs: the venue’s POI names, map-derived spatial
+descriptions, and the filtered top-𝑁SSID–RSSI pairs. The
+prompt instructs the model to treat RSSI as relative proximity
+evidence rather than a deterministic distance measurement;
+the full prompt is shown in Appendix D.2.
+To provide spatial grounding, we augment each POI with
+a natural-language descriptor derived from the navigability
+graph. The descriptor summarizes the POI’s relative position
+and nearby stores, e.g., “Uniqlo is north of KFC and adjacent
+to the main corridor entrance,” as illustrated in Figure 7.
+These relational cues help the model disambiguate SSIDs that
+are lexically similar or spatially overlapping, and prevent it
+from treating all name matches as equally plausible. Rather
+than forcing a single location decision, the model outputs all
+Filtered Wi-Fi Window
+System Role: You are a precise positioning assistant. 
+Output ONLY valid JSON.
+SYSTEM TASK: Identify ALL possible store locations 
+for each timestamp...
+MAP NODES: [Uniqlo, KFC, Zara, Starbucks, ...]
+INSTRUCTIONS:
+1. List ALL SSIDs that match the Map Nodes.
+2. Do NOT limit to one store per timestamp.
+Prompt
+--- WIFI WINDOW (T=25.0s) ---
+1 KFC_FREE_WiFi    : -48 dBm
+2 Uniqlo_Store     : -54 dBm
+3 MALL_FREE_WIFI   : -65 dBm
+4 TP-Link_AP_98    : -78 dBm
+5 ChinaNet_Auto    : -82 dBm
+*... (5 more signals omitted)*
+Window size: 
+Δw=1s
+LLM
+{
+  "results": [
+    {
+      "time": 0.5,
+      "locs": [
+        {"name": "Uniqlo", 
+         "conﬁdence": 0.9},
+        {"name": "KFC", 
+         "conﬁdence": 0.4}
+      ]
+    },
+    ...
+  ]
+}
+Structured JSON Output
+Spatial Context Description:
+Uniqlo: North of KFC, adjacent to the main corridor entrance.
+Zara: Next to Starbucks, across from the information desk.
+H&M: Between Starbucks and Sephora …
+Map Nodes: 
+[Uniqlo, KFC, Zara, Starbucks, H&M, ...] 
+Spatial Context Description & POI Context
+Figure 7: LLM-based semantic anchoring pipeline. Wi-Fi RSSI
+observations, spatial context, and POI context are combined into
+a structured prompt, producing multi-label POI hypotheses with
+confidence scores.
+plausible nearby stores with confidence scores between zero
+and one.
+The resulting predictions are post-processed into semantic
+anchors. Each predicted POI name is matched to the corre-
+sponding GeoJSON feature and mapped to its polygon cen-
+troid or store region in the navigability graph. Generic out-
+puts such as floor identifiers, restroom tokens, and corridor
+labels are discarded. Each surviving tuple (𝑡,𝑛,𝑐), consisting
+of timestamp 𝑡, store name 𝑛, and confidence 𝑐, becomes a
+probabilistic claim that the user was near store 𝑛at time 𝑡.
+These sparse anchors provide semantic location evidence,
+which complements the continuous but drift-prone PDR es-
+timate used next.
+5.3
+Motion Context via PDR
+Wi-Fi semantic anchors provide place-level cues but are
+sparse and intermittent, leaving gaps between valid obser-
+vations. AirLog bridges these gaps with continuous relative
+motion from the phone’s inertial sensors using a standard
+PDR pipeline [25, 31, 59]: step detections and rotation-vector-
+derived headings are integrated into relative displacement
+and heading change between consecutive sensing windows.
+Wi-Fi anchors provide semantic positions, while PDR pro-
+vides continuous motion between them. The earliest high-
+confidence anchor can initialize the PDR path when no sur-
+veyed starting point is available. Residual heading errors are
+corrected during fusion using well-separated anchors. PDR
+remains a motion context rather than a store-level trajectory
+because its errors accumulate over time [37].
+
+
+Yun et al.
+5.4
+Context Fusion & Review Agent
+Prior Wi-Fi IMU floor-plan fusion systems can learn dense
+location histories by training fusion models over collected
+traces [27]. AirLog targets a different setting: wild indoor
+venues where no site-specific fingerprint survey or training
+trajectory is available. We therefore use a semantic-priority
+Viterbi decoder that performs explicit probabilistic optimiza-
+tion over the GeoJSON-derived navigability graph G [15, 49],
+as shown in Figure 8. The decoder combines three scores. Wi-
+Fi semantic anchors provide the emission term: nodes near
+a high-confidence candidate store receive higher likelihood.
+PDR provides the transition term: candidate graph edges
+are favored when their distance and heading agree with the
+observed displacement and turn angle. The map provides the
+hard topological constraint: Viterbi only considers adjacent
+nodes in G, which restricts the search to physically walkable
+routes. We summarize the decoded trajectory as
+ˆ𝑆1:𝑇= arg max
+𝑆1:𝑇∈G
+∑︁
+𝑡
+𝛽𝐸𝑡(𝑆𝑡) + 𝛼𝐴𝑡(𝑆𝑡−1,𝑆𝑡)
++ 𝛾𝐷𝑡(𝑆𝑡−1,𝑆𝑡) + 𝐶𝑡(𝑆𝑡−1,𝑆𝑡)
+
+,
+(1)
+where 𝐸𝑡is semantic consistency with Wi-Fi anchors, 𝐴𝑡
+and 𝐷𝑡are IMU heading and distance consistency, and 𝐶𝑡
+is an anchor-based heading-calibration bonus when con-
+secutive high-confidence semantic anchors imply a reliable
+direction. Concretely, for a candidate transition from node
+𝑢to node 𝑣, with edge direction 𝜃(𝑢, 𝑣), edge length ℓ(𝑢, 𝑣),
+IMU motion primitive (𝑑𝑡, Δ𝜙𝑡), and active semantic anchors
+ˆ𝐿𝑡= {(𝑛𝑗,𝑐𝑗)}, these terms are
+𝐸𝑡(𝑣) =
+∑︁
+(𝑛𝑗,𝑐𝑗)∈ˆ𝐿𝑡
+𝑐𝑗
+ 
+−
+dist(𝑣, P𝑛𝑗)2
+2𝜎2
+!
+,
+(2)
+𝐴𝑡(𝑢, 𝑣) = log max (cos(𝜃(𝑢, 𝑣) −Δ𝜙𝑡), 𝜖) ,
+(3)
+𝐷𝑡(𝑢, 𝑣) = −(𝑑𝑡−ℓ(𝑢, 𝑣))2 .
+(4)
+Here P𝑛𝑗denotes the polygon or centroid of the POI named
+by anchor 𝑛𝑗, and 𝜎controls the spatial bandwidth of se-
+mantic evidence. In short, Wi-Fi estimates where the user
+is likely to be, IMU estimates how the user moved, and the
+map defines where the user can move.
+Review and Feedback Loop: This optimization produces
+an initial trajectory estimate, which AirLog then evaluates
+using diagnostic signals such as position jumps, stuck seg-
+ments, and PDR-to-map scale drift. If these indicate a low-
+quality decode, a deterministic grid search re-runs Viterbi
+over preset (𝛼, 𝛽,𝛾, calib_weight) configurations and keeps
+the lowest-variance result; if issues persist, the Planning
+Agent inspects the flagged windows using read-only Wi-Fi,
+anchor, spatial, and PDR context and selects one bounded cor-
+rective action, such as re-running semantic anchoring with
+adjusted parameters or known SSID mappings, reweighting
+WiFi Semantic (Emission) 
+How well each node 
+matches semantic anchors 
+IMU Motion (Transition)
+Topological Map (Constraints) 
+Only allow transitions along
+walkable edges 
+Viterbi ﬁnds the most likely path that best 
+explains both WiFi semantics and IMU motion 
+under map constraints 
+Semantic-Priority Viterbi Fusion 
+Most Likely Path 
+How well movement
+matches distance &
+heading on map 
+Figure 8: Semantic-priority Viterbi fusion. Wi-Fi semantic an-
+chors score where the user is likely to be, PDR motion primitives
+score how the user could move, and the GeoJSON graph restricts
+the search to physically walkable transitions. The decoder first
+estimates a globally consistent trajectory, which is then reviewed
+by the multimodal feedback agent.
+14:12-14:57
+15:07-15:42
+16:00-16:51
+17:15-17:41
+17:41-18:05
+Behavior Inference 
+Life journal
+"A productive afternoon! After 
+grabbing a latte at Starbucks, The 
+user spent some time at Zara and 
+then headed to Apple to check out 
+the new gadgets..." 
+Reconstructed Trajectory 
+& Map Information
+Motion Calibration
+"browsing","passing",...
+(low linearity, few steps)
+Candidate Motion
+POI: Food Court
+Behavior: Browsing
+Dwell Time: 3 min 
+(18:30-18:33)
+Motion Disambiguation 
+LLM
+PDR/
+IMU 
+signals
+LLM
+LLM
+Figure 9: Workflow of Diary Generation. The reconstructed
+trajectory is aggregated into store-level visits by a behavior infer-
+ence module (A). A motion calibration module (B) then refines each
+activity label using PDR geometry and location context. Finally, a
+diary agent (C) synthesizes the calibrated behavior sequence into a
+third-person Life Journal.
+the fusion decoder within a fixed valid range, falling back
+to substring-based Wi-Fi matching, patching a single behav-
+ior label, or accepting the result. Only Wi-Fi anchoring and
+fusion may be revisited, each within a small retry budget,
+while map parsing and PDR are fixed; the investigation itself
+is capped by a round limit and a wall-clock budget, after
+which the best result found is used. The Planning Agent’s de-
+cision calls use a low sampling temperature, so repeated runs
+can select different parameter values within these bounded
+ranges rather than always reaching an identical trajectory.
+6
+Journal Generation
+Spatial fusion produces a corrected trajectory, but the re-
+sult remains a localization sequence rather than a human-
+readable account. As shown in Fig. 9, AirLog transforms
+this sequence into a diary through three stages: behavior
+
+
+AirLog : Store-Level Indoor Life Logging Made Easy
+inference (A), motion calibration (B), and journal generation
+(C).
+6.1
+Behavior Inference
+As shown in Fig. 9(A), behavior inference converts the
+fused trajectory into store-level visits. For each POI, AirLog
+merges consecutive contacts inside or near the store region,
+producing an enter time, exit time, dwell duration, semantic
+confidence, and local motion summary. Consecutive con-
+tacts are merged using a trajectory-adaptive temporal toler-
+ance, allowing segmentation to adapt to different sampling
+rates. Short contacts are treated as passing behavior, whereas
+longer dwell periods form candidate visits. Structural POIs
+such as corridors, elevators, and restrooms are excluded re-
+gardless of dwell time.
+For each candidate visit, the inference agent uses the
+store name and category, dwell duration, neighboring POIs,
+and an IMU-derived activity cue to infer the most likely
+behavior. The motion cue can come from either a conven-
+tional smartphone activity recognizer or a zero-shot activity
+model [29, 31, 54]. The output is a compact behavior se-
+quence containing the store, time interval, dwell duration,
+inferred action, and confidence.
+6.2
+Journal Generation
+Motion Calibration. As illustrated in Fig. 9(B), motion cali-
+bration refines candidate activity labels using PDR-derived
+motion features and location context. Step count, displace-
+ment, path linearity, and mean speed first produce a candi-
+date label from stationary, walking, browsing, transit, which
+an LLM then disambiguates using the store category, dwell
+time, and neighboring POIs. Before narration, an evidence-
+filtering step removes unreliable WiFi anchors. Specifically,
+a POI’s WiFi evidence is discarded when its active window
+exceeds a predefined fraction of the visit while scan den-
+sity remains low, indicating repeated background detections
+rather than a concentrated visit. This rule overrides even
+high-confidence WiFi anchors.
+Journal Generation. As shown in Fig. 9(C), journal gener-
+ation transforms the validated visits and calibrated actions
+into a third-person Life Journal. The diary agent first con-
+structs a structured outline containing the chronological
+flow, dominant activity, inferred purpose, and salient visit
+characteristics, and then rewrites the outline as a fluent nar-
+rative. This two-stage process keeps the journal grounded in
+validated behaviors while allowing natural transitions and
+varied phrasing.
+7
+Implementation
+Prototype. AirLog is implemented as a Python prototype.
+A preprocessing module normalizes timestamps, converts
+Table 1: Map-parsing results on the complete benchmark.
+Higher is better. The two AirLog rows share identical region ge-
+ometry and differ only in semantic-labeling configuration.
+Method
+Area F1 ↑
+Region
+Purity ↑
+Matched
+Label F1 ↑
+Color Filling
+0.277
+0.510
+0.523
+Su et al.-style Boundary Detection
+0.144
+0.468
+0.506
+SAM 3
+0.037
+0.306
+0.155
+AirLog w/o semantic subagent
+0.705
+0.767
+0.734
+AirLog w/ semantic subagent
+0.705
+0.767
+0.814
+raw Wi-Fi records into SSID–RSSI snapshots, resamples IMU
+streams for PDR, and serializes each session into a struc-
+tured JSON file. The JSON representation contains Wi-Fi
+windows, PDR motion primitives, and map context includ-
+ing POI names, polygon centroids, and graph-based spatial
+descriptors. To facilitate reproducibility, we will publicly re-
+lease the implementation and experimental configurations
+upon publication.
+Model backends. We evaluate AirLog with both closed-
+source and open-weight LLMs. GPT-4o is the default back-
+bone, while GPT-5.4, Claude Sonnet 4.6, gpt-oss-120b, Gemma
+4, Qwen 3, and DeepSeek-R1 are used for cross-model eval-
+uation [3, 40, 41, 44]. The map-semantic comparison addi-
+tionally uses GPT-5.5 [42]. Across backbones, preprocessing,
+graph construction, Viterbi parameters, prompts, and post-
+processing remain fixed.
+Prompting and tools. AirLog uses a lightweight ReAct-
+style agent loop [67], with LLMs handling semantic reason-
+ing and deterministic Python modules performing validation
+and spatially constrained trajectory fusion. Agent outputs
+follow structured JSON schemas for semantic anchoring,
+behavior inference, and diary generation.
+Public dataset. We use the sample data from Indoor Loca-
+tion Competition 2.0 [35], which provides smartphone sensor
+traces, Wi-Fi scans, floor-plan images, and GeoJSON maps
+from two large shopping malls in Hangzhou. Site 1 covers five
+floors with 642 traces totaling 563.8 minutes, while Site 2
+covers nine floors with 429 traces totaling 290.8 minutes.
+Overall, the dataset contains 1,071 traces, 19,712 Wi-Fi scans,
+and 8,704 surveyor-labeled waypoints. Each trace provides
+time-synchronized sensor streams and surveyed waypoints
+with absolute coordinates, enabling quantitative evaluation
+of zero-shot trajectory reconstruction in multi-floor indoor
+environments.
+Self-collected dataset. We collect smartphone traces us-
+ing Sensor Logger and export the recorded data for offline
+processing [10]. A total of 603.0 hour data was collected
+(Table 6). For each experiment, a volunteer starts record-
+ing before entering the venue and carries the phone natu-
+rally while performing ordinary activities. Wi-Fi scans are
+recorded at the application default interval 10 s, and IMU
+
+
+Yun et al.
+streams are resampled to 50 Hz before PDR processing. Each
+session is paired with a venue floor plan and a manual refer-
+ence record of visited stores and dwell intervals. The floor
+plan is captured by the volunteer as a photo of the mall di-
+rectory before the session. AirLog uses readable floor-plan
+images obtained from public venue websites, online map
+directories, or crowdsourced photos when available. We use
+the self-collected dataset primarily for Wi-Fi semantics anal-
+ysis and journaling validation. For journaling evaluation, we
+recruited 11 volunteers to annotate a subset of the traces in
+Table 6 with reference journals, yielding a total of 33 h 37 min
+of recorded time, of which 20 h 55 min correspond to indoor
+activity.
+8
+Evaluation
+8.1
+Map Parsing Evaluation
+Metrics. We report three complementary scores. (1) Area
+F1 measures tolerant one-to-one region recovery, capturing
+whether annotated regions are successfully recovered with-
+out requiring exact boundaries. (2) Region Purity measures
+the fraction of predicted area overlapping annotated fore-
+ground, reflecting how well predictions avoid background
+and other clutter. (3) Matched Label F1 evaluates semantic
+label accuracy after geometry-based matching between pre-
+dicted and ground-truth regions. Detailed matching rules,
+averaging procedures, and label normalization are provided
+in Appendix A.1.
+Baselines. We compare three visual pipelines and two AirLog
+semantic-labeling configurations. (1) Color Filling groups
+connected regions by color and binds OCR labels by spa-
+tial overlap. (2) Boundary Detection / Su et al. represents the
+classical edge/region-growing approach in mall-plan pars-
+ing [55], with OCR applied separately to candidate regions;
+because no official implementation is used, this is our imple-
+mentation of the procedure described in the paper. (3) SAM
+3 [8] uses the fixed text-prompted configuration documented
+in Appendix A.2, followed by full-crop OCR with the same
+spatial binding strategy as Color Filling. We also report a
+uniform threshold-0.5 SAM 3 sensitivity rerun in the appen-
+dix. Since these methods differ in both region extraction and
+label binding, Table 1 presents an end-to-end pipeline com-
+parison rather than a controlled comparison under a shared
+semantic-labeling module.
+The two AirLog configurations use identical frozen pre-
+dicted polygons and the same visible-label policy. Full-map
+uses GPT-5.5 to jointly predict labels and coordinates for
+the entire map before binding them to polygons, whereas
+the current configuration invokes GPT-4o on each polygon-
+masked crop and writes the returned label list directly to the
+corresponding GeoJSON feature.
+Table 2: Semantic labeling comparison. The GPT-4o per-region
+run contains 1,920 completed semantic records from 1,927 applica-
+tion attempts; all seven extra attempts were recovered by retries
+and no record was excluded.
+Model
+Input
+Calls Tokens (I/O) Time (s) Label F1
+GPT-5.5 Full map
+24/24 127.4k/137.0k
+1,984.0
+0.734
+GPT-4o Region crop 1,920/1,927
+524.2k/24.6k
+1,815.9
+0.814
+Setting and map complexity. The complete benchmark
+contains 24 floor-plan images spanning both public web-
+published mall directories and in-the-wild photographs. Twenty
+correspond to publicly discoverable malls with official web-
+sites and public directory/floor-plan images; the remaining
+four were photographed during our in-the-wild sensing col-
+lection and may contain realistic perspective distortion, il-
+lumination variation, and color shift. Region geometry was
+manually maintained in QGIS against the exact pixel-aligned
+crop. GPT-5.5 was used only as an auxiliary label-auditing
+tool, and all final ground-truth labels were manually verified
+against the source images. All method–image evaluations
+completed under evaluator v8; the archived benchmark snap-
+shot and runtime details are documented in Appendix A.2.
+Figure 10 summarizes the density of OCR text relative to
+geometry-valid annotated regions, characterizing visual clut-
+ter rather than recognition accuracy.
+Region recovery. AirLog substantially outperforms the vi-
+sual baselines in both Area F1 and Region Purity, indicating
+more complete region recovery and cleaner foreground lo-
+calization. Area F1 increases from 0.277 for Color Filling to
+0.705 for AirLog, while Region Purity increases from 0.510
+to 0.767. These scores reflect tolerant region matching and
+foreground coverage, respectively, rather than exact pixel
+overlap. The conclusion is unchanged under standard IoU-
+based metrics: AirLog obtains 0.590 Region F1@0.5 and 0.475
+PQ@0.5, compared with 0.229 and 0.199 for Color Filling;
+Appendix A.1 reports the full sanity check.
+Semantic-labeling comparison. Table 2 compares the two
+production semantic-labeling configurations under identical
+frozen region geometry and the same visible-label policy.
+Calls denotes completed semantic records/application at-
+tempts, Tokens reports aggregate input/output tokens, and
+Time is the summed model-response latency rather than
+wall-clock batch time. Label F1 is the Matched Label F1 de-
+fined above. Because the backend model and input scope
+change together, this is an operational comparison rather
+than a controlled ablation; we do not attribute the difference
+independently to model choice or region cropping.
+Semantic labeling. With region geometry and visible-label
+policy fixed, the GPT-4o region-crop configuration reaches
+0.814 Matched Label F1 (precision 0.789, recall 0.842), com-
+pared with 0.734 for full-map GPT-5.5 (precision 0.728, recall
+
+
+AirLog : Store-Level Indoor Life Logging Made Easy
+50
+100
+150
+Number
+0.0
+0.5
+1.0
+CDF
+Polygons
+Labels
+Figure 10: Floor-plan image
+complexity.
+(a) Ground truth
+(b) AirLog (Ours)
+(c) SenLLM
+(d) AutoLife
+Figure 11: Spatial distribution of subset hit/miss results across localization methods. Green dots
+indicate waypoints where the GT location falls within the predicted subset; red dots indicate misses.
+Rule
+SenLLMAutoLife Ours
+Different Methods
+0
+20
+40
+60
+80
+100
+Subset Hit (%)
+Subset Hit
+Avg Hit Ratio
+Rule
+SenLLMAutoLife Ours
+Different Methods
+0
+20
+40
+60
+80
+100
+Recall (%)
+Recall
+Avg SeqSim
+0
+20
+40
+60
+80
+100
+Avg Hit Ratio (%)
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Avg SeqSim
+(a) Subset Hit & Avg Hit Ratio
+(b) Recall & Avg SeqSim
+Figure 12: Trajectory reconstruction evaluation.
+0.740). The 0.080 difference describes the two deployed con-
+figurations only because model and input scope change to-
+gether. The GPT-4o run completed all 1,920 semantic records;
+seven transient failed attempts across six polygons were re-
+covered within the retry budget, so no sample was excluded
+from evaluation.
+8.2
+Store-Level Trajectory & Visit Recovery
+Next, we evaluate how accurately AirLog reconstructs a
+user’s trajectory and recovers the stores visited along the
+trajectory.
+Metrics. We evaluate recovery at two complementary lev-
+els. For point-level trajectory recovery, (1) Subset Hit mea-
+sures whether the predicted set covers all ground-truth POIs,
+while (2) Avg Hit Ratio measures the fraction of ground-truth
+POIs covered, using the five nearest POIs and an 8 m spatial
+threshold with a ±5 s temporal window. These metrics are
+evaluated on the public benchmark with surveyed ground
+truth (§7). For store-level visit recovery, we further evaluate
+self-collected diary cases (§7), where (3) Recall measures
+recovered ground-truth visits and (4) SeqSim measures or-
+dering consistency between predicted and ground-truth POI
+sequences using normalized edit distance.
+Baselines. We compare AirLog against three baselines. (1)
+SenLLM, inspired by Penetrative AI [62], is a pure LLM rea-
+soning baseline that receives the same formatted sensing
+context and infers the POI sequence from motion and Wi-
+Fi data. (2) AutoLife [63] is adapted to indoor settings by
+using the provided floor-plan image as VLM location con-
+text instead of a GPS-queried map. (3) Rule-based Trajectory
+Reconstruction assigns each timestamp to the POI with the
+strongest nearby Wi-Fi signal.
+Results. Figure 12 shows that AirLog outperforms all base-
+lines, improving Subset Hit and Avg Hit Ratio over AutoLife
+by 24.8% and 24.6%, respectively. It also achieves 84.6% Recall
+Figure 13: Comparison of generated journals. Underlined italic
+denotes ground-truth POI names. Red denotes hallucinated or in-
+correct content. More details in the Appendix C.
+and 0.778 SeqSim, compared with 63.6% and 0.327 for Au-
+toLife. The limited gain of AutoLife over SenLLM suggests
+that floor-plan images alone are insufficient for reliable in-
+door trajectory reasoning, whereas AirLog combines map
+topology, Wi-Fi semantics, and motion continuity for more
+accurate and physically consistent reconstruction; remaining
+errors mainly occur in anchor-sparse corridors and dense
+areas with overlapping Wi-Fi semantics (Fig. 11).
+8.3
+Journalling Recovery
+Metrics. To evaluate the quality of generated journals, we
+measure their similarity to reference journals using chrF [46]
+and BERTScore [73]. We also report hallucination rate, which
+is marked as hallucinated if the response contains content
+that is not supported by evidence and is factually inconsistent
+with the target context.
+Settings: We recruit 11 volunteers to collect indoor shopping
+traces. Each participant carries a smartphone during natural
+shopping activities while the device records Wi-Fi scans and
+IMU data. After each session, the participant writes a concise
+reference journal describing the stores visited, dwell periods,
+and main activities.
+Results. Table 3 shows that AirLog achieves the best per-
+formance across all metrics. It reduces the hallucination rate
+from 0.667 for SenLLM and 0.636 for AutoLife to 0.000, while
+improving chrF by 26.9% and 10.2%, and BERTScore F1 by
+53.3% and 23.7%, respectively. Figure 13 further shows that
+the baselines introduce unsupported stores, whereas AirLog
+
+
+Yun et al.
+Table 3: Diary generation quality evaluation. Hall. Rate indi-
+cates the hallucination rate, chrF denotes the character F-score, and
+P, R, and F1 refer to the precision, recall, and F1 score of BERTScore.
+Method
+Hall. Rate ↓
+chrF ↑
+BERTScore ↑
+P
+R
+F1
+SenLLM
+0.667
+0.331
+0.263
+0.403
+0.330
+AutoLife
+0.636
+0.381
+0.363
+0.458
+0.409
+AirLog
+0.000
+0.420
+0.485
+0.529
+0.506
+Table 4: Token usage and nominal estimated cost per ses-
+sion. Estimates use GPT-4o-equivalent rates of $2.50/1M input and
+$10.00/1M output tokens; they are not gateway invoices.
+Module
+Input
+Output
+Cost (USD)
+Calls
+Spatial description
+22.3k
+1.2k
+6.8×10−2/hr
+1 per floor
+Wi-Fi semantic agent
+118.7k
+13.2k
+4.3×10−1/hr
+𝑁𝑤
+Trajectory validation
+62.8k
+26.9k
+4.3×10−1/hr
+1 per session
+Behavior inference
+1.9k
+0.8k
+1.3×10−2/hr
+1 per session
+Journal generation
+3.0k
+1.3k
+2.1×10−2/hr
+1 per session
+Total per session
+208.7k
+43.4k
+9.6×10−1/hr
+All modules
+generates journals grounded in the recovered POI visit se-
+quence.
+8.4
+Ablation Study
+Figure 14 shows the contribution of each component to store-
+level recovery. Removing the Wi-Fi Semantic Agent causes
+the largest degradation, reducing Subset Hit and Avg Hit Ra-
+tio from 71.2%/75.5% to 38.3%/42.3%, and Recall from 84.6%
+to 36.0%. This highlights semantic Wi-Fi evidence as the
+key source for identifying visited stores. Removing the Map
+Agent or Context Fusion also substantially reduces point-
+level recovery, with Avg Hit Ratio dropping to 56.0% and
+55.2%, respectively. The Motion Agent mainly improves visit-
+level consistency, while the Planning Agent has the small-
+est effect on point-level metrics. Overall, the results show
+that semantic anchoring provides the strongest contribution,
+with map, motion, and fusion providing complementary con-
+straints.
+8.5
+Cross-Model Evaluation
+We evaluate AirLog with different LLM backbones to as-
+sess its robustness to model choice. Figure 15 shows that
+trajectory recovery remains relatively stable across back-
+bones, while diary generation is more sensitive to model
+choice. GPT-5.4 achieves the strongest overall trajectory per-
+formance (73.9% Subset Hit, 77.3% Avg Hit Ratio, 83.3% Recall,
+and 0.833 SeqSim), while Qwen3 (32B) achieves the highest
+Recall (91.7%) but a substantially higher hallucination rate
+(0.313). This gap highlights that high visit recall alone does
+not guarantee reliable diary generation. Overall, AirLog re-
+mains effective across both proprietary and open-weight
+backbones, demonstrating robustness to the underlying LLM.
+8.6
+Human Evaluation Study
+Setting. Following AutoLife [63], we conduct a user study
+to evaluate generated journals along five dimensions: clarity,
+conciseness, correctness, completeness, and relevance. Six
+volunteers rated 11 generated diaries. All dimensions are
+rated on a 1–4 scale, where 1 indicates that the generated
+journal completely does not meet the criterion and 4 indi-
+cates that it completely meets the criterion. Fleiss’ 𝜅is used
+to measure inter-rater agreement. For self-evaluation, users
+assessed the end-to-end system using their own collected
+data.
+Results. Figure 16 shows that the generated journals are
+generally perceived as clear, relevant, and faithful to the col-
+lected data. Evaluations from third-party raters are consistent
+with the authors’ self-assessment, and raters show substan-
+tial agreement in their judgments. Correctness emerges as a
+particular strength, while conciseness remains an area for
+improvement.
+8.7
+Token Cost
+We report nominal API-equivalent cost by logging input
+and output tokens for each LLM/VLM call and applying the
+nominal GPT-4o rates stated in Table 4. Requests in our
+experiments were routed through a custom third-party API-
+compatible gateway, and no billing invoice or verified gate-
+way pricing was available; the reported dollar values are
+therefore estimates rather than actual paid cost. Processing
+one hour of trace consumes 208.7k input tokens and 43.4k
+output tokens, corresponding to $0.96 per hour. In other
+words, the token cost is roughly $1 per hour of processed
+trajectory. The cost is dominated by Wi-Fi semantic anchor-
+ing and trajectory validation, while behavior inference and
+journal generation add only a small fraction of the total.
+8.8
+Mobile and Edge Deployment
+As location information is privacy sensitive, we evaluate
+the local deployment cost of AirLog in terms of sensing
+overhead and on-device processing.
+Sensing System Cost. During daytime collection, the phone
+only records passive Wi-Fi scans, IMU samples, timestamps,
+and optional venue context using Sensor Logger [10] on
+commodity phones (Xiaomi Flipmix2, vivo S12, and iQoo12).
+Across the tested phones, a 1-hour trace consumes 153 mAh
+(3% battery) and produces 70 MB of local data on average.
+These measurements indicate modest overhead for hour-
+scale passive sensing.
+Running on edge device. We run our agent with Gemma 4
+12B [20] locally with LM Studio [14] on a Mac mini equipped
+with an M4 chip and 24 GB memory. Processing a 1-hour
+daytime trace takes roughly 75 min end-to-end, making the
+local setup suitable for deferred trajectory analysis and di-
+ary generation rather than interactive use. This runtime is
+
+
+AirLog : Store-Level Indoor Life Logging Made Easy
+Subset Hit Avg. Hit
+Recall
+SeqSim
+0.0
+0.2
+0.4
+0.6
+0.8
+Full Ours
+w/o Wi-Fi Semantic
+w/o Motion
+w/o Map
+w/o Context Fusion
+w/o Planning
+Figure 14: Ablation study.
+Subset Hit
+Avg. Hit
+Recall
+SeqSim
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+DeepSeek-R1 (70B)
+Gemma 4 (4B)
+Qwen3 (32B)
+GPT-OSS (120B)
+Claude Sonnet 4.6
+GPT 5.4
+(a) Trajectory Reconstruction
+Hall. Rate
+chrF
+BS-P
+BS-R
+BS-F1
+0.0
+0.1
+0.2
+0.3
+0.4
+0.5
+GPT-OSS (120B)
+DeepSeek-R1 (70B)
+GPT 5.4
+Claude Sonnet 4.6
+Qwen3 (32B)
+Gemma (latest)
+(b) Diary Generation
+Figure 15: Cross-model robustness evaluation.
+2
+2.5
+3
+3.5
+4
+Clarity
+Conciseness
+Correctness
+Completeness
+Relevance
+Third-Party
+Self-Eval
+Fleiss' κ
+Figure 16: User study results.
+therefore suitable for deferred journal generation rather than
+interactive use during the trip. The map can be parsed once
+offline and reused across visits to the same venue, so map
+construction is not included in the per-trace runtime. We
+further note that AirLog can also be deployed on mobile de-
+vices through the Google AI Edge Gallery framework [18, 19];
+however, phone-side execution is expected to take longer
+and is mainly an additional deployment option.
+9
+Conclusion
+We have presented the design and implementation of AirLog,
+an agentic mobile system that converts a floor plan intended
+for human interpretation into a machine-readable spatial
+structure to which ambient Wi-Fi can be anchored, making
+store-level indoor logging possible without dedicated infras-
+tructure. We believe this points to a broader direction: agents
+that interpret the spatial artifacts already present in built
+environments and ground everyday signals against them.
+Acknowledgments
+This work was supported in part by the National Science
+Foundation under award No. 2554332, No. 2337537, No. 2433914,
+and No. 2302724.
+References
+[1] Abdulrahman Alarifi et al. 2016. Ultra wideband indoor positioning
+technologies: Analysis and recent advances. Sensors (2016).
+[2] Tuo An, Yunjiao Zhou, Han Zou, and Jianfei Yang. 2025. IoT-LLM: En-
+hancing Real-World IoT Task Reasoning with Large Language Models.
+arXiv:2410.02429 [cs.AI] https://arxiv.org/abs/2410.02429
+[3] Anthropic. 2026. Claude Sonnet 4.6. https://www.anthropic.com/
+claude/sonnet. Accessed: 2026-05-28.
+[4] Paramvir Bahl and Venkata N. Padmanabhan. 2000. RADAR: An in-
+building RF-based user location and tracking system. IEEE INFOCOM
+(2000).
+[5] Nayan Sanjay Bhatia and Katia Obraczka. 2025. Transforming Decoder-
+Only Transformers for Accurate WiFi-Telemetry Based Indoor Local-
+ization. arXiv:2505.15835 [cs.NI] https://arxiv.org/abs/2505.15835
+[6] Marc Bolaños, Mariella Dimiccoli, and Petia Radeva. 2016. Toward
+Storytelling from Visual Lifelogging: An Overview. In Proceedings of
+the 2016 ACM on International Conference on Multimedia Retrieval.
+[7] Howard Butler, Martin Daly, Allan Doyle, Sean Gillies, Stefan Hagen,
+and Tim Schaub. 2016. The GeoJSON Format. RFC 7946. Internet
+Engineering Task Force. https://doi.org/10.17487/RFC7946
+[8] Nicolas Carion, Laura Gustafson, Yuan-Ting Hu, Shoubhik Debnath,
+Ronghang Hu, Didac Suris, Chaitanya Ryali, Kalyan Vasudev Alwala,
+Haitham Khedr, Andrew Huang, Jie Lei, Tengyu Ma, Baishan Guo,
+Arpit Kalla, Markus Marks, Joseph Greer, Meng Wang, Peize Sun,
+Roman Rädle, Triantafyllos Afouras, Effrosyni Mavroudi, Katherine
+Xu, Tsung-Han Wu, Yu Zhou, Liliane Momeni, Rishi Hazra, Shuan-
+grui Ding, Sagar Vaze, Francois Porcher, Feng Li, Siyuan Li, Aish-
+warya Kamath, Ho Kei Cheng, Piotr Dollár, Nikhila Ravi, Kate Saenko,
+Pengchuan Zhang, and Christoph Feichtenhofer. 2025. SAM 3: Seg-
+ment Anything with Concepts. https://doi.org/10.48550/arXiv.2511.
+16719 arXiv:2511.16719 [cs.CV]
+[9] Kehan Chen, Yan Huang, Dong An, Jiawei He, Yifei Su, Jing Liu, Ni-
+anfeng Liu, and Liang Wang. 2026. FloorPlan-VLN: A New Paradigm
+for Floor Plan Guided Vision-Language Navigation. arXiv preprint
+arXiv:2603.17437 (2026).
+[10] Kelvin Choi. 2026.
+Sensor Logger.
+https://www.tszheichoi.com/
+sensorlogger. Accessed: 2026-05-28.
+[11] Hongwei Cui, Yuyang Du, Qun Yang, Yulin Shao, and Soung Chang
+Liew. 2025. LLMind: Orchestrating AI and IoT with LLM for Complex
+Task Execution. IEEE Communications Magazine 63, 4 (2025), 214–220.
+https://doi.org/10.1109/MCOM.002.2400106
+[12] Decawave. 2017. Decawave UWB positioning system overview.
+[13] Aiden R. Doherty et al. 2013. Passively recognising human activities
+through lifelogging. Computers in Human Behavior 29, 4 (2013), S40–
+S48.
+[14] Element Labs, Inc. 2026. LM Studio: Local AI on your computer.
+https://lmstudio.ai/. Accessed: 2026-06-05.
+[15] G. David Forney. 1973. The Viterbi algorithm. Proc. IEEE (1973).
+[16] Valentin Gabeur, Shangbang Long, Songyou Peng, Paul Voigtlaender,
+Shuyang Sun, Yanan Bao, Karen Truong, Zhicheng Wang, Wenlei Zhou,
+Jonathan T. Barron, Kyle Genova, Nithish Kannen, Sherry Ben, Yan-
+dong Li, Mandy Guo, Suhas Yogin, Yiming Gu, Huizhong Chen, Oliver
+Wang, Saining Xie, Howard Zhou, Kaiming He, Thomas Funkhouser,
+Jean-Baptiste Alayrac, and Radu Soricut. 2026. Image Generators are
+Generalist Vision Learners. arXiv preprint arXiv:2604.20329 (2026).
+[17] Jim Gemmell, Gordon Bell, and Roger Lueder. 2006. MyLifeBits: Ful-
+filling the Memex Vision. In Proceedings of the 10th ACM International
+Conference on Multimedia.
+[18] Google AI Edge. 2026. AI Edge Gallery Agent Skills. https://github.
+com/google-ai-edge/gallery/tree/main/skills. Accessed: 2026-06-05.
+[19] Google AI Edge Team. 2026. Bring State-of-the-Art Agentic Skills to the
+Edge with Gemma 4. https://developers.googleblog.com/bring-state-
+of-the-art-agentic-skills-to-the-edge-with-gemma-4/.
+Accessed:
+2026-06-05.
+[20] Google DeepMind. 2026. Gemma 4 model card. https://ai.google.dev/
+gemma/docs/core/model_card_4. Accessed: 2026-06-05.
+[21] Google Maps. n.d..
+Indoor Maps – About.
+Online documenta-
+tion.
+https://www.google.com/maps/about/partners/indoormaps/
+Accessed: 2026-05-24.
+
+
+Yun et al.
+[22] Google Maps Help. n.d.. Use indoor maps to view floor plans. Online
+support documentation. https://support.google.com/maps/answer/
+2803784 Accessed: 2026-05-24.
+[23] Kristen Grauman, Andrew Westbury, Eugene Byrne, Vincent Car-
+tillier, Zachary Chavis, Antonino Furnari, Rohit Girdhar, Jackson Ham-
+burger, Hao Jiang, Devansh Kukreja, Miao Liu, Xingyu Liu, Miguel
+Martin, Tushar Nagarajan, Ilija Radosavovic, Santhosh Kumar Ra-
+makrishnan, Fiona Ryan, Jayant Sharma, Michael Wray, Mengmeng
+Xu, Eric Zhongcong Xu, Chen Zhao, Siddhant Bansal, Dhruv Batra,
+Sean Crane, Tien Do, Morrie Doulaty, Akshay Erapalli, Christoph
+Feichtenhofer, Adriano Fragomeni, Qichen Fu, Abrham Gebreselasie,
+Cristina González, James Hillis, Xuhua Huang, Yifei Huang, Wenqi
+Jia, Weslie Khoo, Jáchym Kolář, Satwik Kottur, Anurag Kumar, Fed-
+erico Landini, Chao Li, Yanghao Li, Zhenqiang Li, Karttikeya Man-
+galam, Raghava Modhugu, Jonathan Munro, Tullie Murrell, Takumi
+Nishiyasu, Will Price, Paola Ruiz Puentes, Merey Ramazanova, Leda
+Sari, Kiran Somasundaram, Audrey Southerland, Yusuke Sugano, Rui-
+jie Tao, Minh Vo, Yuchen Wang, Xindi Wu, Takuma Yagi, Ziwei
+Zhao, Yunyi Zhu, Pablo Arbeláez, David Crandall, Dima Damen, Gio-
+vanni Maria Farinella, Christian Fuegen, Bernard Ghanem, Vamsi Kr-
+ishna Ithapu, C. V. Jawahar, Hanbyul Joo, Kris Kitani, Haizhou Li,
+Richard Newcombe, Aude Oliva, Hyun Soo Park, James M. Rehg,
+Yoichi Sato, Jianbo Shi, Mike Zheng Shou, Antonio Torralba, Lorenzo
+Torresani, Mingfei Yan, and Jitendra Malik. 2025. Ego4D: Around
+the World in 3,600 Hours of Egocentric Video. IEEE Transactions on
+Pattern Analysis and Machine Intelligence 47, 11 (2025), 9468–9509.
+https://doi.org/10.1109/TPAMI.2024.3381075
+[24] Cathal Gurrin, Alan F Smeaton, and Aiden R Doherty. 2014. Lifel-
+ogging: Personal Big Data. Foundations and Trends in Information
+Retrieval 8, 1 (2014), 1–125.
+[25] Robert Harle. 2013. A Survey of Indoor Inertial Positioning Systems
+for Pedestrians. IEEE Communications Surveys & Tutorials (2013).
+[26] Suining He and S-H Gary Chan. 2016. Wi-Fi fingerprint-based indoor
+positioning: Recent advances and comparisons. IEEE Communications
+Surveys & Tutorials (2016).
+[27] Sachini Herath, Saghar Irandoust, Bowen Chen, Yiming Qian, Pyojin
+Kim, and Yasutaka Furukawa. 2021. Fusion-DHL: WiFi, IMU, and Floor-
+plan Fusion for Dense History of Locations in Indoor Environments. In
+2021 IEEE International Conference on Robotics and Automation (ICRA).
+IEEE, 5677–5683.
+[28] Steve Hodges, Lyndsay Williams, Emma Berry, Shahram Izadi, James
+Srinivasan, Alex Butler, Gavin Smyth, Narinder Kapur, and Ken Wood.
+2006. SenseCam: A Retrospective Memory Aid. In Proceedings of
+the 8th International Conference on Ubiquitous Computing (UbiComp).
+Springer, 177–193.
+[29] Sijie Ji, Xinzhe Zheng, and Chenshu Wu. 2024. HARGPT: Are LLMs
+Zero-Shot Human Activity Recognizers?. In 2024 IEEE International
+Workshop on Foundation Models for Cyber-Physical Systems & Internet
+of Things (FMSys). 38–43. https://doi.org/10.1109/FMSys62467.2024.
+00011
+[30] Martin Korelič, Octavian Machidon, and Veljko Pejović. 2025. SELLMA:
+Semantic Location through On-Device LLMs and WiFi Sensing. In
+Proceedings of the 8th International Workshop on Edge Systems, Ana-
+lytics and Networking (World Trade Center, Rotterdam, Netherlands)
+(EdgeSys ’25). Association for Computing Machinery, New York, NY,
+USA, 7–12. https://doi.org/10.1145/3721888.3722091
+[31] Jennifer R Kwapisz, Gary M Weiss, and Samuel A Moore. 2011. Activity
+Recognition using Cell Phone Accelerometers. In KDD.
+[32] Yong Jae Lee et al. 2008. Wearable context-aware systems for lifelog-
+ging: A survey. In ISWC.
+[33] Jiaxin Li, Weiqi Huang, Zan Wang, Wei Liang, Huijun Di, and Feng
+Liu. 2025. FloNa: Floor Plan Guided Embodied Visual Navigation. In
+Proceedings of the AAAI Conference on Artificial Intelligence, Vol. 39.
+14610–14618.
+[34] Chen Liu, Jiajun Wu, Pushmeet Kohli, and Yasutaka Furukawa. 2017.
+Raster-to-Vector: Revisiting Floorplan Transformation. In Proceedings
+of the IEEE International Conference on Computer Vision (ICCV). 2195–
+2203.
+[35] Location Competition. 2020. Indoor Location Competition 2.0 Sam-
+ple Data and Code. https://github.com/location-competition/indoor-
+location-competition-20. Accessed: 2026-05-28.
+[36] Subigya Nepal, Arvind Pillai, Talie Massachi, Eunsol Soul Choi, et al.
+2024. Contextual AI Journaling: Integrating LLM and Time Series
+Behavioral Sensing Technology to Promote Self-Reflection and Well-
+being using the MindScape App. In Extended Abstracts of the CHI
+Conference on Human Factors in Computing Systems. 1–8.
+[37] Zheng Ni et al. 2022. Experience: Indoor Localization in the Wild. In
+Proceedings of the 18th International Conference on Emerging Network-
+ing Experiments and Technologies (CoNEXT).
+[38] Open Geospatial Consortium. 2021. Indoor Mapping Data Format
+(IMDF) Community Standard, Version 1.0.0.
+Technical Report 20-
+094. Open Geospatial Consortium. https://docs.ogc.org/cs/20-094/
+Reference/index.html Accessed: 2026-05-24.
+[39] Open Geospatial Consortium. 2023. IndoorGML Standard – Indoor
+Spatial and Navigation Data Standard. OGC standards page. https:
+//www.ogc.org/standards/indoorgml/ Accessed: 2026-05-24.
+[40] OpenAI. 2025.
+Introducing gpt-oss.
+https://openai.com/index/
+introducing-gpt-oss/. Accessed: 2026-05-28.
+[41] OpenAI. 2026. GPT-4o Model. https://platform.openai.com/docs/
+models/gpt-4o. Accessed: 2026-05-28.
+[42] OpenAI. 2026. GPT-5.5 Model. https://developers.openai.com/api/
+docs/models/gpt-5.5. Accessed: 2026-08-24.
+[43] OpenAI. 2026. Introducing ChatGPT Images 2.0. https://openai.com/
+index/introducing-chatgpt-images-2-0/. Accessed: 2026-06-05.
+[44] OpenAI. 2026.
+Introducing GPT-5.4.
+https://openai.com/index/
+introducing-gpt-5-4/. Accessed: 2026-05-28.
+[45] Xiaomin Ouyang and Mani Srivastava. 2024. LLMSense: Harnessing
+LLMs for High-level Reasoning Over Spatiotemporal Sensor Traces.
+arXiv preprint arXiv:2403.19857 (2024).
+[46] Maja Popović. 2015. chrF: character n-gram F-score for automatic MT
+evaluation. In Proceedings of the Tenth Workshop on Statistical Machine
+Translation. 392–395.
+[47] Kevin Post, Reo Kuchida, Mayowa Olapade, Zhigang Yin, Petteri
+Nurmi, and Huber Flores. 2025. ContextLLM: Meaningful Context
+Reasoning from Multi-Sensor and Multi-Device Data Using LLMs. In
+Proceedings of the 26th International Workshop on Mobile Computing
+Systems and Applications (HOTMOBILE ’25). ACM, New York, NY, USA,
+13–18. https://doi.org/10.1145/3708468.3711892
+[48] Jiageng Qiao et al. 2024. Advancements in Indoor Precision Posi-
+tioning: A Comprehensive Survey of UWB and Wi-Fi RTT. Network
+(2024).
+[49] Lawrence Rabiner. 1989. A tutorial on hidden Markov models.
+[50] Anshul Rai, Krishna Kant Chintalapudi, Venkata N. Padmanabhan,
+and Rijurekha Sen. 2012. Zee: Zero-Effort Crowdsourcing for Indoor
+Localization. In Proceedings of the 18th Annual International Conference
+on Mobile Computing and Networking (MobiCom ’12). Association
+for Computing Machinery, New York, NY, USA, 293–304.
+https:
+//doi.org/10.1145/2348543.2348580
+[51] Zhiwei Ren, Junbo Li, Minjia Zhang, Di Wang, Xiaoran Fan, and
+Longfei Shangguan. 2025.
+Toward Sensor-In-the-Loop LLM Agent:
+Benchmarks and Implications. Association for Computing Machin-
+ery, New York, NY, USA, 254–267. https://doi.org/10.1145/3715014.
+3722082
+
+
+AirLog : Store-Level Indoor Life Logging Made Easy
+[52] Suranga Seneviratne, Fangzhou Jiang, Mathieu Cunche, and Aruna
+Seneviratne. 2015. SSIDs in the wild: Extracting semantic informa-
+tion from WiFi SSIDs. In 2015 IEEE 40th conference on local computer
+networks (LCN). IEEE, 494–497.
+[53] Guobin Shen, Zhuo Chen, Peichao Zhang, Thomas Moscibroda, and
+Yongguang Zhang. 2013. Walkie-Markie: Indoor Pathway Mapping
+Made Easy. In 10th USENIX Symposium on Networked Systems Design
+and Implementation (NSDI ’13). USENIX Association, Lombard, IL,
+USA, 85–98. https://www.usenix.org/conference/nsdi13/technical-
+sessions/presentation/shen
+[54] Muhammad Shoaib et al. 2014. Fusion of Smartphone Motion Sensors
+for Physical Activity Recognition. In Sensors.
+[55] Ming Su, Wei Shi, Dangjun Zhao, Dongyang Cheng, and Junchao
+Zhang. 2022. A High-Precision Method for Segmentation and Recog-
+nition of Shopping Mall Plans. Sensors 22, 7 (2022), 2510.
+https:
+//doi.org/10.3390/s22072510
+[56] Ke Sun, Chunyu Xia, Xinyu Zhang, Hao Chen, and Charlie Jianzhong
+Zhang. 2024. Multimodal Daily-Life Logging in Free-living Environ-
+ment Using Non-Visual Egocentric Sensors on a Smartphone. Proc.
+ACM Interact. Mob. Wearable Ubiquitous Technol. 8, 1, Article 17 (March
+2024), 32 pages. https://doi.org/10.1145/3643553
+[57] He Wang, Souvik Sen, Ahmed Elgohary, Moustafa Farid, Moustafa
+Youssef, and Romit Roy Choudhury. 2012. No Need to War-Drive: Un-
+supervised Indoor Localization. In Proceedings of the 10th International
+Conference on Mobile Systems, Applications, and Services (MobiSys ’12).
+Association for Computing Machinery, New York, NY, USA, 197–210.
+https://doi.org/10.1145/2307636.2307655
+[58] Shihao Wang, Guo Chen, De-an Huang, Zhiqi Li, Minghan Li, Guilin
+Liu, Jose M. Alvarez, Lei Zhang, and Zhiding Yu. 2025. VideoITG: Mul-
+timodal Video Understanding with Instructed Temporal Grounding.
+arXiv preprint arXiv:2507.13353 (2025).
+[59] Harvey Weinberg. 2002. Using the ADXL202 in pedometer and per-
+sonal navigation applications. In Analog Devices AN-602.
+[60] Zhao Wenda, Goudar Abhishek, Qiao Xinyuan, and Angela P. Schoellig.
+2024. UTIL: An Ultra-wideband Time-difference-of-arrival Indoor
+Localization Dataset. The International Journal of Robotics Research
+43, 10 (2024), 1443–1456.
+[61] Shuo Xing, Shuangyu Xie, Zezhou Sun, Kaiyuan Chen, Yanjia Huang,
+Yuping Wang, Jiachen Li, Dezhen Song, and Zhengzhong Tu. 2025.
+Can Large Vision Language Models Read Maps Like a Human? arXiv
+preprint arXiv:2503.14607 (2025).
+[62] Huatao Xu, Liying Han, Qirui Yang, Mo Li, and Mani Srivastava. 2024.
+Penetrative ai: Making llms comprehend the physical world. In Proceed-
+ings of the 25th International Workshop on Mobile Computing Systems
+and Applications. 1–7.
+[63] Huatao Xu, Zilin Zeng, Panrong Tong, Mo Li, and Mani B. Srivastava.
+2025. AutoLife: Automatic Life Journaling with Smartphones and
+LLMs. Proceedings of the ACM on Interactive, Mobile, Wearable and
+Ubiquitous Technologies 9, 4 (2025), 1–29.
+https://doi.org/10.1145/
+3770683
+[64] Chen Yang, Zhenghao Tang, Yasutaka Furukawa, et al. 2019. FloorNet:
+A Unified Framework for Floorplan Reconstruction from 3D Scans.
+arXiv preprint arXiv:1903.04394 (2019).
+[65] Jingkang Yang, Shuai Liu, Hongming Guo, Yuhao Dong, Xiamengwei
+Zhang, Sicheng Zhang, Pengyun Wang, Zitang Zhou, Binzhu Xie,
+Ziyue Wang, Bei Ouyang, Zhengyu Lin, Marco Cominelli, Zhongang
+Cai, Bo Li, Yuanhan Zhang, Peiyuan Zhang, Fangzhou Hong, Joerg
+Widmer, Francesco Gringoli, Lei Yang, and Ziwei Liu. 2025. EgoLife:
+Towards Egocentric Life Assistant. In 2025 IEEE/CVF Conference on
+Computer Vision and Pattern Recognition (CVPR). 28885–28900. https:
+//doi.org/10.1109/CVPR52734.2025.02690
+[66] Zheng Yang, Chenshu Wu, and Yunhao Liu. 2012. Locating in Fin-
+gerprint Space: Wireless Indoor Localization with Little Human In-
+tervention. In Proceedings of the 18th Annual International Confer-
+ence on Mobile Computing and Networking (MobiCom ’12). Asso-
+ciation for Computing Machinery, New York, NY, USA, 269–280.
+https://doi.org/10.1145/2348543.2348578
+[67] Shunyu Yao et al. 2023. ReAct: Synergizing Reasoning and Acting in
+Language Models. arXiv preprint arXiv:2210.03629 (2023).
+[68] Moustafa Youssef and Ashok Agrawala. 2005. The Horus WLAN
+location determination system. In MobiSys.
+[69] Xiaofan Yu, Lanxiang Hu, Benjamin Reichman, Dylan Chu, Rushil
+Chandrupatla, Xiyuan Zhang, Larry Heck, and Tajana S. Rosing. 2025.
+SensorChat: Answering Qualitative and Quantitative Questions during
+Long-term Multimodal Sensor Interactions. Proceedings of the ACM on
+Interactive, Mobile, Wearable and Ubiquitous Technologies 9, 3, Article
+148 (2025), 35 pages. https://doi.org/10.1145/3749496
+[70] Ozgur Yurur et al. 2014. Context-awareness for mobile sensing: A
+survey and future directions. IEEE Communications Surveys & Tutorials
+(2014).
+[71] Faheem Zafari, Athanasios Gkelias, and Kin K. Leung. 2019. A survey
+of indoor localization systems and technologies. IEEE Communications
+Surveys & Tutorials (2019).
+[72] Haopeng Zhang, Yili Ren, Haohan Yuan, Jingzhe Zhang, and Yitong
+Shen. 2025. Wi-Chat: Large Language Model Powered Wi-Fi Sensing.
+arXiv:2502.12421 [cs.CL] https://arxiv.org/abs/2502.12421
+[73] Tianyi Zhang, Varsha Kishore, Felix Wu, Kilian Q. Weinberger, and
+Yoav Artzi. 2020. BERTScore: Evaluating Text Generation with BERT.
+In International Conference on Learning Representations.
+[74] Kaiwen Zhou, Kaizhi Zheng, Connor Pryor, Yilin Shen, Hongxia Jin,
+Lise Getoor, and Xin Eric Wang. 2023. NavGPT: Explicit Reasoning in
+Vision-and-Language Navigation with Large Language Models. arXiv
+preprint arXiv:2305.16986 (2023).
+
+
+Yun et al.
+A
+Map Parsing Evaluation and Failure
+Analysis
+This appendix expands the map-parsing claims made in Sec-
+tion 4 and the results reported in Section 8.1. The main text
+gives the headline comparison; here we explain why the
+three reported metrics are appropriate, how to interpret the
+corresponding scores, and which qualitative cases support
+the design choices and limitations discussed in the method.
+A.1
+Metric Design and Interpretation
+Table 1 in the main text evaluates two questions: whether
+AirLog recovers each floor-plan region as a usable polygon,
+and whether the recovered polygon receives the correct read-
+able labels. We therefore report two geometry metrics and
+one semantic metric.
+Area F1: did we recover the regions? For an annotated
+region 𝑔and a predicted region 𝑝, we first compute the two
+directed area coverages
+𝑐𝑔(𝑔, 𝑝) = Area(𝑔∩𝑝)
+Area(𝑔)
+,
+𝑐𝑝(𝑔, 𝑝) = Area(𝑔∩𝑝)
+Area(𝑝)
+.
+(5)
+A pair is eligible when
+max(𝑐𝑔,𝑐𝑝) ≥0.5,
+min(𝑐𝑔,𝑐𝑝) ≥0.05,
+(6)
+after which we form a label-independent one-to-one match-
+ing. Let 𝑇𝑃𝐴be the matched pairs, 𝐹𝑃𝐴the unmatched pre-
+dictions, and 𝐹𝑁𝐴the unmatched annotations. We compute
+𝑃𝐴=
+𝑇𝑃𝐴
+𝑇𝑃𝐴+ 𝐹𝑃𝐴
+,
+𝑅𝐴=
+𝑇𝑃𝐴
+𝑇𝑃𝐴+ 𝐹𝑁𝐴
+,
+AreaF1 = 2𝑃𝐴𝑅𝐴
+𝑃𝐴+ 𝑅𝐴
+.
+(7)
+This tolerant criterion reflects the downstream require-
+ment of AirLog: later modules need one queryable polygon
+for each floor-plan region, while small boundary deviations
+are less important than missing, splitting, or duplicating a
+region. Thus, the increase from 0.277 to 0.705 in Table 1
+indicates substantially more successful one-to-one region
+recovery; it should not be interpreted as 70.5% pixel overlap.
+For reproducibility, this paper-facing Area F1 corresponds
+to the association_f1 field in evaluator v8.
+Region Purity: did a polygon absorb unrelated content?
+Let ΩGT be the union of all evaluator-valid annotated regions.
+For each predicted polygon 𝑝, we compute
+Purity(𝑝) = Area(𝑝∩ΩGT)
+Area(𝑝)
+.
+(8)
+Predictions receive equal weight within each image, and
+image-level means are macro-averaged. Region Purity com-
+plements Area F1 because a prediction may recover the in-
+tended region while also absorbing corridor, neighboring-
+store, icon, or background pixels. The increase from 0.510 to
+0.767 in Table 1 therefore indicates cleaner region predictions
+with less unrelated content.
+Matched Label F1: are the labels correct once geometry
+is fixed? Semantic evaluation first forms a separate label-
+independent one-to-one geometry matching at IoU ≥0.5.
+Label strings are canonicalized identically for all methods
+and compared as sets. With pooled semantic true positives,
+false positives, and false negatives denoted by 𝑇𝑃𝐿, 𝐹𝑃𝐿, and
+𝐹𝑁𝐿, we report
+𝑃𝐿=
+𝑇𝑃𝐿
+𝑇𝑃𝐿+ 𝐹𝑃𝐿
+,
+𝑅𝐿=
+𝑇𝑃𝐿
+𝑇𝑃𝐿+ 𝐹𝑁𝐿
+,
+LabelF1 = 2𝑃𝐿𝑅𝐿
+𝑃𝐿+ 𝑅𝐿
+.
+(9)
+Unmatched polygons are left to the geometry metrics, so
+geometry failures are not counted again as semantic errors.
+Under frozen geometry, the deployed GPT-4o region-crop
+configuration obtains 0.814 Matched Label F1, compared
+with 0.734 for the GPT-5.5 full-map configuration in Table 2.
+Because the backend model and visual scope change together,
+this comparison does not isolate the effect of region cropping
+or model choice.
+Standard-metric sanity check. Area F1 uses a task-motivated
+tolerant matching rule. To verify that the geometry conclu-
+sion does not depend on this rule, we additionally evalu-
+ate the same frozen predictions using standard one-to-one
+matching at IoU ≥0.5. Table 5 reports Region F1@0.5 and
+PQ@0.5. The method ordering remains unchanged under
+both metrics.
+Table 5: Standard-metric sanity check on map geometry. Re-
+gion F1@0.5 and PQ@0.5 use one-to-one matching at IoU ≥0.5
+and are macro-averaged across the 24 maps.
+Method
+Region F1@0.5 ↑
+PQ@0.5 ↑
+Color Filling
+0.229
+0.199
+Boundary Detection / Su et al.
+0.095
+0.075
+SAM 3
+0.020
+0.016
+AirLog
+0.590
+0.475
+A.2
+Benchmark and Comparison Protocol
+The benchmark used by Section 8.1 contains 24 floor-plan
+images with 1,488 geometry-valid annotated polygons and
+1,400 label strings; 190 polygons contain multiple readable
+labels. Twenty images correspond to publicly discoverable
+
+
+AirLog : Store-Level Indoor Life Logging Made Easy
+malls with official websites and publicly available directory
+or floor-plan images. The remaining four are mall-directory
+photographs captured during the same in-the-wild sensing
+collection used elsewhere in AirLog. These photographs may
+contain perspective distortion, illumination variation, and
+color shift that are less pronounced in web-published maps.
+The benchmark therefore covers both web-published floor-
+plan artifacts and photographed mall directories encountered
+in the target deployment setting.
+The multi-label cases motivate evaluating label sets rather
+than forcing every region to contain a single store-name
+string. Ground-truth polygon geometry was manually main-
+tained in QGIS against the exact pixel-aligned source image.
+GPT-5.5 was used only as an auxiliary tool for label audit-
+ing; every final ground-truth label was manually reviewed
+against the source floor-plan image.
+All reported values use the same archived evaluator-v8
+snapshot and prediction artifacts under OpenCV 4.10.0. Baseline-
+specific settings were fixed globally and applied uniformly
+across the 24 maps. We did not tune parameters separately
+for individual maps or select settings against the benchmark
+ground truth.
+Baseline configurations. Color Filling uses gray-world
+normalization, OKLab clustering with𝑘= 6, merge threshold
+0.04, random seed 13, and a 30-pixel minimum connected-
+component area. PaddleOCR (lang=ch) is applied to the full
+map, and OCR results are bound to predicted regions by
+maximum overlap with center fallback.
+Boundary Detection / Su et al. is our implementation of
+the edge/region-growing procedure described by Su et al.,
+rather than an official author-code reproduction. It applies
+the fixed threshold/edge pipeline at the original resolution,
+retains regions of at least 30 pixels, runs OCR on regions of
+at least 1,200 pixels among at most the 80 largest candidates,
+and retries OCR once after a 90◦rotation when necessary.
+For SAM 3, the configuration reported in Table 1 uses the
+text prompts map region and enclosed spatial region,
+longest-side preprocessing at 2,048 pixels, and a mask-binarization
+threshold of 0.5. Separately, the wrapper’s omitted object-
+query score threshold resolves to a detection-confidence
+threshold of 0.0 rather than the processor default of 0.5. The
+configuration uses up to 500 masks, no overlap NMS, and
+exports each residual connected component as a polygon.
+This permissive configuration produces 24,939 predicted
+polygons for 1,482 annotated polygons, and 68.05% of the
+predicted polygons have no evaluator-raster overlap with an-
+notated foreground. This large amount of over-segmentation
+explains the unusually low 0.037 Area F1 reported for SAM
+3.
+SAM 3 configuration sensitivity. To test whether the low
+SAM 3 result is primarily an artifact of the permissive con-
+figuration above, we reran all 24 maps using the same check-
+point, text prompts, resize cap, and OCR pipeline, while
+restoring the detection-confidence threshold to 0.5 and re-
+taining one residual component per query. This more con-
+servative configuration removes the large false-positive frag-
+mentation, but produces predictions on only one of the 24
+maps. With empty-prediction maps assigned zero, it obtains
+Region F1@0.5 of 0.042 and PQ@0.5 of 0.033. Thus, the sen-
+sitivity check does not indicate robust SAM 3 performance
+on this benchmark; instead, the more conservative configu-
+ration suppresses nearly all detections.
+Table 1 is an end-to-end map-parsing comparison: the vi-
+sual baselines may differ in both region extraction and label
+binding. By contrast, Table 2 freezes the predicted polygons
+and visible-label policy, then compares the full-map GPT-5.5
+labeling configuration with the GPT-4o per-region semantic
+subagent. Because model and input scope still change to-
+gether, this table compares the two deployed configurations
+but does not independently isolate either factor.
+For the GPT-4o per-region run, all 1,920 semantic records
+were completed from 1,927 application attempts. Seven tran-
+sient failed attempts affected six polygons, and all six reached
+a valid terminal response within the retry budget. No seman-
+tic record was dropped from evaluation.
+A.3
+Downstream Map Preparation
+Section 4 ends with a labeled region map serialized as a
+GeoJSON FeatureCollection. Corridor geometry and con-
+nectivity are constructed afterward, before the trajectory
+stage in Section 5. Figure 17 visualizes this interface: the
+parser-produced regions are converted into a complemen-
+tary corridor mask, region targets are placed in the same
+metric space, and the corridor is skeletonized into the navi-
+gability graph used by the Viterbi decoder.
+This separation also clarifies the scope of Table 1: Area F1,
+Region Purity, and Matched Label F1 evaluate the parser’s
+region geometry and labels, rather than the downstream
+corridor or graph construction.
+
+
+Yun et al.
+(a) Corridor mask and region tar-
+gets.
+(b) Navigability graph.
+Figure 17: Interface between map parsing and trajectory fu-
+sion. The labeled GeoJSON region map produced in Section 4 is
+converted by a separate deterministic stage into the corridor mask
+and navigability graph consumed in Section 5. These artifacts are
+not parser outputs and are not included in the map-parsing metrics.
+A.4
+Qualitative Evidence and Remaining
+Failures
+Tables 1 and 2 report the aggregate geometry and label re-
+sults. The examples below illustrate specific failure mecha-
+nisms discussed in Section 4; they are qualitative evidence
+rather than additional quantitative comparisons.
+Exact-region OCR errors. Figure 18 fixes the target geom-
+etry and gives PaddleOCR only the exact region crop. The
+readable vertical HMV label is returned as AWH, while O2 is
+returned as 02. Region isolation therefore removes spatial-
+assignment ambiguity but does not, by itself, resolve OCR
+orientation or glyph confusion.
+(a) Orientation
+GROUND TRUTH
+HMV
+PADDLEOCR
+AWH
+(b) Glyph confusion
+GT O2 →
+OCR 02
+O → 0
+Figure 18: Exact-region OCR failures. PaddleOCR reads (a) a
+visible vertical HMV crop as AWH and (b) O2 as 02.
+Full-map coordinate-binding error. Figure 19(a) provides
+an illustrative cached full-map failure case. GPT-5.5 recog-
+nizes VOGUE, yet its predicted coordinate falls inside the
+adjacent UBERFONE polygon. Per-region labeling removes
+this additional coordinate-prediction and polygon-binding
+step. This example illustrates the failure mechanism and is
+not used for the quantitative comparison.
+Geometry-to-semantics cascade. Figure 19(b) illustrates
+a remaining limitation of the factorized pipeline. For one
+matched Crew-associated component, the predicted polygon
+excludes the readable word. The resulting polygon-masked
+crop therefore removes the visual evidence needed by the
+semantic subagent. The adjacent Crew component, whose
+polygon retains the text, is labeled correctly.
+anchor
+text outside
+(a) Correct text, wrong polygon
+anchor in UBERFONE
+exact region
+VOGUE
+no binding step
+(b) Geometry removes label evidence
+predicted polygon
+masked crop
+labels = []
+Figure 19: Two map-parsing interface failures. (a) A cached
+full-map GPT-5.5 result recognizes VOGUE but places its coordinate
+in the adjacent UBERFONE polygon; an exact-region input removes
+this binding step. (b) For one Crew-associated component, the pre-
+dicted polygon removes the readable word from the masked crop,
+leaving no readable evidence for the semantic subagent.
+B
+Wi-Fi Semantic Evidence and Collection
+Context
+This appendix groups the evidence supporting the use of
+ambient Wi-Fi as a weak semantic cue: collection coverage,
+the sparsity and failure modes of lexical SSID–POI matching,
+and the ambiguity of RSSI-based nearest-signal decisions.
+B.1
+Collection Coverage
+Figure 20 summarizes representative urban and session-level
+coverage. These figures document collection context; store-
+level reconstruction remains grounded in indoor Wi-Fi ob-
+servations, PDR motion continuity, and structured indoor
+topology.
+B.2
+Lexical Similarity and Representative
+Failure Cases
+The character-level distribution shows a clear non-zero tail,
+indicating that many SSIDs still contain partial POI-related
+strings. However, only a small fraction of pairs reach strong
+lexical overlap: 647 pairs exceed 0.8 at character level with a
+precision of 52.2%, and 14,516 additional pairs fall between 0.6
+and 0.8. Among word-level and TF-IDF pairs, high-similarity
+matches (>0.8) achieve up to 100% and 90.0% precision re-
+spectively, but account for only 11 and 40 pairs out of 185,140,
+
+
+AirLog : Store-Level Indoor Life Logging Made Easy
+(a) Shenzhen density.
+(b) Shanghai density.
+(c) Hong Kong session context.
+Figure 20: Representative Wi-Fi collection context. The density maps summarize two urban collection areas, while the Hong Kong
+panel provides a session-level view of mobility coverage.
+Table 6: Dataset statistics across six cities.
+Metric
+Hong Kong
+Beijing
+Shanghai
+Shenzhen
+Dalian
+Nanjing
+Total
+Active hours (h)
+59.3
+5.8
+208.4
+225.5
+2.6
+101.3
+603.0
+GPS points
+157,360
+2,137
+277,356
+319,865
+6,696
+168,041
+931,455
+Wi-Fi observations
+260,394
+2,711
+25,798
+45,801
+10,391
+29,472
+374,567
+Unique SSIDs (raw)
+21,303
+984
+1,730
+2,125
+1,604
+1,274
+29,020
+Unique BSSIDs (raw)
+56,615
+1,742
+2,541
+3,199
+2,832
+1,922
+68,851
+Avg. SSIDs per scan
+81.0
+46.7
+3.0
+5.9
+48.8
+6.2
+59.4
+Table 7: Number of SSID–POI pairs by similarity range and
+precision. Precision is computed over manually annotated same-
+store labels.
+Range
+Cosine (Char)
+Cosine (Word)
+Cosine (TF-IDF)
+0.0
+9,731
+184,841
+184,871
+0.0–0.2
+33,454
+3
+3
+0.2–0.4
+72,318
+131
+65
+0.4–0.6
+54,474
+137 (34.3%)
+100 (9.0%)
+0.6–0.8
+14,516
+17 (58.8%)
+61 (44.3%)
+0.8–1.0
+647 (52.2%)
+11 (100%)
+40 (90.0%)
+Total
+185,140
+185,140
+185,140
+showing that exact token matches are extremely sparse in
+practice.
+Table 8 illustrates a complementary failure mode: surface
+string similarity can rank misleading SSID–POI pairs highly
+even when the semantic explanation points elsewhere. These
+examples justify using semantic reasoning over names, local
+context, and map constraints; they are not presented as a
+standalone quantitative benchmark.
+B.3
+RSSI Ambiguity
+Figure 21 expands the Wi-Fi anchoring example from the
+main paper. Nearby access points overlap substantially along
+a single walk, and one signal window can remain compatible
+with multiple neighboring stores. This motivates treating
+the top-𝐾SSIDs as soft evidence rather than selecting the
+strongest signal as the user’s location.
+Table 8: Representative bad cases of Wi-Fi SSID–POI match-
+ing. String similarity algorithms fail where LLM semantic reasoning
+succeeds.
+Wi-Fi SSID
+POI
+Best Sim.
+SKH-SchoolDevice
+SKH Holy Carpenter Church
+0.693
+Beauty
+A Boutea
+0.833
+MNSGUEST
+Monster Sushi
+0.820
+𝑎SKH-SchoolDevice: SKH is a dominant institutional prefix of the
+Hong Kong Sheng Kung Hui; “SchoolDevice” identifies a campus
+device network, pointing to an affiliated lodging facility rather than
+the church itself.
+𝑏Beauty: “A Boutea” is a beverage brand whose name superficially
+resembles “Beauty” in spelling; the SSID more plausibly belongs to
+a cosmetics or personal-care venue.
+𝑐MNSGUEST: MNS follows a typical three-letter property code
+convention; combined with its location in the Miramar cluster in
+Tsim Sha Tsui, the network is better attributed to Miramar Shopping
+Centre’s guest Wi-Fi than to a restaurant abbreviation.
+C
+Additional Journal Examples
+The following examples supplement the journal comparison
+in the main paper. Underlined italic denotes ground-truth
+POI names, and red denotes hallucinated or incorrect con-
+tent.
+
+
+Yun et al.
+t = 0
+entrance
+t = 60
+KFC
+t = 120
+Uniqlo
+t = 180
+atrium
+t = 240
+Starbucks
+t = 300
+H&M zone
+t = 360
+rebound
+Time (s)
+-90 dBm
+-80 dBm
+-70 dBm
+-60 dBm
+-50 dBm
+-40 dBm
+RSSI (dBm)
+ambiguity zone
+signal rebound
+KFC_FREE_WiFi
+Uniqlo_Store
+Zara_Guest
+Starbucks_WiFi
+in top-10 (LLM visible)
+out of top-10 (LLM invisible)
+(a) RSSI variation. Solid lines indicate SSIDs in the top-𝐾
+window; faded dashed lines indicate lower-ranked sig-
+nals.
+(b) Spatial layout. The corresponding mall trajec-
+tory remains compatible with multiple nearby
+stores.
+Figure 21: RSSI ambiguity and spatial layout. The profiles and
+map show why semantic anchoring is formulated as soft multi-label
+inference rather than a deterministic nearest-signal decision.
+Figure 22: Journal generation case 2: restaurant visit.
+Figure 23: Journal generation case 3: shopping and dining
+visit.
+
+
+AirLog : Store-Level Indoor Life Logging Made Easy
+D
+Prompt Templates
+D.1
+Spatial Description Generation
+This prompt converts GeoJSON store features into normal-
+ized names, neighbor relations, and natural-language posi-
+tion descriptions. The output is a compact spatial context
+that later prompts can use without directly reasoning over
+raw polygon coordinates.
+Figure 24: Prompt template for spatial description generation
+from GeoJSON floor-plan features.
+D.2
+Wi-Fi Semantic Anchoring
+The following prompt maps Wi-Fi SSIDs to candidate store
+locations via semantic similarity, relative signal strength, and
+spatial context.
+Figure 25: Prompt template for Wi-Fi semantic anchoring
+using SSID semantics and signal evidence.
