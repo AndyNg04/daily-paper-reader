@@ -48,7 +48,7 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-03</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-04</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
     <strong class="dpr-home-dashboard-count">共 35 篇</strong>
@@ -58,7 +58,7 @@
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-03 18:21:36 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-04 18:48:37 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-03 日报已完成：共整理 35 篇论文，精读 15 篇、速读 20 篇，聚焦人机协作与智能体系统。</p>
-<p>最值得关注的是人机协作模式与多模型聚合预测两个方向，对应精读推荐分别获 10.0/10 和 9.0/10。</p>
-<p>建议先读满分推荐《Human-AI Collaboration: From Paradoxes to Patterns》，再看《Two Heads Are Better Than One: Aggregating Weaker LLMs for Better Forecasts》，了解协作与预测的不同思路。</p>
+<p>2026-10-04 论文日报已完成：共梳理 35 篇论文，精读 15 篇、速读 20 篇，聚焦大模型行为、记忆与多智能体协作。</p>
+<p>最值得关注的是区分多轮对话中的迎合与共情（FIGS，10/10），以及大模型显著压缩幸福感不平等、却大体保留其社会经济结构的发现（9/10）。</p>
+<p>建议先读这两篇的摘要，了解 AI 如何回应用户、呈现社会差异，再按兴趣速读大模型在线记忆或仓储机器人协作方向（均为 8/10）。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -83,9 +83,9 @@
     <strong class="dpr-home-dashboard-count">15 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Human-AI Collaboration: From Paradoxes to Patterns">Human-AI Collaboration: From Paradoxes to Patterns</span></li><li><span class="dpr-home-dashboard-paper-title" title="Two Heads Are Better Than One: Aggregating Weaker LLMs for Better Forecasts">Two Heads Are Better Than One: Aggregating Weaker LLMs for Better Forecasts</span></li><li><span class="dpr-home-dashboard-paper-title" title="Population Fidelity: Evaluating Population Representativeness in LLMs">Population Fidelity: Evaluating Population Representativeness in LLMs</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="FIGS: Evaluating Multi-Turn Sycophancy Without Penalizing Empathy">FIGS: Evaluating Multi-Turn Sycophancy Without Penalizing Empathy</span></li><li><span class="dpr-home-dashboard-paper-title" title="Large Language Models Substantially Compress Well-Being Inequality but Largely Preserve Its Socioeconomic Structure">Large Language Models Substantially Compress Well-Being Inequality but Largely Preserve Its Socioeconomic Structure</span></li><li><span class="dpr-home-dashboard-paper-title" title="Beyond Memory Construction: Rethinking Memory Access for LLM-based Conversational Agents">Beyond Memory Construction: Rethinking Memory Access for LLM-based Conversational Agents</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>3</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>2</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>6</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -96,9 +96,9 @@
     <strong class="dpr-home-dashboard-count">20 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="WSM-Aware HRI: An IoT-Enhanced Framework for Early Detection and Norm-Guided Repair of Failures with LLM Guidance">WSM-Aware HRI: An IoT-Enhanced Framework for Early Detection and Norm-Guided Repair of Failures with LLM Guidance</span></li><li><span class="dpr-home-dashboard-paper-title" title="AuthorityLens: Rethinking LLM-Based Agent Systems Through the Lens of Authority">AuthorityLens: Rethinking LLM-Based Agent Systems Through the Lens of Authority</span></li><li><span class="dpr-home-dashboard-paper-title" title="Beyond Dyadic Memory: Interaction-Aware Multimodal Memory with Adaptive Agentic Retrieval for Multi-Party Spoken Conversations">Beyond Dyadic Memory: Interaction-Aware Multimodal Memory with Adaptive Agentic Retrieval for Multi-Party Spoken Conversations</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="LSTMem: Hierarchical Long Short-Term Online Memory for Large Language Models">LSTMem: Hierarchical Long Short-Term Online Memory for Large Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="Hierarchical Multi-agent Reinforcement Learning for Warehouse Robot Coordination under Communication Loss">Hierarchical Multi-agent Reinforcement Learning for Warehouse Robot Coordination under Communication Loss</span></li><li><span class="dpr-home-dashboard-paper-title" title="Evolution of fairness in multi-objective reinforcement learning framework">Evolution of fairness in multi-objective reinforcement learning framework</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>8</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>3</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>3</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>8</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>4</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>3</strong></span></div>
 </section>
 </div>
 

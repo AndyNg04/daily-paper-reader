@@ -1,0 +1,298 @@
+Title: Stashbird: Efficient Speaker-Indexed Memory for Conversational Agents
+
+URL Source: https://arxiv.org/pdf/2609.34242v1
+
+Published Time: Tue, 29 Sep 2026 02:55:38 GMT
+
+Number of Pages: 11
+
+Markdown Content:
+# Stashbird: Efficient Speaker-Indexed Memory for Conversational Agents 
+
+Chidera Biringa ∗ Lucas Yannul ∗ Xiaowen Wang Marco Ayala Nicholas Yi Alex Moyse Nishant Manchanda Vivek Gupta 
+
+Microsoft 
+
+# Abstract 
+
+AI agents require memory that preserves information across user-agent exchanges, user-to-user conversations, and group conversations with or without agent partici-pation, while supporting updates as evidence changes or is removed. We present Stashbird, an agent memory system that links source episodes to derived mem-ory state through explicit provenance. Stashbird organizes memory into episodic records, semantic relations, community summaries, and persisted graph state, with lifecycle operations for incremental updates and episode-level deletion. We evalu-ate question-answering accuracy and model-facing workload across four long-term memory benchmarks. On LoCoMo, Stashbird uses 76.4x fewer ingestion prompt tokens than Graphiti. Compared with reproduced Hindsight on the same bench-mark, it uses 8.1x fewer retrieval prompt tokens, with accuracy 1.6 percentage points lower. It achieves higher accuracy than Hindsight on LongMemEval-S and GroupMemBench and comparable accuracy on EverMemBench. 
+
+# 1 Introduction 
+
+AI agents increasingly operate over interaction histories that cannot be handled reliably through full-context prompting alone [1, 2, 3, 4]. As these histories grow, especially in shared, multi-party settings, agents must retain facts, preferences, plans, and prior decisions while remaining responsive to corrections and changing evidence. A memory system for this scenario must recover earlier context, preserve information across interactions, track provenance, and support revision. Current memory systems often attach an external memory layer to the model. Some rely on vector stores and retrieval-augmented generation [5, 6]. Others use graph structures over entities, relations, and summaries [7, 8, 9]. Recent systems combine dense retrieval with structured or hierarchical memory [10, 11]. These systems must balance answer quality against the model calls and tokens required to construct and query memory. Memory must also evolve as conversational evidence changes [12]. Existing systems support updates and memory management [8, 9, 13]. Our focus is the provenance linking source episodes to derived memory state and the reconciliation of that state when episodes are added or deleted. We present Stashbird, an agent memory system that maintains memory as persistent, episode-grounded state with provenance, updates, and deletion. Stashbird organizes memory into linked views: episodic records, semantic relations, preference traces, community summaries, and persisted graph state. Unlike systems that primarily store retrieved snippets, extracted memory items, or graph summaries, Stashbird keeps raw conversational evidence linked to derived semantic state, allowing memory to be carried forward, revised, deleted, and queried as histories develop. At retrieval time, Stashbird combines lexical-vector search and reranking to select relevant evidence for the response model.  
+
+> ∗Equal contribution. Correspondence to: cbiringa@microsoft.com .Preprint. arXiv:2609.34242v1 [cs.AI] 28 Sep 2026
+
+Figure 1: Overview of Stashbird. The purple region shows consolidation, where conversations are converted into episodes, summaries, semantic memories, and communities. The blue region shows persistent storage in the search index and graph database. The green region shows retrieval, where a query is decomposed, expanded through graph search, fused and reranked, and converted into the final context for the answer model. We evaluate Stashbird on four long-term memory benchmarks, measuring ingestion and retrieval model calls and tokens alongside question-answering accuracy. Incremental update and deletion are system capabilities outside the evaluation. Our contributions are as follows: • We introduce Stashbird, an episode-grounded memory system that integrates episodic evi-dence, semantic relations, preference traces, community summaries, and persisted graph state, with retrieval based on lexical-vector search, query decomposition, fusion, and rerank-ing. • We present lifecycle operations for incremental updates and episode-level deletion. Prove-nance links source episodes to derived records, enabling provenance reconciliation, graph and index cleanup, community invalidation, and episode-chain reconnection. • We evaluate Stashbird on long-term memory benchmarks spanning user-agent, dyadic, and group conversation settings. Stashbird uses substantially fewer ingestion and retrieval prompt tokens than reproduced Hindsight while achieving competitive question-answering accuracy. Table 1: Structured memory views in Stashbird and their roles.                   
+
+> View Stored Unit Update Behavior Used For Episodes Conversation chunks Append / delete Evidence recall Entities Canonical entities Merge / invalidate Grounding Relations Entity relations Replace / version Reasoning Preferences User traits Overwrite Personalization Communities Entity clusters Re-summarize High-level context
+
+# 2 Stashbird 
+
+Figure 1 shows Stashbird’s three core operations: ingestion and update (§ 2.1), deletion(§ 2.2), and retrieval(§ 2.3).Ingestion and update incorporate ordered conversation episodes into structured 2memory views while preserving provenance, either by constructing memory from scratch or by appending new episodes to existing persisted state. Retrieval recovers relevant evidence from these views for downstream question answering. Deletion removes source episodes, reconciles entity and relation provenance, and marks affected communities for re-summarization. The benchmarks evaluate ingestion and retrieval for static question answering. Incremental update and deletion are system capabilities outside this evaluation. 
+
+2.1 Ingestion and Update 
+
+Stashbird ingests conversations as ordered timestamped episodes and constructs a persistent memory state that can be searched, updated, and selectively removed. Let E = {e1, . . . , e T } denote the episode sequence, where each et stores the turn author, content, message time, and ingestion time. Adjacent episodes form a conversational thread, and episodes link to referenced entities while preserving provenance on entity and relation records. To avoid repeated full-history LLM calls, Stashbird builds a global summary with 15K-token windows, then processes episodes in 20K-token chunks with 10% overlap. A named-entity recognition model [14] reduces missed mentions before the backbone LLM extracts entities and relations from the chunk text, global summary, and rolling entity-centered context. This context stores recent summaries and relation facts, is capped at 4K tokens, compressed when needed, and pruned by removing the least-supported entities if still too large. Extracted entities and relations are reconciled against the existing state. Entity reconciliation accepts a match when both cosine similarity and Levenshtein ratio exceed 0.85. Remaining candidates exceeding 0.75 on either measure are passed to the backbone for resolution. These thresholds were fixed across benchmarks. Relations are reconciled within each entity pair, where duplicates extend provenance and contradictions replace the earlier relation. Stashbird exposes memory through structured views over the same conversation state, including episodes, entities, relations, preference-like facts, and community summaries. Searchable documents support semantic and lexical retrieval over these views. Table 1 summarizes the system’s memory views. Dedicated preference retrieval was disabled in the reported experiments. When community summarization is enabled, Stashbird clusters the entity graph with label propagation [15]. Each cluster is summarized and stored as a community node linked to its members. 
+
+Update. Stashbird supports incremental updates by appending new episodes to an existing memory graph. A persisted checkpoint stores the conversation summary, serialized rolling context, last processed episode, and current entity count. During updates, the system loads the checkpoint, restores the rolling context, and appends new episodes to the conversational thread. The conversation summary is updated using the added episodes. Semantic consolidation processes the appended turns and reuses existing entities and relations. When communities are enabled, newly created entities are assigned to existing communities. 
+
+2.2 Deletion 
+
+Stashbird performs deletion at the episode level. A deletion request specifies an episode identifier, and provenance [16] identifies the entities, relations, and communities affected by that episode. Let 
+
+P (x) denote the set of episodes supporting entity or relation x, and let d be the episode to delete. Algorithm 1 summarizes the complete reconciliation process. For each affected relation r, Stashbird updates P (r) ← P (r) \ { d}. Relations with remaining support are retained with updated provenance. Relations without support are removed from the graph and search index. For each affected entity e, Stashbird updates P (e) ← P (e) \ { d} and applies Entity Meta-forgetting with Neighbor Adoption. Entities with remaining support receive only provenance updates. Un-supported entities without surviving neighbors are removed. Unsupported entities with surviving neighbors retain their structural identity as connective anchors after their episode-derived metadata is cleared [17]. Removed entities and stale entity documents are also removed from the search index. Finally, Stashbird removes the episode from the graph and search index, reconnects its predecessor and successor when both exist, and marks affected communities dirty for deferred re-summarization. Stale community documents are removed from retrieval until their summaries are regenerated. 3Algorithm 1: Episode-Anchored Memory Deletion 
+
+Input: Episode d, memory state M
+
+Output: Updated memory state M 
+
+> 1
+
+E ← AFFECTED ENTITIES (d, M) 
+
+> 2
+
+R ← AFFECTED RELATIONS (d, M) 
+
+> 3
+
+C ← AFFECTED COMMUNITIES (E, M) 
+
+> 4
+
+(p, n ) ← EPISODE NEIGHBORS (d, M) 
+
+> 5
+
+foreach r ∈ R do  
+
+> 6
+
+P (r) ← P (r) \ { d} 
+
+> 7
+
+if P (r) = ∅ then  
+
+> 8
+
+Remove r from the graph and search index  
+
+> 9
+
+else  
+
+> 10
+
+Update provenance for r 
+
+> 11
+
+foreach e ∈ E do  
+
+> 12
+
+P (e) ← P (e) \ { d} 
+
+> 13
+
+if P (e)̸ = ∅ then  
+
+> 14
+
+Update provenance for e 
+
+> 15
+
+else if e has no surviving neighbors then  
+
+> 16
+
+Remove e from the graph and search index  
+
+> 17
+
+else  
+
+> 18
+
+Clear episode-derived metadata for e 
+
+> 19
+
+Preserve e as a connective anchor  
+
+> 20
+
+Remove its stale search document  
+
+> 21
+
+Remove d from the graph and search index  
+
+> 22
+
+if p and n exist then  
+
+> 23
+
+Link p to n 
+
+> 24
+
+Mark communities in C dirty and remove their stale search documents  
+
+> 25
+
+return M
+
+2.3 Retrieval 
+
+Stashbird retrieves evidence from its persistent memory state for the answer model. To handle queries involving multiple entities, time constraints, or related facts, we retain the original query and use the backbone to generate up to four focused sub-queries. Let q denote the input query and 
+
+Q = {q0, . . . , q k} the set of query variants, where q0 is the original query. Each query variant is embedded, and temporal expressions are resolved relative to the question date when available. Conversation-scoped hybrid search retrieves episode, entity, and relation documents, together with community documents where enabled. Results across queries are merged and deduplicated. Evidence from different sources is fused using reciprocal rank fusion [18]. An LLM relevance scorer assigns each fused candidate a score based on its usefulness for answering the query. The top-ranked candidates form the final evidence set. The response generator passes this context, together with the question date, to the backbone, which is instructed to answer using only the retrieved evidence. 
+
+# 3 Experiments 
+
+3.1 Datasets 
+
+We evaluate Stashbird on four long-term memory benchmarks: LongMemEval-S[3], LoCoMo[19], EverMemBench[20], and GroupMemBench[21]. LongMemEval-S tests user-assistant memory over long histories, with 500 questions and roughly 115K tokens per question, covering information extraction, multi-session reasoning, temporal reasoning, knowledge updates, and abstention. LoCoMo evaluates dyadic multi-session conversations with single-hop, multi-hop, temporal, and open-domain questions. 4Table 2: LLM-as-a-judge accuracy on LongMemEval-S by question type. SS-User: Single-Session User, MS: Multi-Session, SS-Pref: Single-Session Preference, Temp: Temporal Reasoning, Update: Knowledge Update, SS-Asst: Single-Session Assistant. For reproduced methods with repeated runs, Overall reports the mean ± 95% confidence interval over 5 runs. Results above the separator are taken directly from prior reports, while those below are reproduced in our experiments. 
+
+Backbone Method SS-User MS SS-Pref Temp Update SS-Asst Overall 
+
+GPT-4o-mini Zep 92.9 47.4 53.3 54.1 74.4 75.0 63.2 Nemori 88.6 51.1 46.7 61.7 61.5 83.9 64.2 Full Context 84.6 44.1 9.5 45.4 81.0 93.5 59.8 Mem0 90.6 53.5 39.3 59.5 75.2 30.4 59 .8±0.4
+
+Hindsight 93.1 67.1 53.7 68.0 75.7 95.7 74 .8±1.8
+
+Stashbird 95.6 63.2 74.6 67.1 77.5 97.1 75 .6±0.9
+
+GPT-4.1-mini Nemori 90.0 55.6 86.7 72.2 79.5 92.9 74.6 Full Context 94.3 53.6 10.6 60.4 78.2 98.5 67.4 Mem0 95.9 70.3 42.9 77.5 78.1 26.4 70 .0±0.6
+
+Hindsight 94.7 67.2 55.3 76.5 81.1 96.4 78 .3±2.6
+
+Stashbird 98.6 69.9 88.4 72.4 84.0 95.9 81 .0±0.8
+
+Table 3: LLM-as-a-judge accuracy on LoCoMo by question type. Following prior work, the Adver-sarial category is excluded. For reproduced methods with repeated runs, Overall reports the mean ±
+
+95% confidence interval over five runs. 
+
+Backbone Method Multi-Hop Temporal Open-Domain Single-Hop Overall 
+
+GPT-4o-mini Zep 50.5 58.9 39.6 63.2 58.5 Nemori 65.3 71.0 44.8 82.1 74.4 Full Context 79.5 57.9 74.4 91.3 80.9 Mem0 74.0 63.3 60.0 74.9 71 .4±0.3
+
+Graphiti 61.5 46.2 57.7 58.3 56 .3±0.6
+
+Hindsight 87.5 77.7 73.2 89.9 85 .9±0.4
+
+Stashbird 79.0 69.3 57.9 87.7 80 .4±0.7
+
+GPT-4.1-mini Zep 53.7 60.2 43.8 66.9 61.6 Nemori 75.1 77.6 51.0 84.9 79.5 Full Context 81.5 78.8 62.5 88.9 83.8 Mem0 82.4 72.1 66.7 78.3 77 .0±0.4
+
+Graphiti 68.4 67.9 65.0 74.3 71 .3±0.4
+
+Hindsight 88.0 86.3 74.7 92.2 89 .1±0.7
+
+Stashbird 87.4 83.5 68.5 91.3 87 .5±0.3
+
+EverMemBench and GroupMemBench extend evaluation to shared settings: EverMemBench uses multi-party, multi-group dialogues for fine-grained recall, memory awareness, and user profile understanding, while GroupMemBench uses role-tagged enterprise group-channel logs across Fi-nance, Technology, Healthcare, and Manufacturing, covering multi-hop reasoning, updates, temporal reasoning, user-conditioned queries, term ambiguity, and abstention. These shared-conversation benchmarks are central to Stashbird because memory must persist across interactions where users may communicate with or without an agent present. 
+
+3.2 Implementation Details 
+
+We report Stashbird’s default configuration, with backbone and final evidence count varied in the sensitivity analyses. All LLM and embedding calls are served by Azure OpenAI in Azure AI Foundry. Stashbird uses text-embedding-3-large embeddings with 3072 dimensions. We evaluate it with 
+
+gpt-4o-mini (2024-07-18 ), gpt-4.1-mini (2025-04-14 ), gpt-5.2-chat (2026-02-10 ), and 
+
+gpt-5.4 (2026-03-05 ). 5We process conversation text using 20K-token chunks with 10% overlap, a 15K-token hierarchical-summary window, a 4K-token rolling entity-context cap, and the top five entity vector matches. Entity reconciliation accepts matches when both cosine similarity and Levenshtein ratio exceed 0.85. Remaining candidates exceeding 0.75 on either measure are passed to the backbone for resolution. These thresholds were fixed across benchmarks. Retrieval uses hybrid top-60 search per document type, RRF with k = 60 , 30 rerank candidates, and a final evidence count of 30 in the default configuration. Community summaries are included where enabled. Graph expansion, secondary coverage expansion, credibility weighting, reflection, and dedicated preference retrieval were disabled in the reported experiments. 
+
+3.3 Performance Evaluation Baselines. We compare Stashbird with full-context prompting and prior memory systems, including Zep [9], Mem0 [8], Nemori [22], MemOS [13], Hindsight [10], MemoBase [23], and Graphiti [24]. We evaluate Full Context, Mem0, Graphiti, Hindsight, and Stashbird using a common evaluation harness. Within each benchmark setting, reproduced comparisons use the same questions, named answer backbone, and judge configuration. Each memory system retains its native embedding and retrieval configuration. We include the remaining baselines as reference results from prior reports, using Supermemory for LongMemEval-S, Backboard LoCoMo for LoCoMo, and the EverMemBench paper for EverMemBench. The tables distinguish these reference results from reproduced evaluations. 
+
+Hardware and Criterion. Experiments run on Azure Batch using Standard_E32ds_v4 nodes with 32 vCPUs, 252 GiB RAM, Intel Xeon Platinum 8272CL CPUs, and Ubuntu 22.04, with one benchmark run per node. We measure question-answering accuracy using each benchmark’s LLM-as-a-judge protocol. LongMemEval-S uses binary yes/no correctness. LoCoMo uses binary Correct/Wrong labels with the adversarial category excluded. EverMemBench uses the dataset answer generator and judge. GroupMemBench uses its benchmark judge, with a separate rubric for abstention questions. 
+
+Model-facing workload. We measure LLM calls, embedding calls, prompt tokens, and completion tokens during ingestion and retrieval. These counts cover the active pipeline, including extraction, entity resolution, community summarization where enabled, query decomposition, reranking, and answer generation. Ingestion and retrieval values are dataset-wide totals averaged over repeated iterations. 
+
+# 4 Results 
+
+4.1 Performance 
+
+We report question-answering accuracy across the four benchmarks. LongMemEval-S. We report LongMemEval-S accuracy by question type in Table 2. Stashbird scores 75.6% overall with GPT-4o-mini, slightly above Hindsight at 74.8%, and 81.0% with GPT-4.1-mini, 2.7 points above Hindsight at 78.3%. It also outperforms Zep, Nemori, Full Context, and Mem0. The largest difference is on single-session preference questions, where Stashbird scores 74.6% and 88.4% across the two backbones, compared with 53.7% and 55.3% for Hindsight. Stashbird also shows lower run-to-run variance than Hindsight, with narrower confidence intervals across both backbones. 
+
+LoCoMo. Table 3 presents LoCoMo accuracy by question type. With GPT-4o-mini, Stashbird achieves 80.4% overall, outperforming Zep, Nemori, Mem0, and Graphiti and nearly matching Full Context at 80.9%. With GPT-4.1-mini, Stashbird improves to 87.5%, outperforming Zep, Nemori, Full Context, Mem0, and Graphiti. Hindsight remains higher at 85.9% and 89.1%, but Section 4.2 shows that this accuracy gap comes with substantially higher cost. 
+
+EverMemBench. For EverMemBench, Table 4 shows that Stashbird achieves 55.4% average accu-racy with GPT-4.1-mini, outperforming MemoBase, Zep, and MemOS, and performing comparably to reproduced Hindsight at 54.8%. Stashbird is strongest on single-hop recall, constraint awareness, and profile-understanding questions, while Hindsight performs better on multi-hop recall, temporal recall, proactivity, and knowledge update. This pattern suggests that Stashbird performs best when 6Table 4: LLM-as-a-judge accuracy on EverMemBench across three categories using GPT-4.1-mini as the backbone for all methods: Fine-Grained Recall (Single: Single-Hop, Multi: Multi-Hop, Temp: Temporal), Memory Awareness (Const: Constraint, Proact: Proactivity, Update), and Profile Understanding (Style, Skill, Role). We report mean accuracy percentages. Avg is the unweighted mean across the nine sub-tasks. For the methods we evaluate, it is shown as mean ± 95% confidence interval over five runs. Results above the separator are taken directly from prior reports, while those below are reproduced in our experiments.                                                               
+
+> Method Fine-Grained Recall Memory Awareness Profile Understanding Avg
+> Single Multi Temp Const Proact Update Style Skill Role MemoBase 60.0 12.8 18.0 64.6 36.7 30.6 17.0 29.5 38.7 34.2 Zep 73.7 8.0 13.0 67.1 47.5 43.6 26.7 35.5 44.3 39.9 MemOS 71.3 18.8 15.6 69.9 51.9 45.1 28.9 32.5 48.4 42.5 Hindsight 90.8 22.8 22.4 82.3 66.9 68.6 33.5 49.9 56.5 54 .8±0.5
+> Stashbird 95.6 20.3 17.9 84.4 58.8 66.7 43.3 51.0 60.9 55 .4±0.5
+
+answers rely on explicit user or group evidence, while broader evidence chaining and behavioral inference remain challenging. 
+
+GroupMemBench. On GroupMemBench, Table 5 shows that Stashbird achieves 51.1% average accuracy, 26.2 points above Hindsight at 24.9%. The largest differences are on temporal reasoning, 72.3% versus 2.2%, and user-implicit questions, 60.8% versus 22.8%. The strong temporal result is consistent with Stashbird preserving speaker and time information across shared conversation. 
+
+4.2 Efficiency 
+
+Table 6 reports ingestion and retrieval model calls and token usage across benchmarks. 
+
+LongMemEval-S. Stashbird uses 29K ingestion LLM calls, compared with 109K for Mem0, 137K for Hindsight, and 1.3M for Graphiti. It also uses 164M ingestion prompt tokens, compared with 700M for Hindsight and 3.6B for Graphiti. At retrieval time, Stashbird uses more LLM calls than Mem0 and Hindsight but fewer prompt tokens, 5.5M compared with 19.9M for Hindsight and 6.8M for Mem0. 
+
+LoCoMo. Stashbird uses 57 ingestion LLM calls, compared with 5.08K for Mem0, 18K for Graphiti, and 796 for Hindsight, and 484K ingestion prompt tokens, compared with 44.6M, 37M, and 6.58M. At retrieval time, Stashbird uses more LLM calls than Mem0 and Hindsight, but fewer prompt tokens, 8.24M compared with 19.7M for Mem0 and 66.4M for Hindsight. 
+
+EverMemBench. Stashbird uses 3.97K ingestion LLM calls and 21.4M ingestion prompt tokens, compared with 12.2K calls and 169M prompt tokens for Hindsight. At retrieval time, Stashbird uses more LLM calls than Hindsight but fewer prompt tokens, 52.5M compared with 282M. 
+
+4.3 Ablation Study Backbone Sensitivity. Table 8 shows that stronger backbones improve Stashbird consistently on LoCoMo, where overall accuracy rises from 87.5% with GPT-4.1-mini to 89.9% with GPT-5.2-chat and 92.0% with GPT-5.4. The largest gains occur on open-domain and temporal questions, which require synthesizing retrieved evidence rather than extracting a short fact. On EverMemBench, scaling has a smaller and non-monotonic effect: average accuracy changes from 55.4% to 56.4% and 55.9%, with gains in temporal recall and knowledge update but flat or lower profile-understanding scores. This suggests that EverMemBench is more retrieval-bounded than backbone-bounded. 
+
+Influence of Top K. Table 7 varies the number of retrieved evidence items passed to the answer model. Across K ∈ { 10 , 20 , 30 , 50 }, performance remains stable. EverMemBench average accuracy stays between 55.2% and 55.5%, while LoCoMo overall accuracy stays between 87.0% and 87.5%, with the best score at K = 30 . Increasing K therefore adds candidates but does not reliably improve answers, suggesting that useful evidence is usually already present in the top-ranked context after fusion and reranking. 7Table 5: GroupMemBench accuracy with GPT-5.2-chat on the released Finance, Technology, Health-care, and Manufacturing question sets. Update refers to Knowledge Update, and Avg. reports the average across the six query types. 
+
+Method Multi-hop Update Temporal User Implicit Term Ambiguity Abstention Avg. 
+
+Hindsight 18.9 13.3 2.2 22.8 28.0 64.5 24 .9±1.0
+
+Stashbird 52.9 35.8 72.3 60.8 29.1 55.7 51 .1±1.9
+
+Table 6: Ingestion and retrieval efficiency on LongMemEval-S, LoCoMo, and EverMemBench using GPT-4.1-mini. Ingestion values are one-time totals. Retrieval values are means over repeated retrieval iterations. Counts are abbreviated with K, M, and B for thousands, millions, and billions. 
+
+Benchmark Phase Method LLM Calls Embedding Calls Prompt Tokens Completion Tokens LongMemEval-S Ingestion Mem0 109K 291K 1.03B 8.98M Graphiti 1.28M 2.07M 3.57B 108M Hindsight 137K 462K 700M 81.6M 
+
+Stashbird 29K 29K 164M 13M Retrieval Mem0 470 1.09K 6.75M 76.9K Graphiti 9.84K 940 2.04M 23.8K Hindsight 1.49K 1.14K 19.9M 139K 
+
+Stashbird 3.49K 2.47K 5.51M 76.9K LoCoMo Ingestion Mem0 5.08K 14.6K 44.6M 414K Graphiti 18K 27K 37M 742K Hindsight 796 4.48K 6.58M 507K 
+
+Stashbird 57 294 484K 34.0K Retrieval Mem0 1.54K 4.13K 19.7M 932K Graphiti 32.2K 3.08K 6.87M 131K Hindsight 4.92K 3.20K 66.4M 460K 
+
+Stashbird 10.8K 7.65K 8.24M 216K EverMemBench Ingestion Hindsight 12.2K 71.8K 169M 12.0M 
+
+Stashbird 3.97K 2.87K 21.4M 1.57M Retrieval Hindsight 12.1K 8.57K 282M 1.84M 
+
+Stashbird 37.4K 15.6K 52.5M 1.12M 
+
+Table 8: Backbone sensitivity of Stashbird on EverMemBench and LoCoMo. EverMemBench reports the nine paper sub-tasks with Avg. as the mean across sub-tasks. LoCoMo reports the four non-adversarial question types with Overall as benchmark-level accuracy.                                                     
+
+> Backbone EverMemBench LoCoMo Single Multi Temp Const Proact Update Style Skill Role Avg. Multi-Hop Temporal Open Domain Single Hop Overall
+> GPT-4.1-mini 95.6 20.3 17.9 84.4 58.8 66.7 43.3 51.0 60.9 55.4 87.4 83.5 68.5 91.3 87.5 GPT-5.2-chat 95.7 20.7 19.1 86.0 63.5 73.4 39.8 52.2 57.2 56.4 88.4 86.8 77.9 93.0 89.9 GPT-5.4 96.6 20.2 24.9 85.4 61.3 69.7 39.7 49.7 55.7 55.9 91.9 91.0 78.5 93.8 92.0
+
+# 5 Discussion 
+
+The results show a quality-cost tradeoff. Stashbird uses fewer ingestion and retrieval prompt tokens than Hindsight across the three benchmarks. It achieves higher accuracy on LongMemEval-S, comparable accuracy on EverMemBench, and lower accuracy on LoCoMo. Stashbird trades more retrieval calls for substantially fewer prompt tokens. Overall accuracy remains stable across the tested final evidence counts, indicating that the result is not sensitive to a narrow choice of K. On GroupMemBench, the largest gains occur on temporal and user-implicit questions. This pattern is consistent with Stashbird preserving speaker, time, and provenance in shared conversations. The weaker EverMemBench results on multi-hop, temporal, and proactivity questions suggest that evidence chaining and behavioral inference remain challenging. 8Table 7: Impact of Top K on Stashbird with GPT-4.1-mini. Top K is the number of retrieved evidence items passed to the answer model. Results show how retrieval depth affects performance on EverMemBench and LoCoMo.                                                                    
+
+> KEverMemBench LoCoMo Single Multi Temp Const Proact Update Style Skill Role Avg. Multi-Hop Temporal Open Domain Single Hop Overall
+> 10 95.7 19.4 23.1 84.2 58.8 61.3 41.9 50.9 61.3 55.2 89.0 81.7 66.7 90.9 87.1 20 95.8 21.6 19.3 84.2 59.4 63.6 42.8 50.6 62.2 55.5 88.8 81.4 68.3 90.6 87.0 30 95.6 20.3 17.9 84.4 58.8 66.7 43.3 51.0 60.9 55.4 87.4 83.5 68.5 91.3 87.5 50 95.7 23.5 16.9 83.9 58.0 67.6 40.2 52.1 60.1 55.4 88.7 82.1 66.0 91.0 87.1
+
+Limitations. The reported results characterize the complete evaluated configuration. The backbone and final-evidence-count analyses measure robustness but do not isolate the contributions of all components. Entity reconciliation uses thresholds fixed across benchmarks without a threshold sweep. Accuracy also depends on benchmark-provided LLM judges. 
+
+# 6 Related Work 
+
+Prior work on persistent memory for AI agents falls into two broad groups. The first keeps more his-tory accessible to the model through longer contexts or OS-style context management. MemGPT[25] treats memory as paging between active context and archival storage, while MemoryBank[6] aug-ments dialogue agents with stored histories, summaries, and user portraits. These approaches improve continuity, but memory remains mostly textual and must be reintroduced into the prompt when needed. The second group adds explicit structure. Mem0[8] extracts salient memories and applies add, update, delete, or noop operations, with a graph variant for entities and relations. Zep[9] uses a temporal knowledge graph with episodic, semantic, and community layers, temporal validity, and contradiction handling. A-Mem[26] builds evolving note-like memories, while Mnemis[11] combines similarity retrieval with structured selection. Recent systems such as MemOS[13] and Hindsight[10] treat memory as a managed substrate rather than a flat retrieval cache. These systems differ in memory unit, stored structure, and whether memory is only retrieved or also revised over time. 
+
+# 7 Conclusion 
+
+In this work, we presented Stashbird, an episode-grounded memory system for user-agent, user-to-user, and group interactions. Stashbird preserves speaker information, links source episodes to semantic and graph-based memory views, and supports incremental updates and episode-level deletion. Across four long-term memory benchmarks. Stashbird achieves competitive question-answering accuracy. On the three benchmarks with cost measurements, it uses substantially fewer ingestion and retrieval prompt tokens than reproduced Hindsight. Its largest accuracy gain occurs on GroupMemBench, where questions span speakers and time. These results demonstrate a strong quality-cost tradeoff for structured, traceable conversational memory. 
+
+# References 
+
+[1] Nelson F Liu, Kevin Lin, John Hewitt, Ashwin Paranjape, Michele Bevilacqua, Fabio Petroni, and Percy Liang. Lost in the middle: How language models use long contexts. Transactions of the association for computational linguistics , 12:157–173, 2024. [2] Cheng-Ping Hsieh, Simeng Sun, Samuel Kriman, Shantanu Acharya, Dima Rekesh, Fei Jia, and Boris Ginsburg. Ruler: What’s the real context size of your long-context language models? In 
+
+First Conference on Language Modeling .[3] Di Wu, Hongwei Wang, Wenhao Yu, Yuwei Zhang, Kai-Wei Chang, and Dong Yu. Long-memeval: Benchmarking chat assistants on long-term interactive memory. In The Thirteenth International Conference on Learning Representations .9[4] Xiao Liu, Hao Yu, Hanchen Zhang, Yifan Xu, Xuanyu Lei, Hanyu Lai, Yu Gu, Hangliang Ding, Kaiwen Men, Kejuan Yang, et al. Agentbench: Evaluating llms as agents. arXiv preprint arXiv:2308.03688 , 2023. [5] Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio Petroni, Vladimir Karpukhin, Naman Goyal, Heinrich Küttler, Mike Lewis, Wen-tau Yih, Tim Rocktäschel, et al. Retrieval-augmented generation for knowledge-intensive nlp tasks. Advances in neural information processing systems , 33:9459–9474, 2020. [6] Wanjun Zhong, Lianghong Guo, Qiqi Gao, He Ye, and Yanlin Wang. Memorybank: Enhancing large language models with long-term memory. In Proceedings of the AAAI conference on artificial intelligence , volume 38, pages 19724–19731, 2024. [7] Darren Edge, Ha Trinh, Newman Cheng, Joshua Bradley, Alex Chao, Apurva Mody, Steven Truitt, Dasha Metropolitansky, Robert Osazuwa Ness, and Jonathan Larson. From local to global: A graph rag approach to query-focused summarization. arXiv preprint arXiv:2404.16130 , 2024. [8] Prateek Chhikara, Dev Khant, Saket Aryan, Taranjeet Singh, and Deshraj Yadav. Mem0: Building production-ready ai agents with scalable long-term memory. arXiv preprint arXiv:2504.19413 , 2025. [9] Preston Rasmussen, Pavlo Paliychuk, Travis Beauvais, Jack Ryan, and Daniel Chalef. Zep: a temporal knowledge graph architecture for agent memory. arXiv preprint arXiv:2501.13956 ,2025. [10] Chris Latimer, Nicoló Boschi, Andrew Neeser, Chris Bartholomew, Gaurav Srivastava, Xuan Wang, and Naren Ramakrishnan. Hindsight is 20/20: Building agent memory that retains, recalls, and reflects. arXiv preprint arXiv:2512.12818 , 2025. [11] Zihao Tang, Xin Yu, Ziyu Xiao, Zengxuan Wen, Zelin Li, Jiaxi Zhou, Hualei Wang, Haohua Wang, Haizhen Huang, Weiwei Deng, et al. Mnemis: Dual-route retrieval on hierarchical graphs for long-term llm memory. arXiv preprint arXiv:2602.15313 , 2026. [12] Chingkwun Lam, Jiaxin Li, Lingfei Zhang, and Kuo Zhao. Governing evolving memory in llm agents: Risks, mechanisms, and the stability and safety governed memory (ssgm) framework. 
+
+arXiv preprint arXiv:2603.11768 , 2026. [13] Zhiyu Li, Chenyang Xi, Chunyu Li, Ding Chen, Boyu Chen, Shichao Song, Simin Niu, Hanyu Wang, Jiawei Yang, Chen Tang, et al. Memos: A memory os for ai system. arXiv preprint arXiv:2507.03724 , 2025. [14] Matthew Honnibal, Ines Montani, Sofie Van Landeghem, Adriane Boyd, et al. spacy: Industrial-strength natural language processing in python. 2020. [15] Usha Nandini Raghavan, Reka Albert, and Soundar Kumara. Near linear time algorithm to detect community structures in large-scale networks. Physical Review E , 76(3):036106, 2007. [16] James Cheney, Laura Chiticariu, and Wang-Chiew Tan. Provenance in databases: Why, how, and where. Foundations and trends in databases , 1(4):379–474, 2009. [17] Aidan Hogan, Eva Blomqvist, Michael Cochez, Claudia d’Amato, Gerard De Melo, Claudio Gutierrez, Sabrina Kirrane, José Emilio Labra Gayo, Roberto Navigli, Sebastian Neumaier, et al. Knowledge graphs. ACM Computing Surveys (Csur) , 54(4):1–37, 2021. [18] Gordon V Cormack, Charles LA Clarke, and Stefan Buettcher. Reciprocal rank fusion outper-forms condorcet and individual rank learning methods. In Proceedings of the 32nd international ACM SIGIR conference on Research and development in information retrieval , pages 758–759, 2009. [19] Adyasha Maharana, Dong-Ho Lee, Sergey Tulyakov, Mohit Bansal, Francesco Barbieri, and Yuwei Fang. Evaluating very long-term conversational memory of llm agents. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 13851–13870, 2024. 10 [20] Chuanrui Hu, Tong Li, Xingze Gao, Hongda Chen, Dannong Xu, Yi Bai, Tianwei Lin, Xinda Zhao, Xiaohong Li, Jiaqi An, et al. Evermembench: Benchmarking long-term interactive memory in large language models. arXiv preprint arXiv:2602.01313 , 2026. [21] Jingbo Yang, Kwei-Herng Lai, Xiaowen Wang, Shiyu Chang, Yaar Harari, and Evgeniy Gabrilovich. Groupmembench: Benchmarking llm agent memory in multi-party conversations. 
+
+arXiv preprint arXiv:2605.14498 , 2026. [22] Jiayan Nan, Wenquan Ma, Wenlong Wu, and Yize Chen. Nemori: Self-organizing agent memory inspired by cognitive science. arXiv preprint arXiv:2508.03341 , 2025. [23] Memodb Team. MemoBase: User Profile-Based Long-Term Memory for AI Chatbot Applica-tions. https://github.com/memodb-io/memobase , 2025. Accessed: 2026-05-05. [24] Zep Software, Inc. Graphiti: Build Real-Time Knowledge Graphs for AI Agents. https: //github.com/getzep/graphiti , 2026. Accessed May 1, 2026. [25] Charles Packer, Vivian Fang, Shishir_G Patil, Kevin Lin, Sarah Wooders, and Joseph_E Gonza-lez. Memgpt: towards llms as operating systems. 2023. [26] Wujiang Xu, Zujie Liang, Kai Mei, Hang Gao, Juntao Tan, and Yongfeng Zhang. A-mem: Agentic memory for llm agents. arXiv preprint arXiv:2502.12110 , 2025. 11
