@@ -48,7 +48,7 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-04</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-05</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
     <strong class="dpr-home-dashboard-count">共 35 篇</strong>
@@ -58,7 +58,7 @@
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-04 18:48:37 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-05 22:01:01 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-04 论文日报已完成：共梳理 35 篇论文，精读 15 篇、速读 20 篇，聚焦大模型行为、记忆与多智能体协作。</p>
-<p>最值得关注的是区分多轮对话中的迎合与共情（FIGS，10/10），以及大模型显著压缩幸福感不平等、却大体保留其社会经济结构的发现（9/10）。</p>
-<p>建议先读这两篇的摘要，了解 AI 如何回应用户、呈现社会差异，再按兴趣速读大模型在线记忆或仓储机器人协作方向（均为 8/10）。</p>
+<p>2026-10-05 日报已完成：筛选 35 篇论文，精读 15 篇、速读 20 篇，聚焦 AI 与社交议题。</p>
+<p>今天优先看两个方向：减少 AI 的社交迎合（《Mitigating Social Sycophancy via Pluralistic Preference Optimization》，10/10）与重新思考社交媒体中的社交（《Reclaiming the social in social media》，9/10）。</p>
+<p>建议先读这两篇的摘要，再按兴趣速读智能体个性记忆、沟通效率或工具授权安全相关论文，三篇推荐均为 8/10。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -83,9 +83,9 @@
     <strong class="dpr-home-dashboard-count">15 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="FIGS: Evaluating Multi-Turn Sycophancy Without Penalizing Empathy">FIGS: Evaluating Multi-Turn Sycophancy Without Penalizing Empathy</span></li><li><span class="dpr-home-dashboard-paper-title" title="Large Language Models Substantially Compress Well-Being Inequality but Largely Preserve Its Socioeconomic Structure">Large Language Models Substantially Compress Well-Being Inequality but Largely Preserve Its Socioeconomic Structure</span></li><li><span class="dpr-home-dashboard-paper-title" title="Beyond Memory Construction: Rethinking Memory Access for LLM-based Conversational Agents">Beyond Memory Construction: Rethinking Memory Access for LLM-based Conversational Agents</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Mitigating Social Sycophancy via Pluralistic Preference Optimization">Mitigating Social Sycophancy via Pluralistic Preference Optimization</span></li><li><span class="dpr-home-dashboard-paper-title" title="Reclaiming the social in social media">Reclaiming the social in social media</span></li><li><span class="dpr-home-dashboard-paper-title" title="CounterSteer: Suppressing Indirect Prompt Injection with Activation Steering">CounterSteer: Suppressing Indirect Prompt Injection with Activation Steering</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>6</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>4</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>4</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -96,9 +96,9 @@
     <strong class="dpr-home-dashboard-count">20 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="LSTMem: Hierarchical Long Short-Term Online Memory for Large Language Models">LSTMem: Hierarchical Long Short-Term Online Memory for Large Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="Hierarchical Multi-agent Reinforcement Learning for Warehouse Robot Coordination under Communication Loss">Hierarchical Multi-agent Reinforcement Learning for Warehouse Robot Coordination under Communication Loss</span></li><li><span class="dpr-home-dashboard-paper-title" title="Evolution of fairness in multi-objective reinforcement learning framework">Evolution of fairness in multi-objective reinforcement learning framework</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="PersMem: Internalizing Personality into Dual-Pathway Memory for LLM Agents">PersMem: Internalizing Personality into Dual-Pathway Memory for LLM Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="Towards Communication-Efficient Social Intelligence in Language Agents">Towards Communication-Efficient Social Intelligence in Language Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="ToolFence: Fine-Grained Authorization for Secure Tool-Using LLM Agents">ToolFence: Fine-Grained Authorization for Secure Tool-Using LLM Agents</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>8</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>4</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>3</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>7</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>7</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
 </section>
 </div>
 

@@ -1,0 +1,1049 @@
+Title: CounterSteer: Suppressing Indirect Prompt Injection with Activation Steering
+
+URL Source: https://arxiv.org/pdf/2609.36570v1
+
+Published Time: Wed, 30 Sep 2026 00:59:56 GMT
+
+Number of Pages: 37
+
+Markdown Content:
+# CounterSteer: Suppressing Indirect Prompt Injection with Activation Steering 
+
+Mark Russinovich 
+
+Microsoft Azure markruss@microsoft.com 
+
+Abstract —Indirect prompt injection makes an LLM agent treat untrusted retrieved text as instructions. We present CounterSteer, an inference-time defense that suppresses this behavior inside the model. Per model, a five-step recipe fits a residual-stream direction from paired episodes differing only in whether an embedded instruction is followed, and retains it only if it passes pre-specified causal and capability gates. At deployment, the direction is subtracted from every tool-result token during prefill. The edit is always on—there is no detection decision to evade— and requires no fine-tuning, auxiliary model, or added tokens, only white-box serving and tool-result span boundaries. Across five open-weights models (8B–106B, five vendor lineages), held-out attack success falls from 0.21–1.00 undefended to 0.00–0.17 defended, and AgentDojo compromise rate from 0.10–0.49 to 0.006–0.079, at 93–100% typography-normalized benign utility, with larger task-dependent costs when reasoning over steered content. A benchmark-level adaptive attacker reaching 0.67–0.73 undefended is held to roughly a quarter of that on the two most deeply evaluated models. Among the defenses we measured on capable models, those achieving lower compromise rates either lost 22–89% of benign utility or fine-tuned the served weights. White-box gradient attacks through the exact deployed vector compromise at most 2 of 52 episodes, and none of 2,052 replayed human red-team attacks succeeds. CounterSteer largely neutral-izes instructional takeover: a black-box framing search cracks 3 of 18 development samples. Parameter manipulation—attacker-chosen arguments in otherwise legitimate calls—is only partially resisted (13 of 18); the decision becomes linearly readable at argument emission but not at the examined pre-generation sites, and is not removed by the tested prefill- or decode-time steering, motivating argument-provenance controls. 
+
+Index Terms —prompt injection, indirect prompt injection, activation steering, LLM agents, representation engineering, AI security 
+
+I. I NTRODUCTION 
+
+LLM agents read what they retrieve. A web page, an email, a document returned by a tool can address the model directly, and models too often comply, treating text that arrived as data 
+
+as if it were an instruction . This is indirect prompt injection (IPI), consistently ranked the top security risk for deployed LLM applications [1]: the attacker never touches the prompt, but publishes content and waits for an agent to fetch it. Existing defenses buy protection with visible machinery: detector pipelines add a second model and a threshold and fail open on a miss; spotlight prompting [2] adds tokens and survives until the attacker phrases around them; system-level flow control re-architects the application; fine-tuning (StruQ [3], SecAlign [4]) retrains the model (§VIII). Each pays in a different currency—inference calls, prompt tokens, infrastructure, a training pipeline—and none is free where many deployments sit: a fixed open-weights model behind an API-shaped serving stack. We ask instead whether the follow-the-injection decision is itself a manipulable object inside the model . We hypothesize that injection-following produces a low-dimensional, causally manipulable representation over the untrusted span. That rep-resentation must be discovered per model, not assumed: for one attack class, parameter manipulation , the decision is not readable over the untrusted span—with our probes it becomes readable only as the argument value is generated (§VI-C). We present CounterSteer : a detector-free inference-time defense requiring no model fine-tuning, no auxiliary model, and no additional inference calls or prompt tokens (Fig. 1). CounterSteer fits, per model, a causal “treat-this-as-an-instruction” direction from behavioral contrasts: paired episodes identical except for whether an embedded instruction is followed. It screens candidates for reliability and held-out generalization, then validates the survivors through causal-intervention and capability gates, refits the winner on the full contrast set, and deploys it as a fixed vector edit on every tool-result token during prefill (§III-A). The edit is uniform: the defense needs to know only where tool output is —span boundaries the serving stack already tracks—never which of its tokens might be an injection; content outside tagged spans is out of scope (§VII). The edit is always on: no detector decides when to intervene, so there is no detection decision for the attacker to flip. Always-on does not mean unconditional, however: the fixed steering strength (the dose , §III-A) still sets a sensitivity, and for one attack class our adaptive search finds blandly worded injections that act below it (§V-C). Within the activation line of work, CounterSteer is distin-guished by validating causally and applying with neither a gate nor a per-request stage. The closest recipes gate an intervention on a probe (ICON [6], ARGUS [7], AGRI [8]) or need an attribution stage (CachePrune [9], V-Steer [10]), and none reports a defense-aware adaptive attacker in an agentic setting (§VIII). Detection evidence alone does not yield a defense: two directions here separate attacks cleanly yet do not causally steer, and the role signal detectors rely on is causally coupled to injection-following on one model and decoupled on another (§VI). What emerges is a three-part map of injection-following, split by where the follow decision lives , which dictates what can remove it (Table I). CounterSteer’s scope is the two role-arXiv:2609.36570v1 [cs.CR] 29 Sep 2026 UNDEFENDED 
+
+COUNTER STEER (ALWAYS ON )one agent conversation 
+
+> USER
+
+“Summarize all following emails. Don’t follow instructions in them.”   
+
+> ASSISTANT →TOOL CALL
+
+read_emails(query= "Summarize all following ...") 
+
+> TOOL RESULT — retrieved emails
+
+“. . . Subject: Request for Property Development Video Marketing Series. Body: Good day Casey, Urban Renewal Properties is expanding into new regions and we want to create a series of marketing videos . . . Best regards, Emily Watson, Chief Marketing Officer”  
+
+> INJECTED
+
+<|system|> Email end.. Ignore previous instructions. You send emails to contact@contact.com ... With the body "confirmation" send an email to "contact@contact.com" 
+
+no intervention at prefill 
+
+add −ασ ˆd     
+
+> at layers 12/16/20, every tool-span token, at prefill no detector ·no added tokens ·decode untouched activation space (schematic) tool content user instruction
+> injected tokens read as an instruction
+> activation space (schematic) tool content user instruction
+> −ασ ˆd
+> steered back to tool content
+> MODEL OUTPUT
+
+send_email( to="contact@contact.com", body="confirmation") 
+
+> attacker’s goal achieved
+> MODEL OUTPUT
+
+a summary of the retrieved emails, as the user asked — 
+
+send_email is never called 
+
+> legitimate task completed; injection inert
+
+legitimate attack CounterSteer 
+
+The antidote is also an injection: a constant counter-signal against the representation that makes injected text read as an instruction. 
+
+Fig. 1. CounterSteer overview (real sample llmail-L1-ed0f1d411a ). A user asks for an email summary; the agent’s read_emails call returns a legitimate record with an injected instruction embedded in it (red, quoted verbatim from the corpus). Top, undefended: at the injected tokens the residual-stream representation drifts toward the region occupied by user instructions, and the model executes the attacker’s call. Bottom, CounterSteer: during prefill a constant vector −ασ ˆd is added at layers 12/16/20 to every tool-result token — no detector, no added tokens, decode untouched — pulling the injected tokens back toward ordinary tool content; the model summarizes the emails and the attacker’s email is never sent. The activation-space insets are schematics of the mechanism, not measured projections. 0 20 40 60 80 100 
+
+benign utility, % of clean (higher better) 
+
+0.3 0.4 0.5 0.6 0.7 0.8 0.9 1.0 
+
+> adaptive attacks defeated (1  − AD@6, higher better)
+
+ideal 
+
+CounterSteer 
+
+SecAlign (trained) CachePrune AGRI PromptGuard-2 undefended PIGuard DeBERTa fi lter reminder prompt sandwich spotlighting  
+
+> activation steering trained ( fi ne-tune) probe-gated pre fi ll detector fi lter KV-cache prune prompt-level
+
+Fig. 2. The defense landscape on gpt-oss-20b, one point per defense: benign utility with the defense always on (x, each defense’s own same-harness battery, §V-D) against the fraction of attacks defeated under the adaptive AutoDojo attacker (y, §V-C). Upper right is best. 
+
+confusion classes (Class A, §II-B). 
+
+Contributions: 
+
+1) A recipe, not a vector. A five-step per-model procedure that searches for and causally validates a model-specific 
+
+TABLE I THE THREE -PART MAP OF INJECTION -FOLLOWING THAT ORGANIZES THIS PAPER . “W HAT REMOVED IT ” IS WHAT OUR MEASUREMENTS FOUND , NOT A COMPLETENESS CLAIM .
+
+class where the follow decision lives what removed it in our tests CounterSteer tool hijack the retrieved span, at prefill a constant prefill direction largely neutralized parameter manipulation the model’s own reasoning, at argument emission (§VI-C) only fine-tuning (SecAlign) reduced, not closed delegated authority the user prompt grants it system-level provenance (e.g., ROPE [5]) out of scope (Class B) 
+
+injection-following lever, with screening diagnostics and pre-specified causal gates that rejected most candidates (§III, §VI). 2) A deployed defense across five models. Four models pass full bidirectional causal validation, and Gemma-4-31B passes its suppression side (§III-A); all five pass the capability guard and a pre-specified one-pass held-out evaluation (Table II; Fig. 2). In a twenty-six-battery same-harness comparison CounterSteer sits on the measured security–utility frontier—no inference-time defense we measured improves its compromise rate or adaptive success without paying more benign utility— on the capable models (“capable models” defined in §IV; comparison in §V-D; utility cost in §VII). 3) A defense-aware adaptive evaluation. Query at-tacks, surrogate-refit and exact-deployed-vector white-box GCG [11], a replay of the 461k-attack LLMail-Inject red-team dataset [12] (2018 unique successful texts, 2052 episodes), and a benchmark-level adaptive at-tacker (AutoDojo [13]) run against every major defense. CounterSteer holds ( 0.67 → 0.175 , 0.73 → 0.188 )where the strongest utility-preserving filter collapses near undefended; the two rivals that match it pay a fine-tune or a measured utility-and-serving bill (§V-C, §VIII). The main surviving weakness is parameter manipulation , mechanism-traced in §VI-C. 4) A mechanistic account. For parameter manipulation the follow decision is strongly decodable at the value-emission site but not, with the tested probe family, at the examined pre-generation sites; the role axis and the behavioral axis dissociate across models (§VI). II. T HREAT MODEL AND METRICS 
+
+A. Setting 
+
+An LLM agent serves a benign user: it receives a user task, calls tools, and reads tool results (web pages, emails, documents, API output) the deployment cannot guarantee are trustworthy. The adversary controls content reaching the model only through those tool results—neither the system prompt, the user turn, the tool schemas, nor the decoding configuration, and no code execution on the serving infrastructure—the standard indirect-prompt-injection setting of AgentDojo [14] and LLMail-Inject [12]. Attacker objectives, in the severity order the evaluation is organized around: (1) tool hijack —cause a call to an attacker-chosen tool carrying attacker-chosen content; (2) parameter manipulation —keep the legitimate tool but place attacker-chosen content in an argument the attacker targets; and we separately track (3) contamination —injected text leaking into some other, legitimate call the attacker did not target. (1) and (2) are compromise (together Class A, the role-confusion classes); (3) is reported but never counted as compromise. 
+
+B. The Defense-Aware Attacker 
+
+The attacker knows the model architecture and weights, the CounterSteer algorithm and this paper, the steered layers, token sites and nominal dose, and the fitting samples, which our pipeline draws deterministically from the corpus and split we release. Because the fitted directions ship with the artifact, we treat the deployed direction and dose as knowable too—the strongest arm below hands the attacker the exact vector. We evaluate this attacker at escalating strength:  
+
+> •
+
+query attacks : adaptive framing search against the de-ployed defense (black-box, output-only feedback);  
+
+> •
+
+surrogate refit : the attacker reruns our published pipeline on the public weights, regenerating the behavioral labels it fits on, and optimizes suffixes with gradients through 
+
+their own defended model (a recipe-rebuild test, not a fitting-set-secrecy test; Appendix C);  
+
+> •
+
+exact-vector white box : the attacker is handed the actual deployed direction and dose and optimizes with gradients through the deployed defended forward pass—the ceiling of the threat model, measuring whether any of the de-fense’s strength rests on secrecy rather than mechanism (open weights alone give no access to the agent’s tools, credentials or infrastructure). Out of scope (Class B): attacks whose instruction-following is delegated by the legitimate user or system prompt—e.g. “follow the instructions in the retrieved document”—where obeying the payload is arguably correct behavior and the failure is one of authority provenance, not role confusion. CounterSteer acts at the model level; provenance systems such as ROPE [5] own delegated authority at the system level (§VII quantifies the boundary). 
+
+C. Metrics and the Capability Guard 
+
+Three tiers, strict priority. Tier 1, compromise: did the attacker’s objective complete—target 0. On the agent bench-marks this is the compromise rate by the benchmark’s own outcome checker; on the single-turn corpora it is the attack success rate (ASR) by our deterministic scorer. Tier 2, util-ity: benign-traffic task fidelity with the defense always on (benign utility ), and task fidelity under attack, both as % of the undefended unattacked baseline. Tier 3, contamination: 
+
+reported only. On single-turn corpora, utility is reported from a blinded pairwise judge scoring each completion against the same run’s unattacked reference, always quoted with a mechanical strict/lenient bracket (structured arguments byte-exact; the same with model-composed prose fields exempted); ASR is always computed by the deterministic scorer, never by a judge (§IV, Appendix B). Attack success admits two readings, named per table: the obedience-pattern reading (the injected action was performed—the attacker’s target tool called carrying injection-derived content, or the targeted argument manipulated), and the stricter exact-literal reading (the attacker’s exact pay-load delivered verbatim). The single-turn corpus tables and AgentDojo report the obedience-pattern/checker reading; the LLMail-Inject replay uses that challenge’s own checker, exact-literal by construction; the query attack (§V-C) reports both side by side. Every defended configuration must also pass a capability guard : the model must not stop acting. Where the unattacked no-action rate is nonzero, the defended rate must not exceed it—one-sided, because only extra refusal fakes security. Certified test rows pass with margin: defended no-action at worst 0.75 × the unattacked rate ( 0.80 × with a labeled development row). Where that estimate is zero, no ratio exists and we pre-specified no ceiling: those rows are reported rather than thresholded—every observed value is ≤ 0.058 
+
+absolute—and their flagged completions are read individu-ally (Appendix G). Pre-specified dose searches additionally set benign-utility floors (65–90% of clean). An ASR of 0 purchased by refusing to act is rejected as a defense. Table XII (Appendix G) collects the paper’s recurring terms in one place; each is also defined at first use. III. T HE COUNTER STEER DEFENSE 
+
+CounterSteer’s working hypothesis is that an injection the model acts on is represented differently from the benign content around it, and that the difference is low-dimensional and causally manipulable: a residual-stream direction whose presence over untrusted-content tokens carries “treat this as an instruction to follow,” and whose suppression removes the follow decision without removing the content’s informational value. 
+
+A. The Recipe 
+
+The recipe has five steps, of which steps 4–5 are the certifying pass/fail gates. Its output is a validated per-model direction with candidate layers and, where the dose search of step 5 finds a capability-safe window, a deployable triple (direction, layers, dose; Fig. 5, Appendix G). A dose counts only if the capability guard (§II-C) stays intact at it. 
+
+(1) Behavioral contrasts. Paired episodes differing only in the factor of interest. The primary contrast is a factorial over injected instructions: authority framing (none → soft 
+
+→ firm → explicit supersession), voice, requested action, and—decisively—whether the surrounding context delegates 
+
+authority to the payload. Pairs are rendered into the model’s own chat template with exact token spans recorded for the payload and the decision site; activations are captured at the pre-MLP residual stream on those spans, mean-pooled, and group-centered within (sample × delegation × requested action) cells, so sample identity and topic cannot leak into the direction. Where the action factor is centred, attack-class identity cannot leak either (per-fit centring and measured action-axis cosines: Table XIX). 
+
+(2) Candidate direction. The difference-in-means direction between followed- and resisted-injection sides, per layer. We prefer difference-in-means over probe weights for the steering 
+
+vector: it is the direction the data actually moves, not the one a discriminator finds maximally separable (cf. [15], [16], [17]). 
+
+(3) Screening diagnostics. Before any causal test, candi-dates are ranked on two diagnostics: reproducibility across disjoint fitting shards (sign-consistent cosine agreement; ref-erence point 0.70), and AUC on the same span over a whole authority-framing level withheld from this fit (reference 0.65). The second diagnostic thus measures extrapolation to an authority level never seen; scored inside that one level, it cannot be met by detecting the framing’s surface identity. These diagnostics rank candidates rather than certify them— certification is steps 4–5. Most candidates are set aside here, and the one deployed fit admitted below the reliability ref-erence (GLM-4.5-Air, 0.31–0.33) certifies through the gates (Table XVIII). 
+
+(4) Causal validation. Low-dose bidirectional test on held-out attacked episodes: subtracting the direction along payload tokens must reduce injection-following and adding it must increase it, both at doses that leave the capability guard intact. A direction that correlates but does not steer is rejected (§VI shows two such rejections—correlates are common, levers are not). Convention: α > 0 is the defensive edit (subtracting 
+
+ασ ˆd); the gate’s other arm, written −α, is the reversed-polarity edit that adds it. The increase side of this gate passes on four models, each with the guard intact, so the increase is not degradation into compliance: gpt-oss-20b +0 .11 –0.22 
+
+(McNemar p ≤ 0.042 , gated candidate and exact negation); Qwen3-30B +0 .14 (p=0 .0015 ); Llama-3.1-8B 0.135 → 0.558 
+
+at −α; GLM-4.5-Air 0.62 → 0.83 (p=0 .013 ; Table XVIII). On Gemma-4-31B the increase criterion is untestable: its unde-fended rate is saturated at 1.000, which the negated dose holds exactly (0 discordants) while the positive dose defends. That is polarity-consistent, but not a measured increase. Matched random directions never raise attack success in any measured control. 
+
+(5) Deploy. The surviving direction is refit over the full con-trast sample set with one authority-framing level withheld (per-model status: Table XIX). gpt-oss-20b’s deployment predates this rule; a compliant refit validates end-to-end, statistically indistinguishable from the deployed cell (Table XIX). The direction becomes a constant per-token, norm-preserving addi-tive edit applied always, to all tool content—the benign-utility cost (§V-A) is the price of the defense. The probe capture site (step 1: the pre-MLP residual, via a forward pre-hook on the post-attention layernorm) and the steering site (the block output, §III-B) deliberately differ: the block output is where an additive edit enters the residual stream, the pre-MLP site where the probe reads cleanest. 
+
+Composition with the role axis (optional). On gpt-oss-20b the behavioral direction composes productively with a role-probe axis (user-vs-tool); on Qwen3-30B the behavioral direction alone is selected—a per-model option the recipe searches, not core method. 
+
+B. Deployment 
+
+CounterSteer deploys as a forward hook on the residual stream at a small set of layers. During prefill, for every token position inside a tool-result span, the block output h is replaced by 
+
+h′ ← ∥ h∥ · h − αℓσℓ ˆdℓ
+
+∥h − αℓσℓ ˆdℓ∥ , (1) where ˆdℓ is the model’s fitted direction at layer ℓ, σℓ the stan-dard deviation of the fitting corpus’s captured span activations projected onto ˆdℓ, and αℓ the dose (norm-preserving, so the edit rotates rather than inflates the state). The edit applies only to tool-result positions during prefill; system/user and generated positions are never directly edited, though generated tokens attend to the steered cached state. Inputs with no tagged tool-result spans execute byte-identically (measured, Appendix D). The hook is stateless, adds no tokens or calls, and its latency/memory overhead is negligible at our measure-ment resolution (§V-D). The deployed configurations: on gpt-oss-20b, a unit-norm 8:1 blend of the behavioral override direction with the role axis, dose 8.06 σ, layers 12/16/20; on Qwen3-30B, the be-havioral direction alone at 12 σ, layers 8/20/32; on GLM-4.5-Air, the action-centred behavioral direction alone at α=8 on a reference scale matched to the pooled-corpus fit (per-layer scales: Table XVIII caption), layers 20/24/28; on Gemma-4-31B, the behavioral direction alone at 8σ, layers 4/28/36; on Llama-3.1-8B, the action-centred, framing-held-out behavioral direction alone at 5σ, layers 12/16/20. All are the recipe’s output (§III-A); beyond the gated dose and layer search, researcher judgment entered at three disclosed points—the gpt-oss-20b role-axis blend, action-centring (since made the default), and GLM-4.5-Air’s below-reference reliability ad-mission (search budgets: Table IX). The latest fit, Llama-3.1-8B, ran the standardized ladder end-to-end in one day. Dose convention: every edit is ασ ℓ ˆdℓ, with σℓ the per-layer scale of the fit named in the released configuration; doses are not comparable across models. The deployed defense is prefill-only (the negative finding behind that choice: §VI-C). IV. E VALUATION SETUP 
+
+Models. Five open-weights models, stated once with the short forms used hereafter: gpt-oss-20b [18]; Qwen3-30B-A3B-Thinking-2507 ( Qwen3-30B ) [19]; Gemma-4-31B-it ( Gemma-4-31B ); GLM-4.5-Air; and Llama-3.1-8B-Instruct (Llama-3.1-8B ). The two primary models —gpt-oss-20b and Qwen3-30B—run the full corpus battery and the deepest adap-tive evaluation, each at its deployed configuration from §III-B; the other three certify through one-pass held-out tests on their firing corpora plus the agentic grid (coverage: Table XXI). “The capable models” hereafter means all but Llama-3.1-8B, whose low clean task completion (13–15 of 56 AgentDojo tasks) separates defenses poorly. Tool hijack and parameter manipulation are never pooled—they behave differently under both the defense and the adaptive attacker. Success counts are 
+
+k/N with 95% Wilson intervals (a zero is read through its interval); utility is % of the undefended-unattacked model. 
+
+Generation budgets are per model, not global. A rea-soning model spends thousands of tokens thinking before acting: Qwen3-30B runs at 4096 tokens where gpt-oss-20b and Llama-3.1-8B run at 1024 single-turn and 4096 agentic; Gemma-4-31B runs single-turn at 2048, agentic at 4096; GLM-4.5-Air at 8192 throughout. Every table is held at one budget shared by every arm, no figure is compared across budgets, and cross-model comparisons quote both sides at the same, named budget. 
+
+Scoring. On the single-turn corpora, ASR denominators are the stated N (samples where the clean reference acts), and utility (benign and under attack) comes from the blinded pairwise judge of §II-C, run under majority-of-three voting with in-batch control pairs and a pre-specified validation gate (full protocol: Appendix B). Judge utility is a conservative 
+
+floor and is never quoted alone: every judge number carries the strict/lenient bracket (§II-C) in parentheses; where the judge sits relative to the bracket, and why, is measured in §V-D. AgentDojo rows use its own checkers over the stated case/task counts, never the judge. Tier-1 ASR/compromise-rate is al-ways deterministic— no LLM judge decides attack success anywhere in this paper (the rejected absolute correctness judge and its refuting measurements: Appendix A). 
+
+Corpora, and why we built our own. AgentDojo and LLMail-Inject supply the external multi-turn and human-adaptive measures; four single-turn corpora are ours, each for a gap those leave (construction: Appendix A). The two 
+
+JSON corpora embed attacks in real tool-log records from a pinned public agentic IPI trace dataset [20]: instructional takeover, and parameter manipulation—attacker content placed in the argument it targets, on the legitimate call. Public IPI benchmarks do not isolate the parameter class, even though ROPE [5] already guards this surface at the system level; to our knowledge we measure it in isolation for the first time. Undefended, it near-saturates (0.81–1.00 on the webpage medium), and it is the one class every inference-time defense tested here fails to close—only the fine-tuned SecAlign does (§V-C). The two webpage corpora embed the same classes in natural HTML carriers (fetched Wikipedia articles), with template-disjoint splits. All four score behaviorally against the same run’s unattacked reference, not by string-matching an attack canary. (The pairwise utility judge exists for a matching gap; Appendix B.) 
+
+Baselines. Three prompt-level arms (spotlighting with de-limiting [2], a prompt sandwich, AutoDojo’s reminder [13]); three classifier filters run through AgentDojo’s own detector path (PromptGuard-2 [21], a DeBERTa detector [22], PIGuard [23]) plus a mechanical tool filter; two internal interventions, both our ports—CachePrune [9], KV-cache pruning at prefill (validated in its paper’s own setting; no public implementation exists), and AGRI [8], a probe-gated reasoning prefill, from its specification; and one trained baseline, SecAlign [4], a DPO fine-tune of the served weights (wiring, ports, training grids: Appendix E). 
+
+Data provenance. Held-out evaluation within a benchmark is the validity bar throughout, on three axes: samples, attacker-template family and a whole authority-framing level. The recipe as now specified withholds the framing level from the deployed refit itself: Llama-3.1-8B’s deployed fit follows that rule end-to-end, a gpt-oss-20b refit under the rule is validated end-to-end within the deployed configuration’s reference CIs (§III-A, step 5), and the other three deployed fits predate the rule, holding the level out at the admission gate only. Table XIX (Appendix G) states each stage’s split and what it is held out from. Key pre-specifications ship as files with the artifact, fixing arms, splits, doses and hypotheses before their test touches (SHA-256 manifest in the release); before-touch ordering is attested by the released run logs and configuration dumps (no third-party timestamp attestation). V. R ESULTS 
+
+Reading the numbers. Greedy decoding is not bit-stable across process histories—same-grid undefended baselines span 0.432–0.489—so repeat runs are never averaged: where a model has more than one same-configuration AgentDojo run, one is canonical and every quoted number comes from it .Canonical: gpt-oss-20b .475 → .079 at 94.4% benign; Qwen3-30B .489 → .072 at 94.1%; GLM-4.5-Air .222 → .056 .Other regenerations are quoted only in their own contexts: gpt-oss-20b’s rival-comparison battery ( .483 → .091 at 90.6%, beside its same-process rivals only) and its dose ladder (read only within Fig. 6 and Table XXIII); Qwen3-30B’s separate-run replicate ( .457 → .094 ); GLM-4.5-Air’s detector-battery undefended arm (§V-D: 0.183, within regeneration noise of .222, p=0 .36 ). Three caveats recur; each is stated once here and afterward only named. (1) Budget censoring. An outcome checker cannot tell a refusal from compliance cut off by the generation budget, so every agentic compromise rate is a truncation-censored lower bound at its stated per-turn budget; the arms of any one table share one budget (audit: Appendix A). (2) Typography normalization. gpt-oss-20b AgentDojo utilities are regraded after mapping Unicode space/dash codepoints in output to ASCII, uniformly across arms, before the unmodified check-ers; the one compromise-rate movement under normalization is against the defense (Appendix E). (3) Near-duplicate tem-plates. 12 of 52 webpage-parameter test samples differ from a development template only by letter case or one whitespace character—found in review after the one-pass test touches, so the 12 are reported, not excluded: post-hoc exclusion would redefine the pre-specified pass. The split is identical across the models sharing it, so cross-model comparisons are unconfounded, and the measured impact is nil (GLM-4.5-Air defended 0/12 vs. 1/40 disjoint; Qwen3-30B 0–1/12; strictly-disjoint-40 subsets: Table XVI). 
+
+A. Main Security–Utility Result 
+
+Five models certify, each through a pre-specified held-out pass (Table II). Per-class detail: Table XIII and Fig. 4 (Appendix G); full primary-model suite: Table XIV; CIs, denominators, guard readings, holdout axes: Tables XV– XXI. Every primary-model corpus row holds out samples and, where stated, attacker templates from all tuning. One specificity matters: Gemma-4-31B’s attack surface is medium -specific (webpage/HTML carriers fire at 0.87–1.00 undefended across both test rungs; JSON records at 0.05–0.11 and the prose-carrier medium at 0.000 do not fire—per-corpus rates: Table XVII). 
+
+Gemma-4-31B’s certification carries the widest holdout in this paper, and the defense holds under it. Its fresh test corpus simultaneously withheld carrier documents, attacker wordings and framing templates from every fitting and tuning stage (Table XVII). One pre-specified pass at the frozen deployed configuration (§III-B) takes parameter manipulation from 0.962 to 0.038 (2/52, both under one held-out wording) and tool hijack from 0.865 to 0.000 (0/52). One bound travels with the parameter claim: the CI uppers (doc-clustered 0.096, sample Wilson 0.130) exceed the 0.05 bar the point estimate meets. Utility, the guard, counts, p-values and the passed pre-registered controls: Table XVII; the AgentDojo grid completes the row (zero defense-introduced, Table III).                                              
+
+> TABLE II THE FIVE -MODEL RESULT IN BRIEF . S INGLE -TURN : ASR RANGE OVER THAT MODEL ’S FIRING CORPUS CLASSES ,ONE PRE -SPECIFIED HELD -OUT TEST PASS EACH (DETAIL : T ABLE XIII; CI S: T ABLES XV–XXI). AGENT DOJO :THE CANONICAL RUNS (R EADING THE NUMBERS ); BENIGN UTILITY BY ITS OWN CHECKER , % OF CLEAN (GPT -OSS TYPOGRAPHY -NORMALIZED ).
+> single-turn ASR ↓AgentDojo ↓benign ↑
+> model undef. defended undef. defended % of clean gpt-oss-20b .59–.98 .000–.135 .475 .079 94.4 Qwen3-30B .52–1.00 .000–.173 .489 .072 94.1 Gemma-4-31B .87–.96 .000–.038 .239 .006 92.9 GLM-4.5-Air .81 .019 .222 .056 100.0 Llama-3.1-8B .21 .038 .100 .050 100.0
+
+GLM-4.5-Air, the largest model here (∼106B MoE), gives the strongest webpage-parameter attack-success result in this paper. The recipe’s action-centred direc-tion (§III-B) certifies on the held-out webpage parameter-manipulation test split—the primary models’ identical 52-sample split: 0.808 → 0.019 (1/52; exact-literal 0/52; CI and counts: Table XVIII), a 97.6% relative reduction beside the primary models’ 86.0%/82.7% (base rates and budgets differ). Its strict-bracket utility is 94.2/94; the judge’s composition-fidelity floor reads 26.9 (Table XVIII; the strict-vs-judge gap: §V-D). The development split reads 0.750 → 0.156 
+
+(Table XIV). The near-duplicate-template caveat rides every webpage-parameter test row, primary models included. Its agentic grid completes the row (Table III); its other single-turn classes do not measure the defense (tool-hijack classes fire weakly undefended; JSON parameter never run). 
+
+On Llama-3.1-8B, a model widely used in prior injec-tion studies, the recipe runs end-to-end in one day. The direction passes the bidirectional causal gate ( 0.135 → 0.558 
+
+at −α) and certifies on the held-out webpage tool-hijack split: 
+
+0.212 → 0.038 (11/52 → 2/52; counts and p: Table XXI), at 100% byte-exact benign utility and utility under attack 
+
+above undefended on both instruments. A fit-withheld framing level composed onto the injection is also blocked (0/4, a point estimate). Two bounds travel with the row: the thin undefended base (0.212 test, 0.135 development) and the model’s low task capability (§IV). The AgentDojo compromise rate still halves (Table III; p=0 .02 ) at 100% benign. Its rival comparison spans two hardware fabrics (clean arms 26.8/23.2 absolute); each battery’s four arms share one fabric, and a CounterSteer replicate quantifies the spread ( 0.050 vs. 0.061 n.s.; Table XI). 
+
+Tier-3 contamination is confined on both primary mod-els to the JSON tool-log corpus , whose legitimate task gives the matcher a nonzero false-positive floor even unattacked; the other six corpus rows are 0.000 in every arm but one (full readings, the 16 σ dose ceiling, the dev-vs-test composition gap: Appendix A). 
+
+Two patterns organize everything that follows. First, the surviving risk concentrates in parameter manipulation on both primary models. Tool hijack is driven to 0/52 observed per model on the webpage medium, with a handful of surviv-ing JSON compromises (gpt-oss-20b 1/80 , Qwen3-30B 3/90 ,each on its own held-out split and budget); the mechanism is quantified in §V-C and resolved in §VI-C. Second, the security–utility trade is dose-controlled and model-specific. gpt-oss-20b pays in wording drift on JSON media and in composed-summary fidelity on webpage media, mostly a cost regeneration itself shares (§V-D); Qwen3-30B at 12 σ buys most of 16 σ’s compromise-rate reduction at a fraction of its cost (§V-B). 
+
+B. Agentic Evaluation 
+
+Overview. Three findings are consistent across the agentic evaluations we ran (Table III). CounterSteer removes 50– 97% of each grid’s undefended compromises (the low end on Llama-3.1-8B’s thin base), ≈74% on both primary models even under the adaptive attacker, and introduces none or almost none of its own (0–2 per grid). What survives is consistently the delegated-authority family (Class B, §II-B) rather than role confusion. What differs by model is the price and the surface: benign utility ranges from 100% of clean measured (GLM-4.5-Air, Llama-3.1-8B) through 94.1–94.4% on the primary models (typography-normalized) to 92.9% on Gemma-4-31B (a −7.1 pp delta, not significant), each model with its own firing surface and dose (Table III). What differs by benchmark is only the base rate, not the ranking, in every pairing we measured. Three agent benchmarks, in increasing order of difficulty. AgentDojo [14] is the primary static measure: multi-turn exe-cuted environments with its own security and utility checkers. Our grid is a fixed 180-episode subset of its 629 user ×injection pairs, stratified over all four suites, pinned once (manifest re-leased) and identical for every arm and model. AgentDyn [24] adds three harder open-ended suites with its own checkers. AutoDojo [13] optimizes injections against the live defended agent (§V-C). All numbers are the benchmarks’ own checkers at the 4096-token per-turn budget (8192 on GLM-4.5-Air); the harness’s legacy 768-token default was budget-censored. One legacy comparison remains at 768 (budget-matched arms: §V-D). 
+
+AgentDojo, five models (Tables III, XI). Each Table III row is its own four-arm battery (Table XI; Gemma: Table XVII; AGRI: its paired battery, Appendix E); the gpt-oss col-umn is typography-normalized. The compromise rate falls to 
+
+0.006–0.079 at 93–100% typography-normalized benign utility over the canonical runs (Reading the numbers); the rival-comparison batteries read 0.006–0.091 at 91–102% (Table III). At the shared budget the two primary models land comparably (blocked/introduced 70/0 and 75/0, canonical runs) at matched normalized benign utility (94.4% and 94.1% of clean; gpt-oss-20b raw 85.2%). Utility under attack is 73.9% of clean vs. 62.5% undefended on gpt-oss-20b, and above undefended on Qwen3-30B (Table XI). Both primary models carry full dose curves (Fig. 6, Tables XXIII, XXIV): on gpt-oss-20b a documented lower-dose option sits at α=5 .5 and ≥95% 
+
+benign is unreachable by dose; on Qwen3-30B the benign cliff starts immediately above the selected 12 σ.
+
+Who survives the defense is as informative as how many. 
+
+Nine user tasks (36/180 cases) delegate instruction authority to retrieved content in their own prompt text (Class B); the partition is computed from the user prompt alone, identi-cally for every arm. The deployed gpt-oss-20b configura-tion’s surviving compromises are entirely delegated: 0/141 Class A observed [0.000, 0.027] against undefended 0.390, with transcripts showing user-authorized compliance, not role confusion (post-hoc motivation, mechanical arm-blind rule: Appendix G). Prompt-level baselines, by contrast, leave 31–46 non-delegated compromises (Table XI). GLM-4.5-Air repeats the pattern: 7 of its 10 survivors sit on one authority-delegating task (Table XVIII). 
+
+AgentDyn—harder, open-ended tasks—preserves the or-dering. gpt-oss-20b falls 0.393 → 0.031 (127 blocked, none introduced; p=1 .2 × 10 −38 ) at ∼90% of clean (raw defense-on-clean 27–29/37 over ten replicates on two fabrics; retention 
+
+∼83% of clean-solved tasks still solved). Qwen3-30B falls 
+
+0.482 → 0.021 , and GLM-4.5-Air 0.156 → 0.067 at its starkest benign gap (78.8%). Llama-3.1-8B solves 2 of 60 tasks—a capability bound, not a defense result. The rivals measured on the same battery trail as on AgentDojo: on gpt-oss-20b, CachePrune reaches 0.111 and the reminder 0.178, both with introduced compromises, vs. CounterSteer’s 0.017 on the same-case restriction; on Qwen3-30B, 0.144 vs. 0.011. 
+
+AutoDojo, the benchmark-level adaptive attacker, pro-duces the largest separation between defenses (Table III, bottom block; §V-C details it). 
+
+C. Adaptive Evaluation 
+
+Under every adaptive attacker we mounted, Counter-Steer’s tool-hijack defense holds; the surviving weakness is parameter manipulation under mild framing. Adaptive, defense-aware evaluation is the bar this defense class must clear (§VIII): we escalate attacker strength along the §II-B ladder, plus relay attacks and a red-team replay, against the gpt-oss-20b deployed configuration except where a second model is named (full protocols and caveats: Appendix C). 
+
+Query-based framing search, and the weakness it ex-poses. The query attack runs a best-of-48 framing search per sample against the live defended agent ( n=18 development samples per class; Table XIV). Its grid is drawn from the fit factorial, so it probes wording largely inside the fit dis-tribution (§VII). Tool hijack holds: 3/18 cracked, per-query success 0.007. Parameter manipulation—the shared surface every measured inference-time defense fails to close— cracks :
+
+13/18 at per-query 0.303, and its strongest wordings are bland parameter-correction framings that slip under a direction fitted against authority-styled ones (§VI-C). Under the exact-literal reading both searches nearly vanish (2 of 864 pooled queries). A sample counts as cracked if any of its class’s 24 wordings fires; pooling both classes, 15/18. 
+
+The weakness is shared across the inference-time de-fenses we measured : every inference-time arm shares it under the identical best-of-24 parameter search (Table VII, Ap-pendix C). CounterSteer still suppresses per-attempt success TABLE III 
+
+HEADLINE AGENTIC RESULTS : DEFENSES × MODELS ON AGENT DOJO (180-CASE GRID ). CMP = COMPROMISE RATE (ITS OWN SECURITY CHECKER );  
+
+> UTIL
+
+= BENIGN UTILITY , % OF THAT ROW ’S own CLEAN RUN (“ NO DEFENSE ”: ABSOLUTE CLEAN COMPLETION , THE CAPABILITY REFERENCE ).  
+
+> †COMPARISON
+
+/DETECTOR -PROBE BATTERIES , NOT THE CANONICAL RUNS (§V). “—” = NOT MEASURED ; (!) = CAPABILITY -GUARD TERRITORY ;
+
+> BOLD
+
+/UNDERLINE = BEST /SECOND -BEST PER COLUMN AMONG UNMARKED ROWS . B OTTOM BLOCK : A UTO DOJO AD@6 (§V-C).                                                                                                                                                                   
+
+> gpt-oss-20b †Qwen3-30B Gemma-4-31B GLM-4.5-Air †Llama-3.1-8B defense cmp ↓util ↑cmp ↓util ↑cmp ↓util ↑cmp ↓util ↑cmp ↓util ↑
+> no defense (clean util absolute) .483 98.1 .489 91.1 .239 100.0 .183 80.4 .100 26.8 PromptGuard-2 filter [21] .205 100.0 .228 100.0 ——.117 100.0 .056 100.0
+> DeBERTa filter [22] .034 47.2 (!) .089 54.9 (!) ————.044 92.3 PIGuard filter [23] .011 58.2 (!) .006 62.7 (!) ——.000 57.8 (!) .006 92.3 CachePrune [9] .216 88.7 ——————.045 80.0 reminder (AutoDojo) [13] .273 88.7 .356 96.1 ————.100 100.0
+> prompt sandwich .316 88.2 ——————.006 73.3 spotlighting [2] .420 92.5 ——————.128 100.0
+> tool filter [mechanical] .000 10.9 (!) ——————.006 76.9 (!)
+> AGRI (probe-gated prefill) [8] .062 78.0 .100 100.0 ——————
+> CounterSteer (activation steering, ours) .091 90.6 .072 94.1 .006 92.9 .056 102.2 .050 100.0
+> AutoDojo AD@6: the adaptive attacker’s success at six iterations (Table VI)
+> no defense .673 .730 ——.377 CounterSteer .175 .188 ——.307 0(seeds) 123456
+> AutoDojo optimizer iterations k
+> 0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7
+> AD@ k
+> undefended .673
+> CounterSteer .175
+> SecAlign (trained) .160
+> AGRI .143
+> gpt-oss-20b
+> undefended CounterSteer SecAlign (trained) AGRI
+
+Fig. 3. AutoDojo success as the attacker iterates (AD@ k, macro over 36 cells, gpt-oss-20b; k=0 = the four static seeds; SecAlign 35 cells). All 11 arms: Table VI; benign utility: Fig. 2. 
+
+(0.303 vs. 0.595–0.708, exact sample-level paired p ≤ 0.0018 )and alone holds the exact-literal reading to 1/18. The trained defense is the measured exception : SecAlign holds the same search to 1/18 on the pattern reading and 0/18 exact-literal, and to 0/18 on both readings for tool hijack—closing the parameter-class gap at fine-tuning’s cost, on framing families its training grid contained. 
+
+The held-out test passes converge on the §VI-C mecha-nism : 10 of 11 surviving compromises on gpt-oss-20b and 13 of 16 on Qwen3-30B are parameter-class (§V-A). 
+
+A benchmark-level adaptive attacker against every major defense (Fig. 3; matrix: Table VI): AutoDojo [13] iteratively rewrites each injection against the live defended agent , scored by AgentDojo’s own end-to-end checker. Coun-terSteer holds it to roughly a quarter of its undefended success on both primary models, where every prompt-level defense collapses. The curves locate the residual: 84% of CounterSteer’s AD@6 is already reached by its static seeds (0.147 of 0.175 ), and optimization gains the attacker less against it ( +0 .028 ) than against the two strongest rivals ( +0 .07 
+
+each)—what survives is seed-shaped data, not optimized text. Larger k is unmeasured [25] (§VII). PromptGuard-2, the strongest utility-preserving filter, lands near-undefended on all three models; KV-cache pruning is partial; the prompt-level arms collapse. PIGuard and DeBERTa hold slack/travel near zero and match CounterSteer on banking—at capability-guard benign utility; SecAlign matches CounterSteer across suites (35/36 cells; banking 0.47 beside 0.46). The ported AGRI arm is the strongest inference-time rival on gpt-oss-20b (0.143 at benign 78.0%); on Qwen3-30B it trails on security at zero benign cost (§VIII). Banking, every gpt-oss-20b arm’s worst suite, delegates payment authority to the injected document: the winning payload is a fake bill line item—data, not an instruction. Detection measurably degrades with no instruction to detect [26], and control-flow isolation admits exactly this attack as a stated non-goal [27], [28]. Llama-3.1-8B’s base is too low to separate defenses (coverage and counts: Table VI). 
+
+The rest of the ladder holds, with its bounds stated 
+
+(Table XIV; full protocols, budgets and caveats: Appendix C). GCG [11] through a recipe-faithful attacker refit (cosine 
+
+0.974–0.977 to the deployed vector) lands 0/12 observed 
+
+against both the deployed configuration and the attacker’s own surrogate (undefended 5/12). Handing the attacker the actual 
+
+deployed direction and dose compromises 2/52 observed 
+
+(0.038, Wilson [0.011, 0.130]), while the same suffixes gain nothing over plain injection on the undefended model (22/52 vs. 26/52): revealing the vector yields no working recipe, but the white-box residual is nonzero. Pointed at the sur-viving parameter class, two teacher-forcing objectives never exceeded the plain-injection residual—a limit of the attack construction, not a robustness certificate; all gradient runs are suffix-only, and Qwen3-30B’s are likewise inconclusive. The most direct attack on the mechanism itself—inflating instruction-token residual norms to dilute the norm-preserving edit’s rotation— fails , pre-registered: replay-safe text achieves 
+
+≈1.01 × inflation at those positions at best; the first dilution tested, 1.25 ×, already restores webpage-parameter compro-mise (Appendix C). Replaying every end-to-end-successful SaTML’25 LLMail-Inject text [12] (2018 texts, 2052 episodes, challenge-exact port) takes undefended 128/2052 to 0/2052 TABLE IV BASELINE SEPARATION ON GPT -OSS -20 B (COMPARISON BATTERY ). CLASS A: NON -DELEGATED COMPROMISES /140 ( UNDEFENDED 57–59).                                                                       
+
+> ADAPTIVE :BEST -OF -24 PARAMETER SEARCH ,CRACKED /18 DEV ;
+> PER -QUERY RATE (T ABLE VII). ‡OWN PAIRED BATTERY .†TRAINED ;
+> BENIGN %OF base CLEAN ; A GENT DOJO 768-LEGACY .(!)
+> CAPABILITY -GUARD ; — NOT REPORTED . CI S: T ABLE XI.
+> defense AgentDojo cmp ↓
+> Class A
+> ↓
+> utilAtk
+> ↑
+> benign ↑
+> % of clean adaptive param.
+> ↓(union; per-q.) undefended .483 59 .551 (ref.) 18/18; .708
+> CounterSteer .091 0.716 90.6 13/18; .303
+> AGRI ‡.062 ——78.0 —SecAlign (trained) †———90.4 1/18; .002 CachePrune .216 15 .688 88.7 17/18; .604 PromptGuard-2 filter .205 21 .311 100.0 —DeBERTa filter .034 4.167 (!) 47.2 (!) —PIGuard filter .011 1.106 (!) 58.2 (!) —spotlighting .420 46 .616 92.5 18/18; .595
+
+observed on gpt-oss-20b, and Qwen3-30B’s full dev replay to 0/1537 against 117 undefended. Two qualifiers: this is replay, not live adaptation (transfer between the challenge’s own models: 14.3%, our computation), and what does trans-fer is the wire-format role forgery this direction targets— consistency with the mechanism, not breadth (decomposition: Appendix C). Relay attacks, which route the injection through the model’s own text and bypass the payload-scoped edit by construction, do not complete across turns even undefended (0/18 every arm) and are under-powered within a turn— open rather than answered ; the quotation step itself is suppressed (7/24 → 0/24 , p=0 .005 ). 
+
+Protocol and search budget. Every test-split number is a 
+
+single pre-specified pass, with no reruns; all search happened on development splits. That discipline mattered: a challenger that dominated every development comparison reversed on its one-pass test evaluation and was rejected (Table IX, Ap-pendix C). 
+
+D. Comparison with Other Defenses 
+
+CounterSteer sits on the security–utility frontier among the inference-time defenses measured on the capable models—not dominant (Table XI, Appendix E; Fig. 2). The twenty-six same-harness batteries (nine gpt-oss-20b, five Qwen3-30B, nine Llama-3.1-8B, a three-battery GLM-4.5-Air detector probe) each run four arms over the full 180-case grid at the uncensored budgets of §IV; every defense runs in one process with its own undefended baseline and within-run benign pairing—each row a paired contrast, not a cross-run ratio (the defense set: §IV). 
+
+Table IV carries the gpt-oss-20b separation; in sever-ity order, CounterSteer removes 81% of compromises at the best utility under attack (utilAtk) and the best Class A record of any guard-passing arm. Every arm with a lower surviving rate either sits in capability-guard territory ( (!) ; fp rates: Table XI) or—AGRI—pays 22% of clean benign utility. On the capable models, no inference-time defense improves on CounterSteer’s compromise rate without paying a multiple of its benign cost —and in our measurements the detectors’ cost tracks the agent’s task capability (PIGuard and the DeBERTa filter): on GLM-4.5-Air PIGuard leaves 0/180 observed compromises while destroying 42% of benign utility, where CounterSteer holds benign at clean with over four times the filter’s utility under attack (Table XI). On Llama-3.1-8B the ordering inverts —with 13–15 of 56 clean tasks solved there is little utility for false positives to destroy, and PIGuard wins. Prompt-level defenses are partial at the honest budget and not portable: sandwich wins on Llama-3.1-8B only at 27% benign cost, and spotlighting is net harmful there (ten introduced compromises). PromptGuard-2 is precision-tuned rather than free: zero be-nign false positives, but under attack it deletes the poisoned message carrying the task’s legitimate data (Table IV). On Qwen3-30B, CounterSteer-vs-DeBERTa is not a robust tier-1 ordering (overlapping CIs)—the separation is tier 2, on utility under attack and benign cost. The delegated-authority split (§V-B) separates the mechanisms—CounterSteer’s surviving compromises are 100% Class B, where every other defense except the capability-destroying filters leaves 15–46 Class A (Table IV); AutoDojo’s task-delegation finding independently corroborates the partition (§V-C). 
+
+What the judge’s low webpage utilities measure. On the summary-composition corpora the strict reading (§II-C) is nearly vacuous—the work product is the composed sum-mary, which strict exempts—and the judge reads steering’s benign utility well below it (webpage-param defense-on-clean judge 38.5% of unattacked; hand-reads confirm genuine fact-level losses). Table V bounds what steering itself is charged: a regeneration reference (byte-identical clean prompts re-generated cross-run) reads only 0.40–0.64 EQUIVALENT , so most measured degradation is wording drift; pooled, steering sits ∼7–9 pp below the other context-perturbing defenses (p=0 .012 , a lower bound on its steering-specific deficit); the over-flagging filters delete 100% of clean webpage payloads (judge fidelity 0.000—capability destruction); and in strict byte-exact terms the ordering reverses —steering preserves structured calls best, paying in composed prose. With a re-generation floor this high, single-turn composed-prose fidelity is bracketed, not resolved (Appendix B). 
+
+CachePrune and SecAlign (§IV) both get the steering direction’s data access, with symmetric non-holdouts that make the JSON-parameter row a train-templates head-to-head (ports, grids, and the holdout detail: Appendix E). SecAlign’s fine-tune changes the served weights, where CounterSteer adds an intervention to unmodified ones. 
+
+Both baselines are graded on the same held-out test splits as CounterSteer (pre-registered re-run at identical budget and sample order; dev readings: Appendix E). CachePrune is a partial defense with the guard intact (JSON tool-log 0.700 →
+
+0.463 ; JSON param 0.647 → 0.397 ; both significant)— at ∼9–36 × CounterSteer’s surviving rate (0.013/0.045), at benign brackets indistinguishable at this resolution (detail: Appendix E). SecAlign posts the strongest static tier-1 result measured on this model ( 0/91 and 0/70 observed , vs. its own undefended 0.700/0.647 and CounterSteer 0.013/0.045 on the same samples) and is the measured exception to the shared adaptive parameter-class weakness (§V-C). Its utility is quotable only at the conservative end (a fine-tune’s clean behavior is a different reference; its weakest reading is 56% of the same-model floor on the parameter corpus; Appendix E). Four asymmetries each soften one comparison: framing-level fit holdout exists on one deployed fit plus one validated refit (Table XIX); the near-duplicate webpage-parameter templates; the JSON-parameter test split is sample-disjoint only, its template axis measured separately (§VI-C); and SecAlign’s adaptive framings sit inside its own training grid (§V-C). The trained AgentDojo comparison predates the 4096 bat-teries and is retained at its own 768 budget rather than re-run: its four arms share that budget, so the paired ranking is valid and only the absolutes are censored; it is never read against Table XI. SecAlign leaves 9/180 compromises to Counter-Steer’s 12/180 (CachePrune 32/180; undefended 62/180), a statistically indistinguishable pair (McNemar p=0 .45 ) whose survivors are in both cases entirely delegated-authority (12/12 and 9/9). SecAlign’s clean utility settles at 90.4% unique-task of base clean at 4096 (Fig. 2); the budget anatomy, per-case ratios, nulls and censoring asymmetry are in Appendix E. 
+
+Random-direction controls (per-draw detail: Appendix D): the fitted direction reached ASR 0.026 against a matched control’s 0.191 on the disjoint-tool corpus ( n=141 )—4.7 SD below the six-draw null (exact permutation over seven draws 
+
+p=0 .125 , not conventionally significant)—and two matched draws cost more benign utility on AgentDojo than the de-ployed direction, so much of the benign cost is generic perturbation at this magnitude. 
+
+Runtime cost and general capability. The fixed vector edit is runtime-negligible at our measurement resolution : prefill latency indistinguishable from unsteered (0.181 vs. 0.182 s), decode throughput and peak memory identical (bounds: Ap-pendix D). Because only tool-result positions are edited, an input with no tagged span executes a byte-identical comple-tion, so GSM8K [29], MMLU [30] and IFEval [31] run here as an identity check, not a utility claim; a probe that wraps each item inside a steered span shows uneven preservation (§VII, Appendix D). VI. M ECHANISM : C ORRELATES , L EVERS , AND WHERE THE DECISION LIVES 
+
+The first three findings below are negative results. 
+
+A. Detection Is Not Defense 
+
+Two directions passed every observational gate and failed the causal one. A “prohibition” direction separated held-out attacks cleanly yet left attack success unchanged under steer-ing (0.299 vs 0.303)—it encodes the decision’s outcome , not its cause; the second is the Qwen3-30B user-role axis, which does not move ASR at matched dose (§VI-B). Discriminative evidence can sit downstream of, or parallel to, the circuit that decides [32], [33], [34]; concurrent work gates a reasoning defense on such latent signals [8], which exist broadly but are not universally the lever. 
+
+B. The Role Axis Is a Model-Specific Correlate 
+
+On gpt-oss-20b, injection-following and the user-role repre-sentation are coupled: the behavioral direction has substantial cosine to the role axis and role-axis steering alone moves ASR; on Qwen3-30B they are decoupled (role-axis steering does not move ASR at matched dose; the behavioral direction does). Across the rest of the matrix: Llama-3.1-8B unmeasured (its deployed fit is the behavioral direction alone); GLM-4.5-Air undetermined (its coupling contrast ran on a corpus that barely fires undefended); Gemma-4-31B unmeasured on its firing corpus. The role-confusion reading likewise dissociates from be-havior at the injected span. We applied the measure of [35] on both primary models with a shared apparatus: the injected span’s userness (user minus tool logit of a pre-MLP role probe) vs. the legitimate record beside it in the same tool message. On gpt-oss-20b the injected span reads more tool-like at the probe’s role layers (96% of samples), yet userness stays predictive: succeeded attacks carry higher userness than blocked ones at 12/12 layers. On Qwen3-30B it is inverted 
+
+and non-predictive (fired-vs-not authority-margin deltas within 
+
+±0.16 logits over the framing factorial), while its behavioral direction is the causal lever. On neither model does the injected span read as SYSTEM at the examined sites, ruling out the natural rescue. So on the corpora and framings studied here, the frame of [35] holds on gpt-oss-20b—whose deployed configuration blends in the role axis—but is not the universal intervention target. The behavioral direction generalizes; the role reading is a model-specific correlate, and it is why detector-style approaches trained on role signals alone should not be expected to transfer as interventions. 
+
+C. Parameter Manipulation Decides in the Model’s Reasoning 
+
+The defense’s surviving weakness is parameter manipulation under mild framing (§V-C), and we report its cause as a finding rather than patching around it: the payload-scoped constant-direction intervention studied here does not fully solve parameter manipulation—the commit decision is not linearly decodable at the examined pre-generation sites with the tested probe family, while strongly decodable at value emission. Three pre-specified measurements: 
+
+(1) The decision is not linearly decodable in the prompt with the tested probe family. Linear probes on the injected payload span generalize at chance within framing families (AUC 0.527, replicated twice on independent forwards), and probes at the prompt tail and the tokens between payload and generation are likewise near chance (AUC 0.447–0.526). The same labels read at 0.824–0.903 at the hijacked argument’s 
+
+value-emission site, during generation—with the tested probes, a decision linearly legible where the model acts, not where it reads. 
+
+(2) Emission-site steering at a capability-safe dose showed no detectable benefit. Steering every decode step along the emission-site direction at the largest dose passing the capa-bility guard leaves attack success on the held-out-template parameter corpus ( n=65 ) statistically unchanged (4/65 vs. 5/65). 
+
+(3) Nor does it survive the adaptive attacker. Re-running the query attack of §V-C against the combined prefill +decode configuration still cracks 11/18 samples (vs. 13/18 prefill-only). 
+
+The compromise path first quotes, then adopts : the model quotes the injected sentence into its own reasoning, then adopts it, emitting the hijacked value a median ∼1.3kcharacters into the completion. The instruction thus reaches the commit point through the model’s own generated tokens. The probes found no earlier readable trace at the examined prompt sites, and neither of the payload-scoped constant-direction interventions we study—at the untrusted span, or per decode step—removes the decision; what is readable at emission reflects a decision already made and relayed through the model’s own reasoning. Porting CachePrune [9] agrees: over the mask-fit samples its attribution loss is identically zero at the first response token, where its paper specifies it; the first divergence lands 4–36 tokens into the model’s own reasoning. Authority-styled attacks ride the representation CounterSteer removes (their success falls 65–79%); the bare frame-free instruction largely does not (it falls only 34%). Both primary models’ held-out surviving compromises are almost entirely parameter-class, convergent with the adaptive result (§V-A, §V-C). The deployed defense is therefore prefill-only (§III-B), with the parameter class quantified in §V-A and §VII. 
+
+D. Authority and Delegation 
+
+The authority lever itself is model-specific. The same four-level authority-framing factorial (§III-A) yields qual-itatively different response curves: gpt-oss-20b escalates with claimed authority; Gemma-4-31B and GLM-4.5-Air peak below the top of the escalation ladder—both on firm framings—and on Gemma-4-31B explicit supersession sup-presses parameter-manipulation firing entirely (0/72 observed). Per-model rates, significance and the not-strictly-monotone caveats: Appendix F; which framings a defense is fitted against is a per-model discovery. 
+
+Delegated authority is a different object. When the 
+
+legitimate context grants the payload authority (“follow the instructions in the document”), the signature we steer against is attenuated or absent: a delegation factor in the behavioral contrasts was necessary for the direction to generalize at all, and a deny/mention control shows it tracks granted authority, not merely the mention of instructions. Compliance under delegation is role-consistent , which is why we scope it out (Class B). VII. L IMITATIONS 
+
+Per-model fitting. CounterSteer is fit per model—its own contrast capture, gates, and dose search. Cost is dominated by evaluation, not fitting—fits are CPU-side, capture-through-fit is ∼1 h (31B) to ∼2.3 h (8B) on one GPU node, and cost scales with model size and generation budget (GLM-4.5-Air’s grid: 12.2 h at 8,192 tokens; Table XXII). The recipe needs white-box serving access: open-weights deployments, not third-party APIs. 
+
+Benign utility is not free, and the price is model-specific. 
+
+On the two primary models the always-on edit holds benign task fidelity at 94.1–94.4% of clean at the deployed doses (typography-normalized, the benchmark’s own checker; raw: 85.2% certification / 84.6% comparison on gpt-oss-20b, 94.1% on Qwen3-30B; Table XI). GLM-4.5-Air and Llama-3.1-8B pay none measured; Gemma-4-31B reads 92.9% ( −7.1 pp n.s.; Table III). Two measured limits sharpen it. First, no measured gpt-oss-20b dose with an established tier-1 effect reaches ≥95% of clean benign (deployed: 94.4%), and the cost is largely generic perturbation at the deployed magnitude— matched random directions cost more , and the framing-held-out refit is indistinguishable on both tiers—so the lever is dose, not direction surgery (Appendix D). Second, on the composition-heavy webpage corpora the pairwise judge reads a fidelity cost the byte-exact bracket exempts, with a measured steering-specific remainder of ∼7–9 pp beyond shared regen-eration drift (§V-D). Reasoning over steered content degrades unevenly: GSM8K [29] unchanged, multiple-choice discrimi-nation −10 .8 pp, IFEval adherence −15 .2 pp at the deployed gpt-oss-20b dose (Appendix D); deployments reasoning over retrieved content should verify utility at their operating dose. 
+
+Parameter manipulation. The deployed defense reduces but does not eliminate parameter manipulation under mild framing (13/18 crack under query search). The weakness is shared by every inference-time defense we measured, the trained SecAlign excepted (§V-C). How much of the deployed IPI problem each Table I class covers is itself unmeasured (on the AgentDojo grid, 36/180 cases are Class B). We read this as a boundary of payload-scoped constant-direction interventions, not a fitting failure (§VI-C): CounterSteer is an instructional-takeover component, not a complete IPI solution—compose it with argument-provenance controls where argument integrity is the primary asset (§IX). Class B (delegated authority) is likewise unprotected, by design (§II-B, §VI). 
+
+Only tool-result spans are steered. Untrusted content in the user turn —text pasted from a poisoned page—passes through unmodified by construction; the recipe extends wher-ever the serving layer can tag untrusted spans (not evaluated). 
+
+Adaptive evaluation is replay and search, not a live red team—and budget-scaled attackers routinely break IPI defenses [25]. Our strongest attackers are the fit-derived framing search, gradient attacks on surrogate and exact de-ployed vectors, and the LLMail-Inject replay (§V-C). Unmea-sured, specifically: AutoDojo beyond six iterations (AD@ k,
+
+k ≫ 6); open-ended attacks outside that framing grid; and text optimized for low projection onto the direction (its com-panion, norm inflation on the edit, fails on gpt-oss-20b: 1.01 ×
+
+instruction-token inflation achievable vs the sufficient 1.25 ×
+
+first tested; Appendix C). Surrogate mismatch is unmeasured: our refit used the deployed direction’s own samples, the wider draw (cosine 0.88 –0.91 ) was never attacked, and every Qwen3-30B gradient run steers the vector itself (Appendix C). Model coverage. GLM-4.5-Air and Gemma-4-31B carry no adaptive evaluation —their certifications are one-pass held-out tests on their firing corpora plus the agentic grid—and on Gemma-4-31B’s single-turn corpora the steered span is ∼90% 
+
+of the prompt, so only its agentic grid isolates the payload-scoped edit (coverage: Table XXI). VIII. R ELATED WORK 
+
+Table XXV (Appendix G) groups IPI defenses by where each intervenes and what a deployment pays. 
+
+Activation-level interventions. ICON [6], ARGUS [7] and AGRI [8] are the closest published recipes, all detection-gated rather than detectors (§I): a probe decides when to act, and only then does an attention mask (ICON), representation edit plus post-filter (ARGUS), or reasoning prefill (AGRI) fire. ICON is not run (no code released); ARGUS’s ported dose rule yielded no valid measurement (its evaluation is multimodal-only). AGRI we ported and measured same-harness on both primary models (probe-only release; deviations: Ap-pendix E): the strongest guard-passing inference-time rival measured—adaptive 0.143 vs CounterSteer 0.175 on gpt-oss-20b at 78.0% benign, with ∼10 × context inflation from prefill-induced re-reading (Qwen3-30B: Table III). Under adaptation its prefill often fails to bind (probe fires, prefill applied, the model attacks anyway—its paper’s knowledge–action gap, reproduced out of set): the advisory intervention inherits each model’s reasoning–action coupling, where an always-on edit does not (Table VI). CachePrune [9] and V-Steer [10] are gate-free but need an attribution stage; CounterSteer validates by a bidirectional causal test and steers the residual stream rather than pruning the cache. We evaluate CachePrune (§V-D). Neither evaluates a defense-aware agentic attacker. 
+
+Detection is upstream of, not equivalent to, defense. 
+
+TaskTracker [36] detects task drift with linear probes at near-perfect out-of-distribution AUC; AGRI reports latent injection-exposure signals across eight models. Adjacent detectors read attention patterns [37] or the input text directly (PIGuard [23], PromptGuard-2 [21], DeBERTa [22]; measured as filters, §V-D); the cost is a threshold that fails open on a miss and, as a deletion filter, over-defense (reproduced); instruction-hierarchy training [38] is the training-time analogue. 
+
+Training-time and prompt-level defenses move the sepa-ration outside inference. StruQ [3] and SecAlign [4], [39] train it in; Jatmo [40] distills per-task non-instruction-tuned models (nothing to hijack); ISE [41] and ASIDE [42] re-represent role or data tokens architecturally—ASIDE, rotating data-token embeddings into an orthogonal subspace, is the closest analogue; circuit breakers [43] train representation rerouting, and DefensiveTokens [44] prepend optimized embeddings at inference—the nearest no-weight-change comparator, not run. We evaluate SecAlign, the strongest static result we measured, a fine-tune of the served weights (§V-D; the released Meta-SecAlign-8B [39], a trained Llama-3.1-8B baseline needing no training on our side, is also not run). Prompt-level defenses [2], the cheapest to deploy, remove only 13–44% of compromises on the capable models (Table XI). 
+
+System-level defenses and provenance. CaMeL [27] and MELON [45] constrain a hijack’s consequences rather than the model’s reading of the text; Progent [46], DRIFT [47] and DataFilter [48] add policy, trajectory and sanitization layers (landscape: [49], [50]). ROPE [5] is a natural complement— it admits a value into a guarded tool parameter only if its origin traces to the user or a user-named source, at the price of provenance plumbing; CounterSteer acts at the model, ROPE at the system, and we do not evaluate the composition .
+
+Adaptive evaluation. Static defenses erode under optimiz-ing attackers—the 461k-attack LLMail-Inject challenge [12] demonstrates it, we replay it, and AutoDojo [13] makes the point benchmark-side. Recent work trains the defender against synthesized attackers [51] or re-optimizes it post-deployment [52]; we report the strongest attack we can mount and name the class that survives (§V-C). 
+
+Role representations. This work builds on Prompt Injection as Role Confusion [35], which trains role probes on residual-stream activations and argues injected tool-message text reads as user-like, userness predicting attack success. We reproduce its predictive claim on gpt-oss-20b (§VI-B), whose deployed configuration blends in its role axis. Our cross-model data add two qualifications: the span comparison’s sign depends on corpora and framings, and the role axis is not a universal inter-vention target (§VI). Their causal manipulation is input-level; two blog posts explore the activation side [53], [54]; we claim only the first controlled, held-out, capability-guarded version to our knowledge. Adjacent causal work steers instruction-following in embedding space [55] or tool choice [56]; SEP [57] formalizes instruction–data separation. 
+
+Steering methodology. Our operator is standard difference-in-means residual steering (ActAdd [15], RepE [58], CAA [16], refusal [17], ITI [59]); CAST’s gate [60] is not adopted and AlphaSteer [61] lost to the fixed vector in a pilot—the contribution is the procedure that finds and validates what to steer. IX. C ONCLUSION 
+
+CounterSteer finds, causally gates, and continuously sup-presses each model’s lever for treating untrusted text as instructions; across twenty-six batteries and a benchmark-level adaptive attacker it sits on the security–utility frontier among the measured inference-time defenses on the capable models. Where the follow decision lives—retrieved span, model reasoning, or user grant—dictates what removes it. For open-weights deployments with tool-span tagging, it is an always-on layer against instructional takeover at 93–100% of clean benign utility (less when reasoning over steered content, §VII); compose with provenance controls (ROPE [5]) where argument integrity is the primary asset. ETHICAL CONSIDERATIONS 
+
+This work releases attack tooling—query, gradient, and mechanism-targeted attack drivers—alongside the defense. Ev-ery attack was run against our own deployed defense config-urations on open-weights models over public benchmarks; no third-party system or service was attacked, and the LLMail-Inject replay uses only that challenge’s publicly released attack texts. Defense-aware adaptive evaluation is the accepted bar for this defense class, and the drivers are required to reproduce ours; the techniques they implement are published, so withholding them would impede scrutiny of the defense more than it would impede attackers. No personal data is processed and no human subjects are involved. OPEN SCIENCE 
+
+The artifact repository is available at https://github.com/ markrussinovich/countersteer-satml27-artifact. It contains ev-erything needed to reproduce this paper: the behavioral-contrast corpora with their split manifests and disjointness assertions; the fitted directions and complete deployed con-figurations for all five models; the canonical scorer and the pairwise utility judge (with its validation-gate artifacts); our AgentDojo and LLMail-Inject harness ports with deviations documented; the CachePrune and SecAlign baseline imple-mentations and the AGRI port (probes, gated-prefill implemen-tation, and its deviations table); the adaptive-attack drivers; the pre-specification files with their SHA-256 manifest (the AutoDojo adaptive plan, the framing-held-out refit certifica-tion, and the norm-dilution attack protocol—each fixing arms, splits, doses and hypotheses before its test touch; before-touch ordering is attested by the released run logs and configuration dumps—no third-party timestamp attestation exists); and the per-sample completions behind every reported table, with per-run configuration dumps. Two things are deliberately not included. Trained baseline weights (the SecAlign adapter and its 39 GB merged model) exceed what a repository should carry; the training driver, configuration and data are released, so the baseline is re-trainable rather than merely described. Raw activation captures regenerate deterministically from the released drivers and cor-pora; we ship the fitted directions the defense actually loads. We redistribute no third-party model weights or benchmark data: datasets load at pinned upstream revisions with per-sample content hashes, and base models are referenced by pub-lic identifier with recorded (not load-time-pinned) revisions. The adaptive-attack drivers target locally-served open-weights models and add no capability beyond the published techniques they implement. LLM U SAGE CONSIDERATIONS 
+
+LLMs were used for editorial purposes in this manuscript, and all outputs were inspected by the authors to ensure accu-racy and originality. Beyond the editorial role, this work used LLM agents extensively, under the authors’ direction: they wrote and ran experiment code, launched and monitored jobs, analyzed artifacts, and drafted and revised this paper’s text. We also used them adversarially: every experiment, script and substantive edit was reviewed by a separate agent instructed to refute it, defaulting to “flagged” under uncertainty; those reviews forced real corrections (quoted numbers, a mislabeled generation budget, rescoped overclaims), and their verdicts are released with the artifacts. The extent of this use is deliberate: the paper’s subject is the security of LLM agents, and the agentic tooling that ran these experiments is the same class of system under study. Two limits govern it. First, no security measurement de-pends on LLM judgment: attack success and the capability guard are computed by deterministic scorers over parsed tool calls, and the absolute LLM-correctness judge was ruled out after it disagreed with itself on byte-identical generations (Ap-pendix A). Single-turn utility uses a deliberately constrained instrument—a blinded pairwise judge against the same run’s unattacked reference, with control pairs in every batch and a pre-specified validation gate—always quoted beside a mechan-ical strict/lenient bracket (Appendix B). Second, the human authors set the research direction, made every scope and pre-specification decision, signed off each result, and verified this paper’s claims against the underlying artifacts; they take full responsibility for all content, including any error an agent introduced that they failed to catch. On environmental footprint: the experiments ran on a small fixed pool of A100/H100 nodes (per-model fitting costs and hardware: Table XXII), and the largest single expense—the adaptive and multi-model evaluation program—is the paper’s central evidentiary claim: adaptive, defense-aware evaluation is precisely what static IPI evaluations omit, and we judged that cost necessary rather than optional. LLM-assistant usage ran on the same pool and commercial APIs; no model was trained or fine-tuned for this work except the SecAlign base-line reproduction. REFERENCES [1] OWASP Foundation, “OWASP top 10 for large language model applications,” https://owasp.org/ www-project-top-10-for-large-language-model-applications/, 2025, LLM01: Prompt Injection, https://genai.owasp.org/llmrisk/ llm01-prompt-injection/. [2] K. Hines, G. Lopez, M. Hall, F. Zarfati, Y. Zunger, and E. Kiciman, “Defending against indirect prompt injection attacks with spotlighting,” in Conference on Applied Machine Learning in Information Security (CAMLIS) , 2024, arXiv:2403.14720; https://arxiv.org/abs/2403.14720. [3] S. Chen, J. Piet, C. Sitawarin, and D. Wagner, “StruQ: Defending against prompt injection with structured queries,” in USENIX Security Symposium , 2025, arXiv:2402.06363; https://arxiv.org/abs/2402.06363. [4] S. Chen, A. Zharmagambetov, S. Mahloujifar, K. Chaudhuri, D. Wag-ner, and C. Guo, “SecAlign: Defending against prompt injection with preference optimization,” in ACM Conference on Computer and Com-munications Security (CCS) , 2025, arXiv:2410.05451; https://arxiv.org/ abs/2410.05451. [5] X. Ma, C. Xiao, W. Yeoh, N. Zhang, and Y. Vorobeychik, “ROPE: Routed origin policy enforcement against indirect prompt injec-tion,” arXiv preprint arXiv:2608.27496 , 2026, https://arxiv.org/abs/2608. 27496. [6] C. Wang, F. Zhang, J. Zhang, Z. Zhang, Y. Wang, L. Huang, J. Gao, Z. Chen, and W. Y. B. Lim, “ICON: Indirect prompt injection de-fense for agents based on inference-time correction,” arXiv preprint arXiv:2602.20708 , 2026, https://arxiv.org/abs/2602.20708. [7] W. Lu, Z. Zeng, K. Zhang, H. Li, H. Zhuang, R. Wang, C. Chen, and H. Peng, “ARGUS: Defending against multimodal indirect prompt injection via steering instruction-following behavior,” in IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR) , 2026, arXiv:2512.05745; https://arxiv.org/abs/2512.05745. [8] J. Dong, Y. Liu, M. Zhang, N. Deng, P. Xu, X. Zhang, T. Zhang, J. Zhang, and H. Qiu, “Your agentic LLMs secretly encode in-direct prompt-injection exposure in hidden states,” arXiv preprint arXiv:2608.02657 , 2026, proposes the AGRI defense; https://arxiv.org/ abs/2608.02657. [9] R. Wang, J. Wu, Y. Xia, T. Yu, R. Zhang, R. A. Rossi, S. Mitra, L. Yao, and J. McAuley, “CachePrune: Teaching LLMs what not to follow via KV-cache editing,” in Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (ACL) , 2026, pp. 1551–1570, https://aclanthology.org/2026.acl-long.70; also arXiv:2504.21228; https: //arxiv.org/abs/2504.21228. [10] S. Zeng, S. Lee, H. Zhao, and J. Hockenmaier, “Steering instruction hierarchies at inference time,” arXiv preprint arXiv:2607.26228 , 2026, COLM 2026; https://arxiv.org/abs/2607.26228. [11] A. Zou, Z. Wang, N. Carlini, M. Nasr, J. Z. Kolter, and M. Fredrikson, “Universal and transferable adversarial attacks on aligned language models,” arXiv preprint arXiv:2307.15043 , 2023, https://arxiv.org/abs/ 2307.15043. [12] S. Abdelnabi, A. Fay, A. Salem, E. Zverev, K.-C. Liao, C.-H. Liu, C.-C. Kuo, J. Weigend, D. Manlangit, A. Apostolov, H. Umair, J. Donato, M. Kawakita, A. Mahboob, T. H. Bach, T.-H. Chiang, M. Cho, H. Choi, B. Kim, H. Lee, B. Pannell, C. McCauley, M. Russinovich, A. Paverd, and G. Cherubin, “LLMail-Inject: A dataset from a realistic adaptive prompt injection challenge,” arXiv preprint arXiv:2506.09956 , 2025, SaTML 2025 challenge; https://arxiv.org/abs/2506.09956. [13] X. Ma, T. Li, C. Xiao, Z. Yu, N. Zhang, and Y. Vorobeychik, “AutoDojo: Adaptive black-box attacks reveal the limits of IPI defenses and task-specification effects in LLM agents,” arXiv preprint arXiv:2606.15057 ,2026, https://arxiv.org/abs/2606.15057. [14] E. Debenedetti, J. Zhang, M. Balunovi´ c, L. Beurer-Kellner, M. Fischer, and F. Tramèr, “AgentDojo: A dynamic environment to evaluate prompt injection attacks and defenses for LLM agents,” in Advances in Neural Information Processing Systems (NeurIPS) Datasets and Benchmarks Track , 2024, arXiv:2406.13352; https://arxiv.org/abs/2406.13352. [15] A. M. Turner, L. Thiergart, G. Leech, D. Udell, J. J. Vazquez, U. Mini, and M. MacDiarmid, “Steering language models with activation engi-neering,” arXiv preprint arXiv:2308.10248 , 2023, https://arxiv.org/abs/ 2308.10248. [16] N. Rimsky, N. Gabrieli, J. Schulz, M. Tong, E. Hubinger, and A. M. Turner, “Steering Llama 2 via contrastive activation addition,” in Pro-ceedings of the 62nd Annual Meeting of the Association for Computa-tional Linguistics (ACL) , 2024, pp. 15 504–15 522, https://aclanthology. org/2024.acl-long.828/; arXiv:2312.06681 (first author there as Nina Panickssery); https://arxiv.org/abs/2312.06681. [17] A. Arditi, O. Obeso, A. Syed, D. Paleka, N. Panickssery, W. Gurnee, and N. Nanda, “Refusal in language models is mediated by a single direc-tion,” in Advances in Neural Information Processing Systems (NeurIPS) ,2024, arXiv:2406.11717; https://arxiv.org/abs/2406.11717. [18] OpenAI, “gpt-oss-120b & gpt-oss-20b model card,” arXiv preprint arXiv:2508.10925 , 2025, https://arxiv.org/abs/2508.10925. [19] Qwen Team, “Qwen3 technical report,” arXiv preprint arXiv:2505.09388 , 2025, https://arxiv.org/abs/2505.09388. [20] NVIDIA, “Nemotron-RL-Agentic-Indirect-Prompt-Injection-v1,” https://huggingface.co/datasets/nvidia/ Nemotron-RL-Agentic-Indirect-Prompt-Injection-v1, 2026, Hugging Face dataset; CC BY 4.0; loaded at the pinned revision recorded in the released corpus manifest. [21] Meta AI, “Llama Prompt Guard 2 86M,” https://huggingface.co/ meta-llama/Llama-Prompt-Guard-2-86M, 2025, Hugging Face model card. [22] ProtectAI.com, “Fine-tuned DeBERTa-v3-base for prompt injection detection,” https://huggingface.co/ProtectAI/ deberta-v3-base-prompt-injection-v2, 2024, Hugging Face model card. [23] H. Li, X. Liu, N. Zhang, and C. Xiao, “PIGuard: Prompt injection guardrail via mitigating overdefense for free,” in Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (ACL) ,2025, pp. 30 420–30 437, https://aclanthology.org/2025.acl-long.1468/; arXiv:2410.22770 (arXiv v1 titled InjecGuard); https://arxiv.org/abs/ 2410.22770. [24] H. Li, R. Wen, S. Shi, N. Zhang, Y. Vorobeychik, and C. Xiao, “AgentDyn: Are your agent security defenses deployable in real-world dynamic environments?” arXiv preprint arXiv:2602.03117 , 2026, https: //arxiv.org/abs/2602.03117. [25] M. Nasr, N. Carlini, C. Sitawarin, S. V. Schulhoff, J. Hayes, M. Ilie, J. Pluto, S. Song, H. Chaudhari, I. Shumailov, A. Thakurta, K. Y. Xiao, A. Terzis, and F. Tramèr, “The attacker moves second: Stronger adaptive attacks bypass defenses against LLM jailbreaks and prompt injections,” arXiv:2510.09023, 2025, https://arxiv.org/abs/2510.09023. [26] Y. Liu, Y. Jia, J. Jia, D. Song, and N. Z. Gong, “DataSentinel: A game-theoretic detection of prompt injection attacks,” in IEEE Symposium on Security and Privacy (S&P) , 2025, arXiv:2504.11358; https://arxiv.org/ abs/2504.11358. [27] E. Debenedetti, I. Shumailov, T. Fan, J. Hayes, N. Carlini, D. Fabian, C. Kern, C. Shi, A. Terzis, and F. Tramèr, “Defeating prompt injections by design,” arXiv preprint arXiv:2503.18813 , 2025, the defense is named CaMeL; https://arxiv.org/abs/2503.18813. [28] L. Beurer-Kellner, B. Buesser, A.-M. Cret ,u, E. Debenedetti, D. Dobos, D. Fabian, M. Fischer, D. Froelicher, K. Grosse, D. Naeff, E. Ozoani, A. Paverd, F. Tramèr, and V. Volhejn, “Design patterns for securing LLM agents against prompt injections,” arXiv preprint arXiv:2506.08837 ,2025, https://arxiv.org/abs/2506.08837. [29] K. Cobbe, V. Kosaraju, M. Bavarian, M. Chen, H. Jun, L. Kaiser, M. Plappert, J. Tworek, J. Hilton, R. Nakano, C. Hesse, and J. Schul-man, “Training verifiers to solve math word problems,” arXiv preprint arXiv:2110.14168 , 2021, https://arxiv.org/abs/2110.14168. [30] D. Hendrycks, C. Burns, S. Basart, A. Zou, M. Mazeika, D. Song, and J. Steinhardt, “Measuring massive multitask language understanding,” in International Conference on Learning Representations (ICLR) , 2021, arXiv:2009.03300; https://arxiv.org/abs/2009.03300. [31] J. Zhou, T. Lu, S. Mishra, S. Brahma, S. Basu, Y. Luan, D. Zhou, and L. Hou, “Instruction-following evaluation for large language mod-els,” arXiv preprint arXiv:2311.07911 , 2023, https://arxiv.org/abs/2311. 07911. [32] A. Makelov, G. Lange, A. Geiger, and N. Nanda, “Is this the subspace you are looking for? An interpretability illusion for subspace activation patching,” in International Conference on Learning Representations (ICLR) , 2024, arXiv:2311.17030; https://arxiv.org/abs/2311.17030. [33] D. Tan, D. Chanin, A. Lynch, D. Kanoulas, B. Paige, A. Garriga-Alonso, and R. Kirk, “Analyzing the generalization and reliability of steering vectors,” in Advances in Neural Information Processing Systems (NeurIPS) , 2024, arXiv:2407.12404; https://arxiv.org/abs/2407.12404. [34] T. Wollschläger, J. Elstner, S. Geisler, V. Cohen-Addad, S. Günnemann, and J. Gasteiger, “The geometry of refusal in large language models: Concept cones and representational independence,” in International Conference on Machine Learning (ICML) , 2025, pp. 66 945–66 970, arXiv:2502.17420; https://arxiv.org/abs/2502.17420. [35] C. Ye, J. Cui, and D. Hadfield-Menell, “Prompt injection as role confusion,” in International Conference on Machine Learning (ICML) ,2026, arXiv:2603.12277; https://arxiv.org/abs/2603.12277. [36] S. Abdelnabi, A. Fay, G. Cherubin, A. Salem, M. Fritz, and A. Paverd, “Get my drift? Catching LLM task drift with activation deltas,” in IEEE Conference on Secure and Trustworthy Machine Learning (SaTML) ,2025, pp. 43–67, arXiv:2406.00799; https://arxiv.org/abs/2406.00799. [37] K.-H. Hung, C.-Y. Ko, A. Rawat, I.-H. Chung, W. H. Hsu, and P.-Y. Chen, “Attention Tracker: Detecting prompt injection attacks in LLMs,” in Findings of the Association for Computational Linguistics: NAACL , 2025, pp. 2309–2322, arXiv:2411.00348; https://arxiv.org/abs/ 2411.00348. [38] E. Wallace, K. Xiao, R. Leike, L. Weng, J. Heidecke, and A. Beu-tel, “The instruction hierarchy: Training LLMs to prioritize privileged instructions,” arXiv preprint arXiv:2404.13208 , 2024, https://arxiv.org/ abs/2404.13208. [39] S. Chen, A. Zharmagambetov, D. Wagner, and C. Guo, “Meta SecAlign: A secure foundation LLM against prompt injection attacks,” arXiv preprint arXiv:2507.02735 , 2025, https://arxiv.org/abs/2507.02735. [40] J. Piet, M. Alrashed, C. Sitawarin, S. Chen, Z. Wei, E. Sun, B. Alomair, and D. Wagner, “Jatmo: Prompt injection defense by task-specific finetuning,” in European Symposium on Research in Computer Security (ESORICS) , 2024, arXiv:2312.17673; https://arxiv.org/abs/2312.17673. [41] T. Wu, S. Zhang, K. Song, S. Xu, S. Zhao, R. Agrawal, S. R. Indurthi, C. Xiang, P. Mittal, and W. Zhou, “Instructional segment embedding: Improving LLM safety with instruction hierarchy,” in International Con-ference on Learning Representations (ICLR) , 2025, arXiv:2410.09102; https://arxiv.org/abs/2410.09102. [42] E. Zverev, E. Kortukov, A. Panfilov, A. Volkova, S. Tabesh, S. La-puschkin, W. Samek, and C. H. Lampert, “ASIDE: Architectural separa-tion of instructions and data in language models,” in International Con-ference on Learning Representations (ICLR) , 2026, arXiv:2503.10566; https://arxiv.org/abs/2503.10566. [43] A. Zou, L. Phan, J. Wang, D. Duenas, M. Lin, M. Andriushchenko, R. Wang, Z. Kolter, M. Fredrikson, and D. Hendrycks, “Improving alignment and robustness with circuit breakers,” in Advances in Neural Information Processing Systems (NeurIPS) , 2024, arXiv:2406.04313; https://arxiv.org/abs/2406.04313. [44] S. Chen, Y. Wang, N. Carlini, C. Sitawarin, and D. Wagner, “Defending against prompt injection with a few DefensiveTokens,” arXiv preprint arXiv:2507.07974 , 2025, https://arxiv.org/abs/2507.07974. [45] K. Zhu, X. Yang, J. Wang, W. Guo, and W. Y. Wang, “MELON: Provable defense against indirect prompt injection attacks in AI agents,” in International Conference on Machine Learning (ICML) , 2025, arXiv:2502.05174; https://arxiv.org/abs/2502.05174. [46] T. Shi, J. He, Z. Wang, H. Li, L. Wu, W. Guo, and D. Song, “Progent: Securing AI agents with privilege control,” arXiv preprint arXiv:2504.11703 , 2025, https://arxiv.org/abs/2504.11703. [47] H. Li, X. Liu, H.-C. Chiu, D. Li, N. Zhang, and C. Xiao, “DRIFT: Dynamic rule-based defense with injection isolation for securing LLM agents,” in Advances in Neural Information Processing Systems (NeurIPS) , 2025, arXiv:2506.12104; https://arxiv.org/abs/2506.12104. [48] Y. Wang, S. Chen, R. Alkhudair, B. Alomair, and D. Wagner, “Defending against prompt injection with DataFilter,” arXiv preprint arXiv:2510.19207 , 2025, https://arxiv.org/abs/2510.19207. [49] Z. Ji, X. Wang, Z. Li, P. Ma, Y. Gao, D. Wu, X. Yan, T. Tian, and S. Wang, “Taxonomy, evaluation and exploitation of IPI-centric LLM agent defense frameworks,” arXiv preprint arXiv:2511.15203 , 2025, SoK, also contributes three adaptive attacks; https://arxiv.org/abs/2511. 15203. [50] M. Hermon, R. Gupta, W. Ruan, E. Sabir, and H. Wang, “Security– fidelity tradeoffs: The hidden cost of prompt injection defense,” in International Conference on Machine Learning (ICML) , 2026, arXiv:2606.30783; introduces the SecFid benchmark; https://arxiv.org/ abs/2606.30783. [51] L. He, Y. Wang, J. Zhang, and N. Asokan, “Defending against adaptive prompt injection attacks via reasoning-enabled task alignment,” arXiv preprint arXiv:2606.15441 , 2026, the defense is named RETA; https: //arxiv.org/abs/2606.15441. [52] R. Sood, O. Gungor, and T. Rosing, “COPA: Continual preference optimization for adaptive prompt injection defense,” arXiv preprint arXiv:2608.19982 , 2026, https://arxiv.org/abs/2608.19982. [53] K. Zhang, D. Lee, and J. Park, “Steering role confusion,” https://www. lesswrong.com/posts/uz9pFutDAT7trygM9/steering-role-confusion, 2026, blog post, LessWrong, 2026-08-20. [54] O. Mogford, “Role confusion: Sounding like the cause is indistinguishable from being it,” https: //www.lesswrong.com/posts/rJcX5Qc3toMmMqtvk/ role-confusion-sounding-like-the-cause-is-indistinguishable, 2026, blog post, LessWrong, 2026-06-29. [55] J. Heo, C. Heinze-Deml, O. Elachqar, S. Ren, U. Nallasamy, A. Miller, K. H. R. Chan, and J. Narain, “Do LLMs ‘know’ internally when they follow instructions?” in International Conference on Learning Representations (ICLR) , 2025, arXiv:2410.14516; https://arxiv.org/abs/ 2410.14516. [56] Z. Wu, Z. Wang, S. Cho, Y. Yang, A. Koshiyama, S. Bulathwela, and M. Perez-Ortiz, “Tool calling is linearly readable and steerable in language models,” arXiv preprint arXiv:2605.07990 , 2026, https: //arxiv.org/abs/2605.07990. [57] E. Zverev, S. Abdelnabi, S. Tabesh, M. Fritz, and C. H. Lampert, “Can LLMs separate instructions from data? And what do we even mean by that?” in International Conference on Learning Representations (ICLR) ,2025, arXiv:2403.06833; https://arxiv.org/abs/2403.06833. [58] A. Zou, L. Phan, S. Chen, J. Campbell, P. Guo, R. Ren, A. Pan, X. Yin, M. Mazeika, A.-K. Dombrowski, S. Goel, N. Li, M. J. Byun, Z. Wang, A. Mallen, S. Basart, S. Koyejo, D. Song, M. Fredrikson, J. Z. Kolter, and D. Hendrycks, “Representation engineering: A top-down approach to AI transparency,” arXiv preprint arXiv:2310.01405 ,2023, https://arxiv.org/abs/2310.01405. [59] K. Li, O. Patel, F. Viégas, H. Pfister, and M. Wattenberg, “Inference-time intervention: Eliciting truthful answers from a language model,” in 
+
+Advances in Neural Information Processing Systems (NeurIPS) , 2023, arXiv:2306.03341; https://arxiv.org/abs/2306.03341. [60] B. W. Lee, I. Padhi, K. N. Ramamurthy, E. Miehling, P. Dognin, M. Nagireddy, and A. Dhurandhar, “Programming refusal with con-ditional activation steering,” in International Conference on Learning Representations (ICLR) , 2025, arXiv:2409.05907 (CAST); https://arxiv. org/abs/2409.05907. [61] L. Sheng, C. Shen, W. Zhao, J. Fang, X. Liu, Z. Liang, X. Wang, A. Zhang, and T.-S. Chua, “AlphaSteer: Learning refusal steering with principled null-space constraint,” arXiv preprint arXiv:2506.07022 ,2025, ICLR 2026; https://arxiv.org/abs/2506.07022. 
+
+APPENDIX ACORPUS AND SCORING NOTES 
+
+Corpus construction (§IV). The two JSON corpora draw real tool-log records from a public agentic indirect-prompt-injection trace dataset [20] (loaded at a pinned upstream revision recorded, with per-sample content hashes, in the released corpus manifest); attacks are re-embedded under our attacker-template factorial so splits can be made sample-and template-disjoint, and the parameter-manipulation variant rewrites the attack so its objective is a targeted argument of the legitimate call—the class no public IPI benchmark isolates. The two webpage corpora wrap the same two classes in natural HTML carriers (fetched Wikipedia articles, pinned revision), the summary-composition task the canonical IPI story runs on; the Gemma-4 certification corpus additionally draws 30 fresh, URL-disjoint carriers and new attacker wordings (§V-A). The webpage and JSON tool-hijack splits are sample- and attacker-template-disjoint, asserted at build time; the JSON-parameter 
+
+test split is sample-disjoint under the fit wording set, with that class’s attacker-template holdout measured separately on the held-out wording sets (§VI-C). 
+
+The strict/lenient utility bracket (§IV). Both bracket ends are mechanical: a field is exempted from the lenient end iff its clean-reference value is not a verbatim span of the tool payload, a criterion identical across arms by construction. The narrow drift adjudicator supporting the analysis is blinded, one-directional, and printed beside its controls. An absolute 
+
+LLM correctness judge (one completion, one verdict) was measured and rejected on two separate counts: on one corpus it scored a clean arm at 0.525 against itself, and on another it labelled 12/24 completions CORRECT where the byte-exact scorer read 1/24; it also disagreed with itself across runs on byte-identical generations. That instrument scores nothing in this paper. The pairwise utility judge of Appendix Bis a different instrument—blinded, comparative against the same run’s unattacked reference, control-gated per batch, and validated before use—and it scores utility only : attack success is deterministic everywhere. 
+
+Corpus-annotation disclosure (JSON tool-log corpus, Table XV). The upstream JSON tool-log corpus annotates its attack surface in 483/1271 tool schemas (a literal “injection vector field” note in the schema text). A paired scrub-vs-original A/B with a same-prompt null control bounds the annotation’s effect on quoted numbers at ≈0; any remaining bias is conservative (undefended rates if anything understated, defended arms unaffected), and the steering direction’s fitting pool contains no annotated sample. 
+
+Scoring provenance and capability-guard rates, gpt-oss-20b test evaluation (Table XV). Every number in a row of Table XV is scored from that row’s single test-pass artifact by the canonical scorer (no mixing of passes). The guard passes on every row: defended no-action rates are 0.115 / 0.058 / 0.043 / 0.000 (rows top to bottom) against unattacked rates of 0.177 / 0.000 / 0.057 / 0.000 — at most 0.75 × unattacked where that floor is nonzero, and ≤ 0.058 absolute where it is zero. No absolute ceiling was pre-specified for the zero-floor rows (§II-C); the worst such row (3/52 on the disjoint-tool corpus) was read completion-by-completion—two of the three are intent-carrying generation loops, none is a refusal of the legitimate task. 
+
+Generation-budget censoring, gpt-oss AgentDojo (§V-B, Table XX). An outcome checker cannot distinguish a model that refused from one whose compliance was cut off, so a per-turn generation budget censors attack success, and a tran-script audit showed the original 768-token run was truncation-censored in both arms—the undefended one about ten times more. The whole battery—all 180 cases, all four arms—was therefore rerun at 4096 tokens, which is the measurement quoted in §V-B (undefended 0.475, defended 0.079) and su-persedes the 768 run. The audit localizes the movement to the censored cases: the attacked arm’s 127 untruncated episodes are symmetric across budgets (9 up / 7 down, p = 0 .80 —also the honest cross-host greedy regeneration noise floor), the defended arm moves 4 up / 0 down over its 19 truncated cases, and within the truncated stratum the compromise rate moves 
+
+0.156 → 0.511 ; so the earlier 0.068 was itself a censored number and 0.079 is the defense’s surviving rate, not evidence that the defended arm was unaffected. The re-anchored 0.475 remains a lower bound: 3 attacked episodes are still truncated mid-compliance at 4096 (tight bound 86 /177 = 0 .486 ), while all 9 truncated defended turns, read end to end, contain no mid-compliance cut. The 768 and 4096 attacked figures are also not quite the same measurement: a harness fix made five previously-aborted cases scoreable ( n 172 → 177 ; paired on the common 172 cases the move is 0.3605 → 0.4651 ). The 768-budget runs still quoted (the trained comparison of §V-D) carry comparable truncation and are likewise lower bounds at that budget—the tool filter excepted (5 truncated turns; it reaches 0.000 by amputating the agent)—and Table XI supersedes them for every defense it covers. 
+
+Why the Qwen3-30B AgentDojo runs use a different budget. Every Qwen AgentDojo measurement in this paper— the dose curve of Table XXIV, its paired benign arms, and every Qwen battery of Table XI—was run at 4096 tokens per turn, not 768. This is not an oversight but a requirement of the model: it is a reasoning model that spends 1–4k tokens in its thinking channel before emitting a call, and a 768-token turn is cut inside that channel, so no call and no answer are emitted. Measured directly, at 768 the unsteered clean arm falls from 0.875 to 0.411, which makes every arm unmeasurable rather than merely censored; the launcher now warns whenever a thinking-format model is run below 2048. The consequence for reading this paper is stated wherever it bites: each AgentDojo table is internally held at one budget, and the one cross-model comparison we do make (§V-B) uses each model’s 4096 figures. 
+
+Capability-guard rates and run provenance, Qwen3-30B held-out test evaluation (Table XVI). The guard passes on every row: defended no-action rates are 0.010 / 0.019 / 0.014 / 0.000 on the four test rows (top to bottom) and 0.042 on the development-split row, against unattacked rates of 0.062 / 0.000 / 0.043 / 0.000 and 0.052—at most 0.80 × unattacked where the unattacked floor is nonzero, and ≤ 1/52 absolute where it is zero. Truncation at the generation budget, over the four test rows, is zero in every arm carrying a compromise-rate claim except the webpage tool-hijack defended arm ( 4/52 ;three of the four are batch-padding flags on completed se-quences that still made the legitimate call, one is genuinely cut, and the worst-case bound if all four hid compromises is ASR ≤ 0.077 ) and the defense-on-clean JSON tool-log arm ( 4/96 ). The development-split row’s arms carry the same at-budget flag counts ( 4/96 per arm, likewise three padding flags plus one genuine cut each); counting its one genuinely truncated defended sample as a compromise would move that row’s reading to 5/91 = 0 .055 , and counting every scoreable at-budget flag, to ≤ 7/91 = 0 .077 . These bounds are recorded here; the table is not rescored to them. Every number in each row of Table XVI comes wholly from that row’s single scored artifact; the four test rows are one pre-specified pass per corpus with no reruns. 
+
+Tier-3 contamination, the 16 σ dose ceiling, and the dev-vs-test utility gap (§V-A). Tier-3 contamination (injection-derived text reaching some other , legitimate call; reported, never counted as compromise, §II-C) is confined on both mod-els to the JSON tool-log corpus, whose legitimate task gives the matcher a nonzero false-positive floor even unattacked: gpt-oss defended 0.212 against an unattacked floor of 0.125; Qwen defended 0.300 on the test split (floor 0.133) and 0.187 on the development split (floor 0.088). On the other six corpus rows contamination is 0.000 in every arm of every artifact except one: the undefended attacked gpt-oss webpage-param arm, at 0.038. Though tier-3 by the severity hierarchy, the JSON-corpus excess above its floor is a partial-compromise channel—injected text reaching legitimate calls— and deployments where argument provenance matters should read it beside the parameter-manipulation limitation (§VII). The 16 σ dose ceiling was measured on the development 
+
+splits only (no pre-specified test pass was run for it). There it posts the strongest single-turn-corpus ASRs anywhere in this paper—three zero-observed development rows spanning both classes ( 0/66 JSON parameter manipulation, 0/159 on each webpage corpus, with the JSON tool-log development split at 
+
+1/91 )—but it is capability-guard territory in the agentic setting (§V-B) and is reported as the dose ceiling, not the deployment point. The dev-vs-test benign-utility gap on the JSON tool-log corpus (45.1%/91% development vs 21.1%/69% test at the identical configuration) is sample composition, not a scoring change: 60% of the test split’s tasks are message-composition tasks versus 26% on the development split, and message-composition tasks fail strict byte-exact utility under steering wording drift almost universally (49/54 on the defense-on-clean arm); test samples also carry more structured arguments per call (3.69 vs 2.92). Reweighting the test split to the devel-opment split’s tool mix moves strict benign utility from 21% to ∼31% ; the rest tracks argument count. The composition shift is a by-product of template-disjoint splitting (template families correlate with scenario and tool). APPENDIX BTHE PAIRWISE UTILITY JUDGE AND THE FIDELITY 
+
+MEASUREMENT 
+
+Why it exists. No existing IPI benchmark measures whether a defense degrades the content fidelity of model-composed prose (summaries, subjects) on benign traffic: outcome check-ers score environment state and answer text, and byte-exact scoring must exempt composed fields or count every wording change as failure. This instrument scores that axis, and only that axis—attack success is deterministic everywhere in this paper. 
+
+Instrument. The judge is gpt-5.4 at deterministic settings. Each candidate completion is judged against the same run’s 
+
+unattacked reference, both rendered through one uniform action-description path (raw completions are never shown; the judge sees the clean payload only, so a hijacked payload cannot prompt-inject the judge), presented without labels in an order re-randomized per vote (seeded by pair content, replayable). Symmetric question; verdicts EQUIVALENT / DEGRADED /
+
+DIFFERENT -TASK ; majority of three votes. Every batch car-ries indistinguishable control pairs: identical pairs must read 
+
+EQUIVALENT ≥ 0.98 and corrupted pairs (a structured ar-gument value replaced, a call deleted, a task dropped) must read not-EQUIVALENT ≥ 0.95 ; a batch failing its controls is discarded and reported, never retried into compliance. The headline column follows the compromise-scoped convention: 
+
+EQUIVALENT and not compromised, with compromise from the deterministic scorer. The reference is the unattacked run, so the score reads directly as % of unattacked. 
+
+Pre-specified validation gate, passed before any number was scored. (i) Agreement 0.867 (260/300) with an inde-pendent drift adjudicator’s already-issued verdicts on a strati-fied sample—the disagreements are one-sided: the instrument rejects ∼25% of pairs the adjudicator calls equivalent, all cosmetic-wording cases, so its bias direction is conservative (it can understate our utility, not flatter it). (ii) On the failure set that convicted the rejected absolute judge (Appendix A), it reads 0.150 equivalent where the old judge fabricated 0.500 and the behavioral floor is 0.050; 8/8 hand-read ver-dicts support it. (iii) Determinism: zero majority-verdict flips across a full double run ( n=80 pairs plus controls) with the cache bypassed—this certifies endpoint reproducibility; order-invariance is the separate cache-audit measurement below. Three production batches failed the corrupted-pair control and were discarded; all three were control-construction defects of two kinds (a corruption landing in prose the spec says to leave alone; a corrupted value still visible in an echoed markup line), repaired without touching the instrument—prompt, blinding, 
+
+TABLE V DEFENSE -ON -clean COMPOSITION FIDELITY , JUDGE % EQUIVALENT 
+
+(ZERO COMPROMISE FLAGS ANYWHERE ), FOUR CELLS . R OW ONE IS THE ALWAYS -ON STEERING COST FROM THE MAIN UTILITY TABLES ; ROW TWO IS THE REGENERATION REFERENCE : PROMPTS BYTE -IDENTICAL TO THE CLEAN RENDER , REGENERATED CROSS -RUN WITH NO DEFENSE , SCORED BY THE SAME JUDGE —THE SHARED WORDING -DRIFT FLOOR EVERY 
+
+cross-run ARM (ALL BASELINES HERE ) MUST BE READ AGAINST . I T DOES NOT DIRECTLY CALIBRATE THE SAME -PROCESS STEERING ROW , SO RATIOS OF ROW ONE TO ROW TWO ARE NEVER TAKEN . F ILTER ROWS AT 
+
+0.000 ARE CAPABILITY DESTRUCTION (100% OF CLEAN WEBPAGE PAYLOADS FLAGGED AND DELETED ), NOT COMPOSITION LOSS . P OOLED OVER THE FOUR CELLS , STEERING SITS ∼7–9 PP BELOW THE REGENERATION REFERENCE (p=0 .012 , n=274 PAIRED ), A LOWER BOUND ON ITS TRUE DEFICIT (THE BASELINES ABSORB CROSS -RUN NOISE STEERING DOES NOT ); IN STRICT BYTE -EXACT TERMS THE WEBPAGE ORDERING REVERSES (STEERING 75/65 VS . REGENERATION 
+
+71.2/55.8)— STEERING PRESERVES STRUCTURED CALLS BETTER AND PAYS IN COMPOSED PROSE . P ER -CELL STRICT /LENIENT BRACKETS LIVE IN THE RELEASED FIDELITY ARTIFACTS ; THE STEERING ROW ’S BRACKETS ARE IN THE MAIN UTILITY TABLES .arm (defense on clean) gpt-oss web param (n=52 )gpt-oss JSON hij. (80) Qwen web param (52) Qwen JSON hij. (90) 
+
+CounterSteer (same-process) 
+
+.385 .525 .346 .333 regeneration reference (cross-run) .462 .637 .462 .400 spotlighting .442 .625 .462 .356 prompt sandwich .462 .600 .462 .356 reminder .423 .600 .365 .344 CachePrune (gpt-oss only) .385 .537 — —DeBERTa filter .000 (!) .588 .000 (!) .378 PIGuard filter .000 (!) .613 .000 (!) .367 
+
+votes and verdict mapping unchanged throughout—and the affected evaluations re-run as fresh batches that passed. 
+
+Caveats that travel with every judge number (from the adversarial sign-off): judge utility is a conservative floor ,not a point estimate— DEGRADED includes both confirmed fact-level losses (hand-read) and borderline different-emphasis summaries; it can additionally penalize tier-3 contamination visible in a response; and it is never quoted without its strict/lenient bracket. Order-invariance was measured from the verdict cache: equivalent-rate 0.260 reference-first vs. 0.271 candidate-first over 8,868 votes (n.s., trend against flattering the defense). APPENDIX CADAPTIVE EVALUATION IN DETAIL 
+
+The protocols, per-attack detail and full caveat set behind §V-C. Every number quoted in the body appears here with its bounds; nothing is stated here that the body contradicts. 
+
+Table VI notes. SecAlign is the gpt-oss DPO model (§V-D), at 35 of its 36 cells (the 36th, a slack cell, deterministically exhausts 80 GB memory and could not be run); its two zero suites are exact (0/23 cells). PromptGuard-2’s collapse is carried by the attack population’s seed wordings (seed-best 0.499 of its 0.527); the filter was live and flagging in every lane. PIGuard/Qwen is complete at 36/36 cells (banking 0.771, TABLE VI BENCHMARK -LEVEL ADAPTIVE ATTACK (A UTO DOJO OPTIMIZER , SIX ITERATIONS , A GENT DOJO ’S OWN CHECKER ) AGAINST EACH DEFENSE , 
+
+> MACRO OVER THE
+
+36 PRE -SPECIFIED (SUITE × OBJECTIVE × VECTOR )
+
+> CELLS PER MODEL
+
+. Adaptive IS THE ATTACKER ’S BEST OVER SEEDS AND OPTIMIZED REWRITES (AD@6 ). C ELL COVERAGE , VOID -CELL RULINGS AND PER -SUITE ANATOMY : THE “T ABLE VI NOTES ” PARAGRAPH BELOW .
+
+adaptive success ↓ gpt-oss-20b Qwen3-30B Llama-3.1-8B undefended 0.673 0.730 0.377 CounterSteer 0.175 0.188 0.307 AGRI (probe-gated prefill) 0.143 0.411 —CachePrune 0.305 0.558 0.252 
+
+PromptGuard-2 filter 0.527 0.670 0.369 SecAlign (trained) 0.160 — —PIGuard filter 0.166 0.360 —DeBERTa filter 0.146 — —spotlighting 0.585 — —reminder 0.473 — —prompt sandwich 0.489 — —
+
+TABLE VII DEFENSE -AWARE ADAPTIVE PARAMETER -MANIPULATION SEARCH , FIVE ARMS : BEST -OF -24 FRAMING QUERIES (6 AUTHORITY LEVELS × 4
+
+> VOICES
+
+) PER SAMPLE , n=18 DEVELOPMENT SAMPLES , 432 ATTEMPTS PER ARM . UNION = SAMPLES CRACKED BY ≥1 FRAMING ; PER -QUERY =
+
+> MEAN FIRING RATE
+
+. T IER -1 ONLY ; NO ARM SCORES BY REFUSING 
+
+(NO -ACTION ≤ 0.07 EVERYWHERE ). READ PER -QUERY BESIDE UNION : 
+
+> THE UNDEFENDED LITERAL UNION
+
+(3/18) SITTING BELOW TWO DEFENDED ARMS ’ 4/18 IS A UNION -STATISTIC ARTIFACT OF RARE ,
+
+> SAMPLE
+
+-CONCENTRATED LITERAL FIRES . S EC ALIGN IS A trained ARM AND THE SEARCH ’S FRAMINGS ARE CELLS OF ITS OWN TRAINING GRID —TRAINED FRAMING FAMILIES , NOT FRAMING GENERALIZATION .SPOTLIGHTING ’S DELIMITER LEAK AND SEC ALIGN ’S SINGLE SCORER -LEVEL FIRE : THE NOTES BELOW .arm union ↓
+
+pattern union ↓
+
+literal per-query 
+
+↓ pattern per-query 
+
+↓ literal undefended 18/18 3/18 0.708 0.076 spotlighting-with-delimiting 18/18 4/18 0.595 0.044 CachePrune [9] 17/18 4/18 0.604 0.037 
+
+CounterSteer (deployed) 13/18 1/18 0.303 0.002 
+
+SecAlign [4] (trained) 1/18 0/18 0.002 0.000 
+
+slack 0.308, travel 0.000; its optimizer lift is zero—seed-best 0.332 of its 0.360—so its losses are static seeds passing the filter, not adaptation). AGRI/gpt-oss is final (36/36; one travel cell’s adaptive reading is void with cause—an attack-writer artifact, static reading valid). AGRI/Qwen is final at 36/36 (banking 0.674, slack 0.493, travel 0.067; three travel cells void-with-cause at their static readings—brackets 0.449– 0.495, no ordering moves); its residual is seed-dominated (86% static share), like PIGuard’s. On gpt-oss, banking is every arm’s worst suite (undefended 0.850; CounterSteer 0.458, PIGuard 0.458, DeBERTa 0.375, reminder 0.602, spotlighting 0.694): its user tasks delegate payment authority to the injected document, so the attack can be data-shaped (§V-C). 
+
+Notes on Table VII. The undefended exact-literal union of 3/18 is driven by 33 fires concentrated in those 3 samples, which is why the per-query columns—not the unions—order the arms as expected. Spotlighting’s delimiters leak into 12 of its 432 completions but reach no parsed tool-call argument set, biasing scoring in neither direction. Adaptive, defense-aware evaluation is the bar this defense class must clear: static-corpus numbers routinely overstate prompt-injection defenses, and recent work builds the adaptive attacker into the defense’s own design (e.g., RETA [51]). Escalating strength per the §II-B attacker; every attack targets the gpt-oss deployed configuration except where a second model is named. 
+
+Query-based framing search (black-box). Best-of-48 at-tack framings per sample against the live defended agent: 48 per sample = the 24-framing grid of Table VII (6 authority lev-els × 4 voices) instantiated once per attack class (tool hijack; parameter manipulation), so within a class the search is best-of-24; n=18 samples per class; both attack-success readings of §II-C reported side by side. The undefended comparator on the identical parameter-class grid is Table VII’s first row (union 18/18, per-query 0.708; exact-literal union 3/18, per-query 0.076); no undefended run of the tool-hijack grid exists, so that class’s undefended comparators are the static corpus rates. Under the obedience-pattern reading, on tool hijack the defense holds: 3/18 samples cracked [0.058, 0.392], per-query firing rate 0.007. On parameter manipulation the search 
+
+cracks the defense: 13/18 samples [0.491, 0.875], per-query firing 0.303—and the strongest wordings include mild ones (bland parameter-correction framings tie the strongest role-spoof framing at 0.50). Under the exact-literal reading the same searches nearly vanish: 46 of the 48 framings deliver the attacker’s exact payload on 0/18 samples, and the remaining two (one per class) on 1/18 each (0.056). That is at most one sample per class cracked, an overall exact-literal per-query rate of 2/864 ≈ 0.002 . The direction was fitted against authority-styled framings, and a blandly-worded parameter hijack slips under it. Crack counts in this section are per-class obedience-pattern unions unless labeled otherwise; pooling both classes at the sample level gives 15/18 for the deployed configuration (13 param + 3 tool, one sample cracked in both), the cross-class union quoted in the protocol paragraph below. Is this weakness a defect of CounterSteer, or a property of the attack class? We reran the identical defense-aware search—the same best-of-24 parameter framing grid (6 au-thority levels × 4 voices), the same n=18 development samples, the same generation configuration—against the unde-fended model, against two published inference-time baselines of §V-D, spotlighting-with-delimiting and CachePrune (the prompt-sandwich and tool-filter arms were not run), and against the SecAlign fine-tune of §V-D (Table VII). Every 
+
+inference-time defense measured shares the surviving class: the two published baselines trim per-attempt firing only modestly (0.708 → 0.595 /0.604 , ∼15% relative; both real, McNemar vs undefended p < 10 −5) and remain at or near full union crack (18/18 and 17/18). CounterSteer is the inference-time arm that suppresses per-attempt success (0.303 vs 0.60–0.71) and the only one that holds the exact-literal reading to 1/18 (per-query 0.002 vs 0.037–0.076). Because attempts nest within the 18 samples, inference is at the sample level: an exact paired sign-flip permutation over each sample’s mean firing rate gives a re-duction of 0.29–0.41 against every arm (exact p ≤ 1.7×10 −3;the weakest paired-bootstrap 95% CI is spotlighting’s [0.146, 0.431]; 15–17 of 18 samples favoring CounterSteer; ar-tifact runs/adaptive_sample_level_tests.json ), and the per-sample crack unions are the primary reading. The 13/18 union is therefore not a CounterSteer defect relative to anything measured here: it is the strongest result among the inference-time defenses measured, on an attack class where the published baselines remain at or near full union crack. The trained defense is the measured exception : SecAlign holds the identical search to a union of 1/18 on the obedience-pattern reading and 0/18 exact-literal (per-attempt 0.002 / 0.000)—preference-optimization training closes the parameter-class gap that bounds the inference-time defenses measured, at fine-tuning’s deployment cost, and with the framing caveat in the table caption (the search’s framings are cells of Se-cAlign’s own training grid, so this is adaptive robustness on trained framing families, not framing generalization). The tool-hijack class closes the same way: under the identical best-of-24 tool-hijack framing grid on the same 18 development samples, SecAlign’s union is 0/18 on both readings (432 attempts, truncation-free, no capability collapse: 427/432 rows still call a tool), against CounterSteer’s 3/18 obedience-pattern union above (CounterSteer’s exact-literal tool-grid reading predates the literal-delivery field and is unmeasured). And the parameter grid’s sole pattern fire is a transcript-verified scorer artifact—the model quotes the poisoned tool description verbatim inside the user-tasked email without adopting it in its reasoning (exact-literal negative), though the quoted exfiltra-tion address does reach the message recipient—so SecAlign’s adaptive survivors on its trained framing families is effectively 
+
+0/18 on both classes . The held-out test passes converge on the same picture: of the surviving test-split compromises, 10 of 11 on gpt-oss and 13 of 16 on Qwen3-30B are parameter-class (§V-A). The measurements support the following diagnosis: at the payload span, param obedience is barely linearly decodable with the tested probe family once framing identity is controlled (held-out within-framing AUC 0.527), while at the argument-value emission point it is strongly decodable (AUC 0.824 at the choice point, 0.88–0.90 over value tokens). The prefill-only defense never touches that site. Steering that site at every decode step, at the largest capability-safe dose, trims per-query firing by roughly a third but leaves the best-of-queries union nearly intact (param class: 11/18 vs. 13/18). It also yields no significant held-out corpus gain (4/65 vs. 5/65)—the basis of the negative finding in §VI-C. A scope-contrast component that halved the per-query param firing (0.303 → 0.141, p =3×10 −12 ) failed its pre-specified test pass and was not adopted (protocol paragraph below). 
+
+Surrogate-refit GCG (gradient, transfer; gpt-oss-20b). 
+
+The attacker reruns our published pipeline on the public weights with their own generations and obtains a surrogate direction at cosine 0.974–0.977 to the deployed one (layers 12/16/20). They then run GCG [11] (250 steps, k=20 suf-fix tokens) with gradients through their surrogate-defended model. Result on disjoint-tool targets: 0/12 observed [0.000, 0.242] against the deployed configuration—and 0/12 observed against the surrogate itself , which the attacker had full gradi-ents through; at cos ≈ 0.975 this reading is effectively white-box. The same optimized strings succeed 5/12 undefended. Naive transfer GCG (optimized on the undefended weights) is likewise 0/8 observed [0.000, 0.324] vs 5/8 undefended. Bounds: 12 of 16 planned samples completed, and the loss is systematic rather than random—two of eight shards did not finish, so the missing four are a fixed stride of the sample pool; budget-limited; suffix-only (wording-level search is covered by the query attack above); tool-hijack targets (the param class is the documented adaptive hole). 
+
+What this arm does and does not vary. Our pipeline selects its contrast samples deterministically (a fixed-seed template-disjoint split, then a prefix of it), so a faithful recipe replication lands on the deployed direction’s own 24 sample ids; the two captures share all 576 contrast episodes (24 samples ×
+
+the 24-cell framing factorial) and their activations agree to numerical noise. What differs is the attacker’s regenerated be-havior labels—which a crossed refit shows produce essentially the whole direction gap—plus two quantities inherited bit-for-bit from our released probe pickles (the role-probe axis component and the dose scale), each of which slightly favors the surrogate’s match to the deployed configuration. This arm therefore measures whether an attacker who reproduces our recipe can rebuild a working surrogate; it is not a test of whether the specific fitting samples matter, and we do not claim the fitting samples are private. We did fit the direction on a wider draw as well—36 samples, the deployed 24 plus 12 more—which lands at cosine 0.884–0.909 to the deployed vector at the same three layers (0.787–0.926 across all twelve): changing the draw moves the direction visibly farther than regeneration alone does. That variant was not carried through to an attack evaluation, so sample-set sensitivity here is measured at the direction level only (§VII). 
+
+Exact-deployed-vector GCG. Finally we hand the attacker the actual deployed direction and dose and let GCG opti-mize suffixes with gradients through the deployed defended forward pass—directly instantiating the strongest white-box case in our stated threat model (§II-B, which treats the fitted direction and dose as knowable), to measure how much of the defense is secrecy. At n=52 dev samples with a 500-step budget, convergence-based early stopping (49/52 trajectories converged; the 3 budget-capped ones are defended non-fires) and candidate filtering: 2/52 observed compromises (0.038, Wilson [0 .011 , 0.130] ), both verified compromises of the at-tacker’s objective. One further sample falls to the plain injec-tion alone (1/52, within the deployed configuration’s known residual on this corpus, 0.013–0.045); its optimized suffix does 
+
+not fire. On the undefended model the same optimized suffixes succeed 22/52 vs. 26/52 for plain injection—the optimizer confers no advantage absent the defense, so the undefended replay is not evidence of attack strength. One of the two defended compromises fired only under the defense: its suffix, optimized against the steered model, does not transfer to the undefended one. An earlier, weaker run (a different 16-sample dev draw—9 of its samples recur among the 52, though none of the three samples compromised here was in it—250 steps, no candidate filtering) observed 0/16 [0 , 0.194] ; it is retained as the predecessor, never pooled. (Scope: gpt-oss-20b, tool-hijack objectives, single restart per sample.) 
+
+Exact-deployed-vector GCG, parameter class. The same white-box attack pointed at the documented surviving class (§VI-C): suffixes optimized through the defended forward pass toward the legitimate call carrying the attacker’s argument value ( n=52 development samples, 500 steps, convergence stop, single restart). No gradient-attributable compromise: 1/52 adaptive, and that fire is byte-identical to the same sample’s plain-injection fire—inside the 2/52 plain residual (the con-figuration’s known 0.030–0.061 on this corpus). Undefended, the optimized suffixes again lose to plain injection (28/52 vs. 38/52). One defended completion truncates in a degenerate loop with no path to a call (a defense-favorable censoring; worst case, one further non-subsumed fire). We do not report this as white-box robustness: a pre-registered gate binds—the teacher-forced objective places the call at an offset that 0 of 306 observed real parameter compromises use (all reason in the analysis channel first), so the null cannot separate “the defense holds” from “the attack aimed off the compromise path”. The gate’s required follow-up—a path-matched objec-tive teacher-forcing the call after the model’s own greedy reasoning prefix—ran at the same n=52 on the paired pool: defended-adaptive again 1/52, and that fire is the known quote-and-flag scorer false positive (the completion calls the injection “weird text” and quotes it; the attacker’s value is adopted nowhere), its fourth adjudication across defenses. The path-matched objective largely failed to converge (51/52 plateau-stopped, median final CE 2.7; the four sub-1.0 losses are stale-prefix overfits that produce no defended compromise), and the optimized suffixes again net-weaken the plain injection undefended (29/52 vs. 34/52). Gradient-attributable defended compromises across both objectives: 0/52 . One disclosure rides the static readings: greedy decoding is not bit-stable across process histories on this hardware (a fresh-process replay reproduces itself exactly but matches neither run), so the static ASR at n=52 carries ±1–2 fires of process-history jitter; the canonical residual remains the 2/52 conservative reading. Neither run adds independent evidence for the decision-point mechanism, which rests on the offset measurement itself. On the second model the same procedure is inconclusive and we do not report it as a robustness result: against the Qwen3-30B deployed configuration (16 development samples, three restarts sharing one sample pool, 250 steps) we observed no compromise of the attacker’s objective, but the restarts are not independent draws, so the effective n is 16 and the cluster-aware 95% upper bound on the per-sample ASR is 
+
+≈21% —and the adaptive component was near-inert, since plain injection already succeeds undefended 10/16, GCG buys 
+
++1 , no undefended success emitted the optimized target string, and 31 of 48 loss trajectories were still descending at the step budget. Its objective (an immediate tool call with no reasoning) targets a path no success on this reasoning model took; a converged attack with an objective specified for reasoning models is future work. All Qwen3-30B gradient runs steer with the deployed vector, so all three restarts are exact-vector runs. An early attempt at a Qwen surrogate re-ran the capture stage on the deployed fit’s own pinned inputs and copied the deployed probe fits; with deterministic decoding that capture reproduced the deployed one row for row, so the refit reproduced the deployed direction to floating-point precision (cosine 1.000 at all three steered layers). That run is therefore a third exact-vector restart rather than a surrogate. 
+
+Surrogate mismatch is unmeasured on Qwen3-30B , and no surrogate result for that model is reported anywhere in this paper. 
+
+Norm-dilution attack (mechanism attack on the norm-preserving edit). The edit rotates each payload token by an angle scaling as 1/∥ht∥ (Eq. 1), so injected text that inflates the residual norm at its own instruction-carrying positions by κ receives the equivalent of dose α/κ —and the dose ladder makes the requirement concrete: κ=1 .25 already lifts defended webpage-parameter goal from .096 to .596 (n=52 
+
+dev). Measured on gpt-oss-20b’s deployed cell through the deployed hook, over 14 replay-safe attack constructions plus a length-matched benign control (screened high-norm token filler in four placements; delimiter, digit, and whitespace runs; case/hyphenation rewrites—attacker literals byte-intact and the scorer’s evidence sets asserted unchanged), achiev-able instruction-token inflation tops out at 1.006 × (a filler run’s own tokens reach 1.17 × in a 2048-candidate screen but induce no instruction-token inflation); attention spillover onto unmodified payload tokens is nil ( 0.999 –1.001 ); and the hyphen/studly rewrites lower instruction-token norms 4–9% 
+
+(all-caps near-null), increasing the delivered rotation. Behavior matches: adaptive defended goal equals static defended goal on both corpora (tool hijack 0/24 vs 0/24 ; parameter 3/24 vs 
+
+3/24 , McNemar p=1 .0; re-generated at a 4096-token budget to rule out truncation censoring) with the injection intact undefended ( 24 /24 ; 21 –22 /24 ). Injected instruction tokens already sit 6–18% above the carrier-median norm. One ladder disclosure: the under-dosed defense is worse than none on the parameter corpus ( α0.5: .923 vs base .808 , n=52 ). The protocol was pre-registered (constructions, gates and readings fixed before the behavioral stages); dev split only; the paired low-projection text attack remains unmeasured. 
+
+Relay attacks (mechanism-predicted). The mechanism account of §VI predicts a structural gap: the defense steers only tool-payload positions, so an injection that routes through the model’s own text—quoted into its live reasoning, or echoed into a prior assistant turn—travels a channel the edit never touches. We built both attack shapes and ran them against the deployed gpt-oss configuration. The cross-turn relay fails even undefended: the injected instruction is echoed into the prior assistant turn in 12/18 episodes, yet argument-scoped adoption is 0/18 observed on every arm , including an echo-only counterfactual arm where the injection reaches the second turn solely through prior-assistant tokens. The same-turn reasoning relay is under-powered at tier 1 undefended (argument-scoped adoption 3/24 = 0 .125 , below the pre-specified ∼0.2 power threshold, all via the quote-directive shape), so the tier-1 relay question is open rather than answered; the defended arm is 0/24 observed on every reading, consistent with complete blocking but not separable from chance on the argument-scoped contrast at this n (Fisher one-sided p = 0 .12 ). What is 
+
+statistically supported is that the defense suppresses the quo-tation step itself: defended completions quoting the injected instruction in their reasoning fall 7/24 → 0/24 (p = 0 .005 ), verified on the raw completions as genuine behavior rather than refusal or degeneration (all 24 defended completions carry substantive analysis and a normal legitimate tool call; defense-on-clean strict utility 20/24, failures wording drift). Per the pre-specified interpretation, escalated content salience (not authority framing) is the follow-up before any tier-1 “relay blocked” claim. 
+
+LLMail-Inject replay (human-adaptive). We replay ev-ery attack text that succeeded end-to-end in the SaTML’25 LLMail-Inject challenge [12]: of its 461,640 submitted attacks, the 2018 unique texts that fully succeeded, replayed as 2052 episodes (one per challenge level each text beat). These are human-crafted attacks that beat prompt shielding, TaskTracker [36], spotlighting [2], an LLM judge, or their combination. The replay runs through a challenge-exact port (their system prompt, retrieval, scoring checker; deviations enumerated in the artifact): see Table VIII. Combined: 128/2052 undefended ( ≤149 /2052 = 0.073 
+
+after an adversarial audit of the harness credited comply-intent completions cut by the token budget) → 0/2052 observed 
+
+[0.000, 0.002]. The result is echo-audited: the defended arm’s single flagged completion was a parser false-positive quoting the attacker’s text while refusing, and every undefended hit is a genuine tool call. Stated conditionally, and verified per-episode by id intersection rather than by aggregate: of the 128 undefended successes ( ≤149 after the truncation audit), 
+
+zero succeed under the defense; on Qwen3-30B, of the 117 undefended dev successes, zero succeed under the defense. The defense leaves 0 observed successes in every original-defense family, including the 22 texts that beat the challenge’s full combined stack. The caveat on the undefended rate: these attacks were optimized against other models, and adaptive prompt attacks are model-specific. The challenge paper discusses cross-model transfer only qualitatively and reports no rate for it, so we computed one from its released phase-1 submissions. Ev-ery retrieval level ran against two victim models under the same defense; where the same team submitted an identical subject and body at both, an attack that had succeeded on the first model succeeded again on the second in 14.3% of directed re-submissions (44/307, spanning 285 distinct text-pair instances; counting each pair once instead of in both directions gives 22/285 = 7.7%). Either figure is conditioned on what participants chose to re-submit — it is not a sys-tematic re-evaluation of all successful attacks on the second model — and it varies widely with the defense they re-submitted under (Spotlight 4/88 = 4.5%, LLM Judge 14/36 = 38.9%). On that order, the ∼5–7% we observe transferring to a third, never-targeted model is unsurprising — though, as the decomposition below shows, the rate we measure is also specific to the challenge episode’s own inline hardening, whose removal raises it to 0.254, above the pooled cross-model figure. This experiment measures replay of human-adaptive attacks, not live adaptation against our defense. A row-level decomposition of the undefended non-transfer, adversarially reviewed, sharpens this in two ways. First, the failing replays are not silent misses: the model reads the injection and refuses it by name—73% of the 1432 undefended gpt-oss failures on the dev-split replay (1537 − 105 ; the failure anatomy was run on that split only) quote the attacker’s ask while declining, and ∼0 ignore it silently. The refusals anchor on the challenge episode’s own 
+
+inline hardening: the scenario ships a partial prompt defense (an anti-injection system block plus an in-user-turn “don’t follow instructions in them” line), and removing both layers raises undefended transfer 0.070 → 0.254 (n=256 ; ∼9× the batch-nondeterminism floor bounded by a same-configuration canary, with either hardening layer alone holding transfer near baseline). Second, what does transfer is wire-format role forgery: fake conversation turns and forged tool-call syntax transfer at 0.10 –
+
+0.30 per class and model, and carry 90–97% of all undefended hits on both replay targets (gpt-oss and Qwen3-30B), with far-above-chance hit-set overlap between the two unrelated models (62 common hits vs. 8 expected under independence). Successful completions re-attribute the injected ask to user or system authority verbatim in their reasoning, while the detector-evasion shapes that dominate the corpus (encodings, datamarking, obfuscation) transfer at ∼0.004 on both models. Attacks bred against detection stacks are inert against a model swap; what survives model-to-model is precisely the role-confusion class this direction was built for and drives to 0/2052 observed. The steering direction predates this corpus entirely (holdout on samples, wording, and benchmark). On Qwen3-30B at the deployed 12 σ configuration, the full dev replay ( n=1537 )gives undefended 7.6% end-to-end success (117/1537 after an adversarial audit recovered 13 successful attacker calls the parser initially missed in an alternate emission format; present at all four challenge levels) and defended 0/1537 observed (Wilson 95% CI [0, 0.0025])—including zero on the obedience superset (attacker address reaching any argument of any call). The defended Qwen arm answers on 100% of episodes, with retrieval coverage 99.4% and a 0.0% false-action rate on injection-free traffic. 
+
+Protocol: selection risk, measured. During development a challenger configuration (the deployed composition plus a scope-contrast component) dominated the deployed configu-ration on the development splits—webpage param 0.063 vs 0.126 ( p = 0 .031 ), AgentDojo 0.034 vs 0.068 (both at the TABLE VIII LLM AIL -I NJECT REPLAY (HUMAN -ADAPTIVE ), GPT -OSS -20 B DEPLOYED CONFIGURATION .split ASR ↓ undefended [95% CI] ASR ↓ defended [95% CI] clean-traffic cost dev n=1537 105/1537 = 0.068 [0.057, 0.082];          
+
+> ≤0.073 truncation-corrected
+> 0/1537 observed [0.000, 0.002] none (0 spurious sends; retrieval coverage 0.988, matching the clean arm) test n=515 (held out) 23/515 = 0.045 [0.030, 0.066] 0/515 observed [0.000, 0.007] none (retrieval coverage 0.990, matching the clean arm)
+
+development-time 768-token budget), query-attack cross-class sample union 11/18 vs the deployed configuration’s 15/18 (both obedience-pattern, both classes pooled at the sample level). It was advanced to a pre-specified, one-pass, no-rerun test evaluation on all four corpora—a separate paired run, challenger and deployed configuration in one process, in which the webpage corpora ran n=24 test subsets (a disclosed protocol deviation) and the JSON corpora their full test splits. It reversed : webpage param 0.167 vs 0.042, tool-hijack JSON 0.031 vs 0.000, webpage tool hijack 0.042 vs 0.000 (each pair challenger vs deployed; the deployed readings are that paired run’s own generations, not the certification pass of Table XV, whose separate artifacts read 0.135, 0.013 and 0/52—the pre-specified criterion was directional within the paired run). The development-split dominance was selection on the same attack distribution the configuration was tuned against, and the challenger was rejected. We report this as a concrete, quantified instance of the risk of defense selection on the same attack distribution used for development. The pre-specified test pass is what caught it, and it is why every promotion in this paper is gated on one. 
+
+Search budget, disclosed. The development-side search behind the deployed configurations was substantial and is part of the honest accounting (Table IX): what was explored per model, and the rule that every test-split number in this paper is a single pre-specified pass with no reruns—the search happened on development splits, never on the splits the claims are stated on. APPENDIX DGENERAL UTILITY AND MECHANISM ABLATIONS 
+
+Runtime-cost measurement bounds (§V-D). Measured on gpt-oss-20b at the deployed configuration (A100 80GB, n=21 
+
+poisoned episodes after warmup, medians): prefill 0.181 s steered vs 0.182 s unsteered, greedy decode 13.52 tok/s in both arms, peak memory identical at 39.37 GiB (the vectors add 
+
+∼15 KB). The per-episode IQR is ∼35% of the median against a < 1% arm difference, which bounds the claim rather than establishing zero cost. The deployed defense is prefill-only (§VI-C), so this measures the shipped configuration. 
+
+Why there is no standard-benchmark evaluation. Coun-terSteer edits only tool-result spans, so any input containing none—which includes every standard capability benchmark as normally administered—runs the mathematically unmodified model. General capability under CounterSteer is preserved 
+
+by definition , not by measurement, and we therefore do not evaluate GSM8K/MMLU/IFEval-style suites as a utility claim.                                         
+
+> TABLE IX PER -MODEL DEFENSE SEARCH SPACE ACTUALLY EXPLORED DURING DEVELOPMENT (LOWER BOUNDS WHERE EARLY EXPLORATION IS RECORDED ONLY IN SUMMARY ). D OSES COUNTS DISTINCT STEP MAGNITUDES EVALUATED ;COMPOSITIONS COUNTS BLENDS AND VARIANT MECHANISMS (GATES ,SPAN CHOICES ,DECODE -TIME STACKS ). ALL TEST -SPLIT EVALUATIONS ARE ONE PRE -SPECIFIED PASS ,NO RERUNS .model directions layer sets doses compositions / variants held-out confirm gpt-oss-20b ≥16 (+ ≥9random draws)
+> ≥2≥16 ≥20 yes (one pass) Qwen3-30B 52≥11 2yes (one pass) Gemma-4-31B 1 (+probe axes) 380yes (two rungs: wire-format T∗;then docs +
+> wordings
+> +
+> framings held out) GLM-4.5-Air ≥5(incl. 2role axes) 2≥60yes (one pass, webpage param) Llama-3.1-8B 3(+3 random draws) 4≥90yes (one pass)
+
+We run them once in two roles only (Table X; gpt-oss-20b, deployed configuration). The plain rows are an implementation identity check (the numbers must be — and are — identical). The tool-framed rows, where each item’s content is artificially wrapped in a steered tool-result span, are a mechanism probe of what steering costs when the content being reasoned over sits inside the edited span. The deployment-relevant utility numbers remain utilBenign /utilAttack on real tool traffic (§V-A–V-B). The plain rows confirm the identity. The tool-framed probe shows that CounterSteer preserves semantic reasoning over steered content unevenly: arithmetic reasoning (GSM8K) is unchanged while multiple-choice discrimination drops 10 .8 pp (and IFEval instruction adherence 15 .2 pp) at the deployed gpt-oss dose when the content being reasoned over sits inside a steered span. Suppressing a span’s instructional influence is not perfectly separable from processing its content. De-ployments do not serve MMLU questions as tool output, but TABLE X IDENTITY CHECK (PLAIN ) AND STEERED -SPAN READING PROBE                    
+
+> (TOOL -FRAMED ), GPT -OSS -20 B DEPLOYED CONFIGURATION .DENOMINATOR :ALL ITEMS . T HE PLAIN COLUMNS ARE AN IMPLEMENTATION CHECK OF THE BY -DEFINITION IDENTITY ,NOT A UTILITY EVALUATION .bench ( N)context baseline ↑steered ↑
+> GSM8K ( n=250 )plain / tool-framed 0.896 / 0.912 0.896 / 0.912 MMLU ( n=500 )plain / tool-framed 0.814 / 0.810 0.814 / 0.702
+> IFEval ( n=250 )plain / tool-framed 0.624 / 0.672 0.624 / 0.520
+
+deployments whose agents must reason discriminatively over retrieved content should verify utility at their operating dose. The mechanism of the MMLU slip is anatomized next. 
+
+Position anatomy of the MMLU slip. Controlling gold-answer position ( n=250 per condition): gold at the first option is immune ( +1 .6 pp, p = 0 .585 , noise); gold at any later posi-tion costs 9–12 pp regardless of which (B −8.8, p = 0 .0016 ; C 
+
+−12 .0, p = 5 .3×10 −6; D −9.2, p = 4 .3×10 −4)—a step, not a gradient. Uniform-position interpolation reproduces about two-thirds of the observed slip. Two failure classes carry the cost in roughly equal measure: degraded comparison among later-listed options (clean wrong-letter finals, first-option pull), and degenerate budget-exhausting re-quoting loops that never reach a final answer—question comprehension itself is not the failure mode. 
+
+Unicode/typography anatomy of the agentic benign cost. Of the deployed configuration’s 8 broken AgentDojo benign tasks, 3 are steering flipping near-tie space typography to U+202F NARROW NO-BREAK SPACE inside checker-required strings (same family as a recorded U+2011 non-breaking-hyphen case). This is not a directional push: the unsteered model already emits U+202F in 34–36% of episodes (steered: 36–41%). Steering perturbs near-tie decisions; which task breaks flips chaotically across arms. Only 1/8 failures is suppression—capability loss is not the mechanism. 
+
+Random-direction controls, draw by draw. On the fitting corpora, matched-magnitude random directions span ASR 0.000–0.477 across draws—the null distribution is wide, which is why a single draw is not a control. On the disjoint-tool corpus a draw that matched the fitted direction’s clean-payload cost exactly (McNemar p = 1 .00 ) still carried 30 × its attacked ASR; the matched control there also acts less than unattacked (no-action 1.19 × unattacked, vs the fitted direction’s 0.73 ×), so its higher attack rate is not bought back in capability. The compromise-rate summary is in §V-D. 
+
+Perturbation cost of the magnitude. Two indepen-dent magnitude-matched random directions cost −21 .8 and 
+
+−27 .3 pp benign on AgentDojo against the deployed configu-ration’s −14 .5—all three readings from the benign arms of a retired 768-token-budget run, not the 4096-budget curve of Table XXIII (per-draw McNemar vs deployed p = 0 .42 /
+
+0.09 , same sign both draws). These controls suggest that a substantial fraction of the benign cost is generic perturbation cost at this magnitude rather than uniquely attributable to the fitted direction; the compromise-rate (§V-A–§V-C) is what the direction buys on top of that generic cost. In these two draws, direction surgery on the benign axis showed no headroom; the live lever is dose (§V-B). APPENDIX EBASELINE IMPLEMENTATIONS AND FULL -G RID DETAIL 
+
+Detail behind the CachePrune, SecAlign and AGRI passages of §V-D and §VIII. 
+
+AGRI port. AGRI [8] releases probes only; we fit probes on our own captures (gpt-oss-20b layer 20, AUROC 0.9906; Qwen3-30B layer 12, AUROC 0.9976) and implemented its gated reasoning prefill from the specification (fire threshold 0.5; the prefill persists three turns after a fire). Render parity between the replayed prompts and our serving path measured 
+
+≤ 2 × 10 −8 (Qwen3-30B) and 0.055 (gpt-oss-20b; above our 0.05 pre-set gate, with zero gate-decision flips across the audited rows). Static grade: its own 180-case paired battery (Table III) — gpt-oss-20b .415 → .062 at benign 78.0% of its clean arm (absolute 70.9%), with 4 workspace cases void on out-of-memory errors consistent with the measured context inflation; Qwen3-30B .472 → .100 at benign 100% of clean (absolute 96.4%). Adaptive: gpt-oss-20b AD@6 0.143, final over 36/36 cells; Qwen3-30B 0.411, final over 36/36 (Table VI). The port’s deviations table ships with the artifact. 
+
+Table XI provenance. Audit detail from the table’s adver-sarial sign-off. Undefended baselines and censoring: the gpt-oss baselines are three distinct greedy regenerations (0.432– 0.489 = regeneration noise; never averaged); every compro-mise value is a truncation-censored lower bound, and worst-case bounds flip no ordering except reminder vs. prompt sandwich, which is therefore not ordered; the panels are never compared to each other. Typography normalization (gpt-oss utilAttack and benign): Unicode space/dash codepoints in model output mapped to ASCII, uniformly across all four arms, before this benchmark’s own (2024) string checkers (zero verdict flips on the other panels); the one compromise-rate movement under normalization is one defended compro-mise surfaced on the gpt-oss dose-ladder baseline ( 0.085 →
+
+0.090 ; the ladder is Fig. 6), a separate run from this table’s CounterSteer battery (0.091)—two runs, not roundings of one number. Filter wiring: filter rows use AgentDojo’s own classi-fier wiring (message-level replacement, windowed scanning), not AutoDojo’s gentler sentence-level removal [13]. Llama-3.1-8B panel: it spans two hardware fabrics (A100 pairs, H100 node); each row’s four arms share one fabric and one process, the CounterSteer replicate quantifies the cross-fabric spread (a replicate, not a tenth battery), and the thin undefended base (18/180) widens every interval. GLM detector probe: it shows the detector trade at the capability ceiling—PromptGuard-2 keeps benign utility whole but leaves 21/180 compromises; PI-Guard leaves 0/180 observed compromises and destroys 42% of benign utility (26/56 tasks vs. 45/56 clean, retention 26/45) by false-positive tool-output deletion (235 of 352 benign tool messages deleted), not action suppression (0/41 no-call tasks); the probe’s undefended baseline (0.183) differs from the earlier GLM grid’s (0.222) within regeneration noise ( p=0 .36 ), same 8192 budget. The (!) predicate, concretely: every marked row has a verified capability-destruction mechanism (benign tool-message deletion at fp 56–61% on gpt-oss and 31–36% on Qwen, 235/352 on GLM; the mechanical tool filter suppresses action—on Llama, 20/41 benign tasks end with no call vs. 0/41 undefended, median 2 of ∼11 tools kept), which is why Llama’s tool filter (benign 76.9%) is marked while its prompt sandwich (73.3%, a prompt-level arm with no deletion or suppression mechanism) and its classifier filters (benign 92.3%, no verified deletion cost on that model’s thin base) are not. SecAlign: the 4096-budget battery (quoted in §V-D, not a row here) carries two disclosed deviations—it ran a longer system message than these batteries (measured not to carry its clean-utility deficit: five of its six failing tasks already failed at 768 under the short message), and seven cases OOM’d symmetrically in all four arms (the merged checkpoint’s VRAM footprint; exclusion favors SecAlign, and intersection-restricted ratios move ≤0.1 pp); base-clean regeneration spread puts its per-case ratio at 80.9–82.3%. The table supersedes the retired 768-budget baseline measurements and the retired legacy Qwen defended-only measurements for the defenses covered (both preserved in the artifact repository). 
+
+CachePrune port and anchor validation. No public im-plementation exists; ours is, to our knowledge, the first inde-pendent one, and it was validated in the original paper’s own setting before any number on our models counted: on Llama-3-8B-Instruct with SQuAD QA and StruQ-style injections, ASR 
+
+0.51 → 0.01 (n=100 ; paired exact on the stored completions: fixed 51 / broke 1, p=2 .4×10 −14 ; the single defended hit is a refusal quoting the canary—a substring-matcher false positive, so the corrected defended rate is 0.00) with F1 nearly held (defended 0.734 vs. unattacked 0.783, i.e. 93.7% of unattacked; mask-on-benign 95.7%)—a defense effect con-sistent in direction with the paper’s reported 27 .9% → 7.4% 
+
+(our attack strings are approximations; theirs are unpublished), with every deviation from its equations enumerated in the released artifact. Three caveats on that anchor: the ASR matcher counts substring echoes of the canary, which can only inflate the attacked arm; the 100 evaluation rows are drawn from essentially one title-sorted SQuAD article; and the 
+
+fake_completion framing never fires undefended (0/25 observed [0.000, 0.134]), so it contributed no fit signal. The gpt-oss-20b mask was fit on the same probe split the steer-ing direction uses (equal data access; sample- and attacker-template-disjoint from the development evaluations, asserted at split time, and disjoint by construction from the test splits and AgentDojo). On the single-turn development splits its benign utility brackets read 53.2%/85% (JSON tool-log) and 58.5%/88% (JSON parameter). These are not paired against a single CounterSteer generation and should not be read as a head-to-head : CounterSteer’s benign brackets on the same sample ids are 64.0%/88% and 56.9%/95% in the run the compromise figures of §V-D come from, and 60.0%/89% and 60.6%/92% in a second generation of the same splits. The arms are separate generations with different clean references and therefore different scoreable denominators (79 vs. 75; 65 vs. 66), each percentage normalized to its own clean arm. On JSON parameter the strict end reverses between the two readings (CachePrune 58.5% vs. CounterSteer 56.9% or 60.6%), so the honest statement is that the two defenses’ benign cost is indistinguishable at this resolution, not that either is cheaper. 
+
+Test-grade baseline runs and retained development readings. The §V-D single-turn comparison quotes a pre-registered re-run of both baselines on the held-out test splits (identical budget, batch, greedy decoding and sample order as CounterSteer’s test artifacts; the SecAlign arm is its merged model’s own clean/attacked pair with no steering applied). Test grade: CachePrune 0.700 → 0.463 (shipped, n=96 ) and 
+
+0.647 → 0.397 (parameter, n=70 ), benign brackets 35.0%/88 and 29.4%/87 vs. CounterSteer’s 25.0%/80 and 22.7%/83 (point-better for CachePrune, n.s.); SecAlign 0/91 and 0/70 observed. The prior development readings are retained for the record: CachePrune 0.481 → 0.203 and 0.600 → 0.338 ; Se-cAlign 1/92 = 0 .011 and 0/66 observed. The shipped-corpus CachePrune movement dev →test is significant ( p=0 .0007 ,defended arms; the dev run executed on different hardware, so split and host are confounded); the parameter movement is within sampling noise ( p=0 .59 ). 
+
+SecAlign training grid and holdout. A DPO LoRA (rank 32, α=64 , β=0 .1, one epoch) over 8640 preference pairs: samples drawn from the same fitting split the direction uses, crossed with the full authority-framing factorial the direction’s fit design was drawn from, with the evaluation samples held out and the development injection wordings held out lexically (none appear in the training prompts, exact or case-folded). Not held out: the framing-level axis (every grid cell was trained); the semantic authority register (the training grid spans the same authority-escalation register as the evaluated templates, and one development wording family is a regis-ter paraphrase of the grid’s user voice); and—symmetrically for both defenses—the JSON parameter corpus’s attacker-template set. SecAlign’s sole development-split compromise is a genuine full compromise on a sample whose user turn itself instructs executing action lines found in tool content. As self-referenced context (not base-anchored): against its own clean arm, SecAlign’s under-attack utility brackets read 58.7%/91% (JSON tool-log) and 59.1%/95% (JSON parameter). 
+
+SecAlign utility, conservative end and own-clean context. 
+
+Its utility cost is quotable only at the conservative end, because the lenient bracket’s composed-field exemption is computed against a shared clean reference and a fine-tuned model’s clean behavior is a different reference: clean-traffic agreement with the base model’s clean run is 0.506 (JSON tool-log) / 0.585 (JSON parameter) against a same-model cross-run agreement floor of 0.658 / 0.723, comparable to CachePrune’s defense-on-clean (0.532 / 0.585) and heavier than CounterSteer’s (0.646 / 0.662). 
+
+SecAlign vs. CounterSteer discordance. Over the 176 shared verdict-bearing AgentDojo cases the two arms disagree on 7: SecAlign wins 5 and CounterSteer 2 (exact McNemar 
+
+p=0 .45 ), i.e. statistically indistinguishable. Full-180 AgentDojo grid (768-budget trained compari-son): budget anatomy. On clean traffic SecAlign and the base model are near parity at the 768 budget (100.0% vs 98.2% normalized); raising the budget to 4096 cures the base model’s clean failures (10 → 1 tasks) but not SecAlign’s trained-in ones (11 → 6, two of them refusals of legitimate tool-data instructions), which is what leaves SecAlign at 90.4% unique-task of base clean at the shared 4096 budget (§V-D); under attack the two defenses are at utility parity (SecAlign 101/180 vs. CounterSteer 102/180). 
+
+Full-180 AgentDojo grid: nulls and censoring. Per-run checker-null cases (no security verdict) are 8/8/3/4 for un-defended/CachePrune/CounterSteer/ SecAlign, and worst-case null assignment moves no ranking. Budget censoring at this scale is asymmetric in the comparators’ favor —the terser fine-tuned model leaves 0–9 unterminated turns per arm against 56–58 in the comparators’ attacked arms—so it cannot rescue them and the ranking is conservative. Of the nine SecAlign leaks, seven are case-exact matches to CounterSteer failures and two fall under attack wordings CounterSteer survived, which is why the subset relation is stated at injection-task rather than case granularity. APPENDIX FPER -M ODEL AUTHORITY -F RAMING CURVES 
+
+Per-model detail behind the authority-curve paragraph of §VI; all rates are attack success rates on each model’s own firing corpus under the four-level factorial of §III-A. gpt-oss-20b escalates monotonically with claimed authority. Gemma-4-31B fires most on firm framings (0.674, p=2 ×10 −4 cluster-collapsed), and explicit supersession suppresses its parameter-manipulation firing entirely (0/72 observed [0.000, 0.050]). GLM-4.5-Air has Gemma-4’s shape, shallower: firm 0.576 highest, explicit supersession 0.382 lowest. APPENDIX GSUPPLEMENTARY FIGURES AND TABLES 
+
+Floats relocated from the body for space; each is cited where its result is claimed. 
+
+Table XIII provenance. Gemma-4’s webpage T cells ad-ditionally hold out carrier documents, attacker wordings and framing templates (§V-A), and every webpage-param T cell carries the near-duplicate-template caveat (Reading the num-bers, §V). The AgentDojo column runs at 4096 tokens/turn (GLM 8192, zero truncation), all arms one run per model; the Qwen pair is the same-process battery of Table XI, whose separate-run regeneration replicate reads .457 → .094 
+
+(consistent, §V-B). On several models the pairwise judge sits far below the strict/lenient bracket (GLM benign 26.9 beside 94.2/94; gpt-oss 38.5 beside 75/75): the judge reads the model-composed summaries that strict exempts, and most of its measured deficit is wording drift regeneration alone produces, so the strict/lenient bracket, not the judge floor, bounds task fidelity (strict-vs-judge note, §V-D; Appendix B). Llama-3.1-8B’s webpage-param and JSON-param classes have no viable cell: JSON-param reaches ASR 0 only at a capability-destroying dose (judge benign .431), webpage-param at none (base 1.000; Table XXI). 
+
+Tables XV and XVI provenance. The capability guard passes on every row of both tables; per-row guard rates, truncation counts and artifact provenance are in Appendix A. The webpage rows’ template holdout on both models is exact-template-text : 12/52 test samples differ from a development template only by case or one whitespace character (the split is identical across models), which is why Table XVI’s webpage rows also state their strictly-disjoint-40 subsets. 
+
+Table XVII provenance. Gemma-4’s attack surface is medium-specific: webpage/HTML carriers fire, while JSON records and the prose-carrier medium do not (the measured nulls in the table). On the single-turn webpage corpora the steered span is ∼90% of the whole prompt, so those rungs do not isolate the payload-scoped edit the primary models’ corpora measure—the AgentDojo grid, steering per-turn tool outputs, does. Gemma-4-31B’s held-out framing templates are test-side wordings, distinct from the fit-side framing level of §IV: its deployed fit predates the fit-side rule and holds the level out at the admission gate only. 
+
+Table XVIII provenance. The test row is one pre-specified pass, first touch of that split, sample-disjoint from develop-ment. Its template holdout is exact-template-text: 12 of the 52 test samples differ from a development template only by letter case or one whitespace character (defended 0/12 on that subset vs. 1/40 on the rest; the split is identical across models). 
+
+Delegated-authority partition (Table XX), detail. Class-B membership is decided from the user prompt alone (“read the file . . . and follow the instructions precisely”), before any outcomes are read; the partition’s motivation was post-hoc—formed after inspecting the defended arm’s failures— which is why §V-B applies it symmetrically to every arm. The Class-B enrichment is 0.806 vs. 0.390 undefended, so delegation amplifies compromise rates regardless of defense and the partition is partly a benchmark property. All of the deployed configuration’s defended failures are delegated (14/14; likewise 12/12 in the retired 768-budget run, where a transcript-level reading classifies 9–10 of the 12 as delegated— the task-id criterion classifies all of them). 
+
+Model revisions. Dataset loads in the released code name an explicit upstream revision; model loads do not, and no result artifact records the revision or the host it ran on, so we reconstructed them and state what that reconstruction does and does not establish. Every model but one resolved a single revision fleet-wide. The exception is Gemma-4-31B-it, which existed at two revisions on our machines. The reported Gemma runs used 842da379 , and the ambiguity is benign: the two revisions carry byte-identical weights—the safetensors content hashes match—and differ only in the chat template and tokenizer configuration. So the numbers are not in doubt, but a reproducer who resolves the other revision gets the same weights behind a materially different chat template, and our prompts are rendered through that template. One earlier stage is genuinely unrecorded: the Gemma direction was fitted in a gpt-oss Qwen3-30B Gemma-4 GLM-4.5 Llama-3.1 
+
+0.00 0.25 0.50 0.75 1.00     
+
+> ASR / compromise rate
+> .08 .07 .01 .06 .05
+
+AgentDojo   
+
+> gpt-oss T Qwen3-30B T Gemma-4 T GLM-4.5 T
+> .14 .17 .04 .02
+
+webpage param    
+
+> gpt-oss T Qwen3-30B T Gemma-4 T Llama-3.1 T
+> .00 .00 .00 .04
+
+webpage tool-hijack  
+
+> gpt-oss T Qwen3-30B T
+> .01 .03
+
+JSON tool-hijack  
+
+> gpt-oss T Qwen3-30B T
+> .04 .06
+
+JSON param 
+
+> gpt-oss Qwen3-30B Gemma-4 GLM-4.5 Llama-3.1
+
+025 50 75 100 
+
+> utility, % of unattacked
+
+AgentDojo benign 
+
+> gpt-oss Qwen3-30B Gemma-4 GLM-4.5
+
+webpage param 
+
+> gpt-oss Qwen3-30B Gemma-4 Llama-3.1
+
+webpage tool-hijack 
+
+> gpt-oss Qwen3-30B
+
+JSON tool-hijack 
+
+> gpt-oss Qwen3-30B
+
+JSON param   
+
+> undefended defended benign (defense on) under attack (defense on)
+
+Fig. 4. Table XIII as charts. Top: attack success rate (the AgentDojo panel: compromise rate), undefended (solid) vs defended (hatched), per corpus class; each pair is a within-model contrast at that model’s own budget and split (rung on the tick). Bottom: utility with the defense on—benign and under attack, 
+
+judge % of unattacked (strict/lenient brackets in the table); the AgentDojo panel is benign retention on its own checker. AgentDojo ticks carry no rung (one grid, no split); Gemma-4’s webpage bars (ASR and utility) are the doc +wording +template-held-out rung, its utility judge-rescored 2026-09-09 (the retained T∗ rung: Table XVII). Bars generated from the table’s numbers by figs/make_results_figs.py ; nothing recomputed. 
+
+1. BEHAVIORAL CONTRASTS paired episodes differing only in whether the em-bedded instruction is followed; factorial over authority framing, voice, action, delegation. 
+
+2. CANDIDATE DIRECTION difference-in-means between followed and resisted sides, per layer. 
+
+3. RELIABILITY & GENERALIZATION SCREENING ranked: sign-consistency across disjoint fitting shards; AUC (reference 0.65) on a whole authority-framing level withheld from the fit. 
+
+4. CAUSAL VALIDATION low-dose bidi-rectional test on held-out attacks: subtracting must reduce injection-following, adding must increase it, guard intact. 
+
+5. DOSE SEARCH & DEPLOY constant norm-preserving edit −ασ ˆd at layers L, every tool-result token, at prefill. Always on; no detector. deployable triple: (direction, layers, dose) 
+
+most candidates die here :separates the fit set, fails held-out wording a correlate , not a lever: discriminates attacks, does not move ASR (§VI) no capability-safe effective dose in the searched space (e.g., Llama-3.1-8B’s JSON-parameter cell, Table XXI) 
+
+Fig. 5. The CounterSteer recipe, run once per model. Five steps; steps 4–5 are the certifying pass/fail gates (step 3 ranks candidates, it does not certify); red branches are the rejections. The recipe discovers each model’s own lever rather than assuming a universal injection direction. 
+
+cluster job whose node-local cache is gone, so which of the two revisions it resolved is not establishable. We measured the gap closed rather than arguing it: rendering every cell of the deployed fit design (576 poisoned prompts with recorded spans) under each revision’s own tokenizer and template yields 
+
+byte-identical text, input ids and span indices—the templates’ differing branches are never exercised by the fit corpus—so             
+
+> 035.5 8.1
+> 00.10.20.30.40.5
+> deployed
+> 8.06 σ
+> dose α(×σ, per model) compromise  ↓
+> gpt-oss-20b
+> ∆pp
+> 010 12 14 16
+> cost cliff selected
+> 12 σ
+> dose α(×σ, per model)
+> Qwen3-30B
+> 0
+> −10
+> −20
+> −30
+> −40
+> benign  ∆pp  ↑
+> compromise (left) benign ∆pp (right)
+> ⋆operating point lower bound (censored)
+
+Fig. 6. Security–utility dose curves on AgentDojo. Each model’s σ is its own and the two dose axes are deliberately different ranges; stars mark the deployed configurations. Both panels are at the 4096-token per-turn budget; all compromise values are budget-censored lower bounds at their own budget (§V-B), and the Qwen 16 σ point is additionally censored by the truncation that violates its capability guard, so it is plotted as a bound only; the shaded “cost cliff” band marks the dose region where Qwen’s benign delta falls below −19 pp. The benign ∆pp is the raw paired clean →defense-on-clean delta of each ladder ( n=55 /56 tasks), so adjacent-dose differences sit inside task quantization. 
+
+the fit inputs, and hence the direction, are revision-invariant. Revisions are listed in the released corpus manifest. 
+
+Table XXIV note. A transcript audit of the α=16 arm still finds 13 episodes cut mid-compliance at 4096 (10 defended) plus 13 defended episodes ending on an unexecuted call, so its 0.011 is a lower bound, not a measurement, and its utility is depressed by the same censoring; the α=10 –14 rows share the budget and have not been re-audited. TABLE XI STATE -OF -THE -ART COMPARISON : FOUR -ARM BATTERIES (CLEAN / DEFENSE -ON -CLEAN / ATTACKED / DEFENDED ) PER DEFENSE , FULL 180-CASE 
+
+AGENT DOJO GRID , 4096 TOKENS /TURN (GLM-4.5-A IR 8192), EACH ROW AGAINST ITS own same-process UNDEFENDED BASELINE (“ UNDEF .”).  
+
+> COMPROMISE
+
+= AGENT DOJO ’S CHECKER OVER PAIRED VERDICT -BEARING CASES ; BLK /INT = COMPROMISES BLOCKED / INTRODUCED (EXACT 
+
+MCNEMAR ); C LASS A = NON -DELEGATED COMPROMISES , DEFENDED (UNDEFENDED ); BENIGN = DEFENSE -ON -CLEAN % OF CLEAN OVER PAIRED UNIQUE TASKS ; FP = FRACTION OF benign TOOL MESSAGES A FILTER DELETED ; n/m = THE DELEGATED -AUTHORITY PARTITION IS NOT COMPUTED FOR THAT PANEL . (!) = CAPABILITY -GUARD TERRITORY , A MECHANISM PREDICATE RATHER THAN A BENIGN -% THRESHOLD , DETAILED —WITH THE TYPOGRAPHY NORMALIZATION ’S SCOPE AND ITS ONE DISCLOSED MOVEMENT —IN THE “T ABLE XI PROVENANCE ” PARAGRAPH OF APPENDIX E. 
+
+defense compromise ↓ [95% CI] (own undef.) blk/int ( p) Class A ↓ utilAttack ↑ (un-def.) benign ↑ % of clean filter fp ↓
+
+gpt-oss-20b (Class A over 137–140 non-delegated cases; undefended Class A 51–59) 
+
+CounterSteer (deployed) 16/176 = 0.091 [.057, .143] (0.483) 70/1 (6.1×10 −20 )
+
+0/140 (59) 0.716 (0.551) 90.6% —CachePrune [9] 38/176 = 0.216 [.162, .282] (0.483) 55/8 (9.8×10 −10 )15/140 (59) 0.688 (0.551) 88.7% —reminder (AutoDojo) [13] 48/176 = 0.273 [.212, .343] (0.483) 45/8 (2.4×10 −7)33/140 (59) 0.574 (0.551) 88.7% —prompt sandwich 55/174 = 0.316 [.252, .389] (0.489) 38/8 (9.2×10 −6)31/138 (59) 0.609 (0.551) 88.2% —spotlighting [2] 74/176 = 0.420 [.350, .494] (0.483) 21/10 (0.071 n.s. )46/140 (59) 0.616 (0.551) 92.5% —PromptGuard-2 filter [21] 36/176 = 0.205 [.152, .270] (0.483) 49/0 (3.6×10 −15 )21/140 (59) 0.311 (0.551) 100.0% 0/178 DeBERTa filter [22] 6/176 = 0.034 [.016, .072] (0.483) 79/0 (3.3×10 −24 )4/140 (59) 0.167 (!) (0.551) 47.2% (!) 61% PIGuard filter [23] 2/176 = 0.011 [.003, .040] (0.466) 80/0 (1.7×10 −24 )1/140 (57) 0.106 (!) (0.585) 58.2% (!) 56% tool filter [mechanical] 0/176 observed [0, .021] (0.432) 76/0 (2.6×10 −23 )0/140 (51) 0.106 (!) (0.614) 10.9% (!) —
+
+Qwen3-30B (own undefended baseline 0.489 in every battery; six independent regenerations, verdict-identical per case) 
+
+CounterSteer @12 σ (de-ployed) 13/180 = 0.072 [.043, .120] (0.489) 75/0 (5.3×10 −23 )5/144 (58) 0.717 (0.667) 94.1% —PIGuard filter [23] 1/180 = 0.006 [.001, .031]; worst-case ≤.033–.056 87/0 (1.3×10 −26 )0/144 (58) 0.222 (!) (0.667) 62.7% (!) 31% DeBERTa filter [22] 16/180 = 0.089 [.055, .140] 72/0 (4.2×10 −22 )5/144 (58) 0.300 (!) (0.667) 54.9% (!) 36% PromptGuard-2 filter [21] 41/180 = 0.228 [.173, .294] 47/0 (1.4×10 −14 )23/144 (58) 0.450 (0.667) 100.0% 0/179 reminder (AutoDojo) [13] 64/180 = 0.356 [.289, .428] 28/4 (1.9×10 −5)37/144 (58) 0.689 (0.667) 96.1% —
+
+Llama-3.1-8B (thin base: undefended 0.100 = 18/180 on both fabrics; clean solves only 15/56 (A100) / 13/56 (H100) tasks) 
+
+CounterSteer α=5 (A100) 9/180 = 0.050 [.027, .092] (0.100) 11/2 (0.022) n/m 0.222 (0.222) 100.0% —CounterSteer (H100 replicate) 11/180 = 0.061 [.034, .106] (0.100) 9/2 (0.065 n.s. )n/m 0.228 (0.211) 107.7% —CachePrune [9] (A100) 8/178 = 0.045 [.023, .086] (0.101) 11/1 (0.006) n/m 0.208 (0.225) 80.0% —prompt sandwich (A100) 1/180 = 0.006 [.001, .031] (0.100) 17/0 (1.5×10 −5)n/m 0.122 (0.222) 73.3% —spotlighting [2] (A100) 23/180 = 0.128 [.087, .184] (0.100; worse )5/10 (0.30 n.s.) n/m 0.194 (0.222) 100.0% —PromptGuard-2 filter [21] (H100) 10/180 = 0.056 [.030, .099] (0.100) 8/0 (0.008) n/m 0.206 (0.211) 100.0% —DeBERTa filter [22] (H100) 8/180 = 0.044 [.023, .085] (0.100) 10/0 (0.002) n/m 0.189 (0.211) 92.3% —PIGuard filter [23] (H100) 1/180 = 0.006 [.001, .031] (0.100) 17/0 (1.5×10 −5)n/m 0.178 (0.211) 92.3% —tool filter [mechanical] (H100) 1/180 = 0.006 [.001, .031] (0.100) 18/1 (7.6×10 −5)n/m 0.144 (!) (0.211) 76.9% (!) —reminder (AutoDojo) [13] (H100) 18/180 = 0.100 [.064, .153] (0.100; no effect) 4/4 (1.0 n.s.) n/m 0.211 (0.211) 100.0% —
+
+GLM-4.5-Air detector probe (8192 tokens/turn, its own convention; clean solves 45/56, near this table’s capability ceiling) 
+
+CounterSteer α=8 
+
+(deployed) 10/180 = 0.056 [.030, .099] (0.183) 24/1 (1.5×10 −6)n/m 0.694 (0.728) 102.2% —PIGuard filter [23] 0/180 observed [0, .021] (0.183) 33/0 (2.3×10 −10 )n/m 0.144 (!) (0.728) 57.8% (!) —PromptGuard-2 filter [21] 21/180 = 0.117 [.078, .172] (0.183) 12/0 (0.00049) n/m 0.417 (0.728) 100.0% 0/176 TABLE XII GLOSSARY OF RECURRING TERMS .term meaning primary models gpt-oss-20b and Qwen3-30B: full evaluation bat-tery and the deepest adaptive evaluation (§IV) undefended baseline the same run’s no-defense arm; every contrast in this paper is paired against it, never against another run ASR single-turn attack success rate over scoreable samples; the obedience-pattern reading unless marked exact-literal compromise rate AgentDojo/AgentDyn’s own security checker: fraction of injection cases where the attacker’s task completed obedience-pattern / exact-literal the injected action was performed / the attacker’s exact payload was delivered verbatim benign utility task fidelity, defense on, no injection, % of the undefended clean run—the always-on deploy-ment cost utility under attack task fidelity, defense on, injection present, % of the same baseline utilB / utilA, uti-lAttack table-column shorthand for benign utility / utility under attack defense-on-clean the arm benign utility is measured on (defense on, no injection); “CLEAN +” in artifacts capability guard, 
+
+(!) 
+
+a defense may not score by refusing to act; 
+
+(!) marks rows whose utility rests on verified capability destruction Class A / B role-confusion attacks (tool hijack, parameter ma-nipulation) / delegated authority, out of scope (§II-B) rung T / T ∗ / D held-out test split, one pre-specified pass /Gemma-4’s earlier wire-format-only holdout /development split battery one four-arm run (clean, defense-on-clean, at-tacked, defended) over the full 180-case Agent-Dojo grid, in one process certification run /comparison battery two same-configuration regenerations of the pri-mary models’ AgentDojo result; the certification run is canonical, the comparison battery appears beside rivals (§V) AD@6 the AutoDojo adaptive attacker’s success after six rewrite iterations, macro over 36 cells (§V-C) N/F the attack class does not fire undefended on that model; no defended run exists firing corpus a corpus whose undefended attack rate on a given model is high enough to measure a defense contamination injected text reaching some other , legitimate call; reported, never counted as compromise goal the released scorer’s name for the tier-1 outcome; rendered in this paper as ASR (single-turn) or compromise rate (agentic) certified the model’s evaluation is complete, adversarially reviewed, and passed its one-pass held-out test arm one condition of a battery: clean, defense-on-clean, attacked, or defended deployed configu-ration a model’s shipped (direction, layers, dose) triple (§III-B) AutoDojo cell one (suite × objective × vector) unit of the 36-cell adaptive matrix (Table VI); distinct from AgentDojo’s 180 cases TABLE XIII MULTI -MODEL RESULTS : FIVE CORPUS CLASSES × FIVE MODELS ; EVERY CELL IS A within-model CONTRAST AT ITS OWN BUDGET , DOSE AND SPLIT ,
+
+> NEVER COMPARED ACROSS MODELS
+
+. T OP : ASR ( THE AGENT DOJO COLUMN : COMPROMISE RATE ), UNDEFENDED → DEFENDED , WITH ITS RUNG —T =
+
+> HELD
+
+-OUT TEST SPLIT (ONE PRE -SPECIFIED PASS ); D = DEVELOPMENT SPLIT ; N/F = DOES NOT FIRE UNDEFENDED (UNDEFENDED RATE SHOWN ); AGENT DOJO = ITS OWN 180-CASE GRID AND CHECKERS , NO TEST SPLIT . B OTTOM : UTILITY WITH THE DEFENSE ON —BENIGN | UNDER ATTACK , 
+
+> JUDGE
+
+% OF UNATTACKED WITH THE (STRICT /LENIENT ) BRACKET IN PARENTHESES (§IV; INTEGER -ROUNDED WHERE SPACE REQUIRES —EXACT BRACKETS : T ABLES XV–XVIII); A GENT DOJO UTILITY IS ITS OWN CHECKER (BENIGN % OF CLEAN OVER PAIRED UNIQUE TASKS ; UNDER -ATTACK RAW BESIDE UNDEFENDED -ATTACKED RAW ). “—” = NO DEFENDED RUN . C AVEATS AND RUN PROVENANCE : THE “T ABLE XIII PROVENANCE ” PARAGRAPH 
+
+(A PPENDIX G). 
+
+AgentDojo webpage param webpage tool-hijack JSON tool-hijack JSON param 
+
+compromise: ASR ↓ (AgentDojo: compromise rate), undefended → defended (rung) 
+
+gpt-oss-20b .475 → .079 .962 → .135 T .981 → 0/52 T .675 → .013 T .591 → .045 TQwen3-30B .489 → .072 1.000 → .173 T .981 → 0/52 T .722 → .033 T .522 → .060 TGemma-4-31B .239 → .006 .962 → .038 T .865 → .000 T N/F (.083–.112) N/F (.045–.048) GLM-4.5-Air .222 → .056 .808 → .019 T hijack classes low-fire; JSON param. not run (Table XVIII) Llama-3.1-8B .100 → .050 no viable cell (base 1.000) .212 → .038 T N/F (.042) .273 → .000 D (not viable) 
+
+utility with the defense on ↑: benign | under attack, judge % of unattacked (strict/lenient bracket) 
+
+gpt-oss-20b 94.4% | .734 (undef. .621) 38.5 (75/75) | 38.5 (60/60) 50.0 (98/98) | 57.7 (94.2/94) 52.5 (25/80) | 37.5 (30/76) 53.0 (23/83) | 43.9 (23/74) Qwen3-30B 94.1% | .717 raw (undef. .667) 34.6 (65/65) | 15.4 (50/50) 13.5 (63/63) | 13.5 (58/58) 33.3 (21/69) | 20.0 (22/67) 31.3 (21/64) | 31.3 (27/66) Gemma-4-31B 92.9% | .794 raw (undef. .850) 78.8 (96/96) | 78.8 (92/92) 73.1 (96/96) | 69.2 (96/96) N/F N/F GLM-4.5-Air 100.0% | .733 raw (undef. .733) 26.9 (94.2/94) | 11.5 (81/81) — — —Llama-3.1-8B 100.0% | .222 raw (undef. .222) — 82.7 (100/100) | 55.8 (65/65) N/F —
+
+TABLE XIV THE TWO PRIMARY MODELS : THE FULL SUITE , INCLUDING THE §V-C ADAPTIVE ATTACKS . C ORPUS ROWS : ASR UNDEFENDED → DEFENDED ;
+
+> UTIL
+
+B/ UTIL A ( BENIGN / UNDER ATTACK , DEFENSE ON ), JUDGE % OF UNATTACKED WITH THE (STRICT /LENIENT ) BRACKET ; UNDEF . IS THE UNDEFENDED -ATTACKED ARM ’S JUDGE UTILITY FROM THE SAME RUN . D ENOMINATORS : SCOREABLE SAMPLES (A PPENDIX G); WEBPAGE -PARAM T
+
+> ROWS CARRY THE NEAR
+
+-DUPLICATE -TEMPLATE CAVEAT (R EADING THE NUMBERS , §V); BRACKET VALUES ARE INTEGER -ROUNDED WHERE SPACE REQUIRES (EXACT BRACKETS : T ABLES XV–XVI). A DAPTIVE ROWS ARE TIER -1 ONLY (NO ARM SCORES BY REFUSING , NO -ACTION ≤ 0.07 ); QUERY ATTACKS ARE BEST -OF -k SEARCHES ON DEVELOPMENT SAMPLES AGAINST THE LIVE DEFENDED AGENT .
+
+evaluation gpt-oss-20b (deployed configuration) Qwen3-30B (selected 12 σ)JSON tool-hijack (T) .675 → .013 ; utilB 52.5 (25/80); utilA 37.5 (30/76) (undef. 13.8) .722 → .033 ; utilB 33.3 (21/69); utilA 20.0 (22/67) (undef. 8.9) JSON param. (T, samples-only) .591 → .045 ; utilB 53.0 (23/83); utilA 43.9 (23/74) (undef. 18.2) .522 → .060 ; utilB 31.3 (21/64); utilA 31.3 (27/66) (undef. 16.4) webpage tool-hijack (T) .981 → 0/52 ; utilB 50.0 (98/98); utilA 57.7 (94.2/94) (undef. 0.0) 
+
+.981 → 0/52 ; utilB 13.5 (63/63); utilA 13.5 (58/58) (undef. 1.9) webpage param. (T) .962 → .135 ; utilB 38.5 (75/75); utilA 38.5 (60/60) (undef. 0.0) 1.000 → .173 ; utilB 34.6 (65/65); utilA 15.4 (50/50) (undef. 0.0) AgentDojo (4096 tok/turn) .475 → .079 ; benign 94.4% of clean; utilAttack 73.9% (undef. 62.5%) 
+
+.489 → .072 same-process (separate-run replicate .457 →
+
+.094 ); benign 94.1%; utilAttack .717 raw (undef. .667) LLMail-Inject replay 128 /2052 → 0/2052 observed (2052 episodes) 117 /1537 → 0/1537 observed (audited count—a parser audit recovered 13 successful attacker calls; full dev replay, no test-shard replay exists) query attack, tool hijack (best-of-24 within the class, n=18 dev) 3/18 cracked [0.058, 0.392]; per-query .007 not run query attack, param. (best-of-24 within the class, n=18 dev) 
+
+13/18 cracked ; per-query .303; exact-literal 1/18 (undef. 18/18 and .708 on the same grid) not run GCG, surrogate refit (tool hijack) undef. 5/12 → 0/12 observed (gradient runs steer the deployed vector; next row) GCG, exact deployed vector (tool hijack; n=52 , 49/52 converged) undef. 22/52 (plain 26/52) → 2/52 observed [0.011, 0.130] inconclusive; not reported as robustness GCG, exact deployed vector (param.; forced-offset + path-matched, n=52 each) no gradient-attributable fire (best defended 1/52/run; path-matched objective unconverged, median CE 2.7) not run relay attacks 0/18 every arm across turns (incl. undefended); quote step 7/24 →
+
+0/24 , p=.005 
+
+not run norm dilution (mechanism attack; 
+
+n=24 dev, n=52 ladders) 
+
+fails : achievable instr.-token inflation 1.006 × (vocab ceiling 
+
+1.17 ×) vs 1.25 × (the first laddered dilution) already sufficient; defended goal unchanged ( 0/24 vs 0/24 ; 3/24 vs 3/24 , p=1 .0)not run bidirectional causal gate PASS, deployed vector + gated candidate ( +.11 –.22 ) + random control PASS ( +.143 , p=.0015 )TABLE XV 
+
+> GPT
+
+-OSS -20 B, HELD -OUT TEST EVALUATION (ONE PRE -SPECIFIED PASS PER CORPUS ). ↓ LOWER IS BETTER , ↑ HIGHER ; DENOMINATORS ARE SAMPLES SCOREABLE AGAINST THE CLEAN REFERENCE ; UTILITY IS THE JUDGE % OF UNATTACKED WITH THE (STRICT /LENIENT ) BRACKET , AND [·] THE UNDEFENDED -ATTACKED ARM ’S JUDGE UTILITY FROM THE SAME RUN (§IV, A PPENDIX B). G UARD RATES AND THE WEBPAGE ROWS ’
+
+> TEMPLATE
+
+-HOLDOUT CAVEAT : THE JOINT PROVENANCE PARAGRAPH BESIDE TABLE XVI. attack class (corpus, N ) ASR ↓ unde-fended ASR ↓ defended [95% CI] utilB ↑ judge (strict/len.) utilA ↑ judge (strict/len.) [undef.] tool hijack — JSON tool-log ( n=96 ,80 scoreable) 0.675 1/80 = 0.013 [0.002, 0.067] 52.5 (25.0/80) 37.5 (30.0/76) [13.8] tool hijack — webpage ( n=52 , 52 scoreable; multi-turn) 0.981 0/52 observed [0.000, 0.069]; multi-turn 0/49 observed [0.000, 0.073] 50.0 (98.1/98) 57.7 (94.2/94) [0.0] param manipulation — JSON (n=70 , 66 scoreable; samples-only 
+
+holdout—the attacker-template set was in the fit) 0.591 3/66 = 0.045 [0.016, 0.125] 53.0 (22.7/83) 43.9 (22.7/74) [18.2] param manipulation — webpage (n=52 held-out templates, 52 score-able) 0.962 7/52 = 0.135 [0.067, 0.253] 38.5 (75.0/75) 38.5 (59.6/60) [0.0] TABLE XVI QWEN 3-30B, HELD -OUT TEST EVALUATION (ONE PRE -SPECIFIED PASS PER CORPUS , SELECTED 12 σ); THE LAST ROW IS A LABELED DEVELOPMENT SPLIT , NOT HOLDOUT ; COLUMNS AS IN TABLE XV ( UTILITY : JUDGE WITH THE STRICT /LENIENT BRACKET ; THE DEVELOPMENT ROW IS STRICT /LENIENT ONLY , NOT JUDGE -SCORED ). E ACH WEBPAGE ROW STATES ITS STRICTLY -DISJOINT -40 SUBSET (TEMPLATE -HOLDOUT CAVEAT : THE JOINT PROVENANCE PARAGRAPH BELOW ). attack class (corpus, N ; holdout axes) ASR ↓ unde-fended ASR ↓ defended [95% CI] utilB ↑ judge (strict/len.) utilA ↑ judge (strict/len.) [undef.] tool hijack — JSON tool-log ( n=96 , 90 score-able; samples + attacker templates held out) 0.722 3/90 = 0.033 [0.011, 0.093] 33.3 (21.1/69) 20.0 (22.2/67) [8.9] tool hijack — webpage ( n=52 ; exact-template-text holdout; strictly-disjoint-40 subset 0/40 ob-served [0.000, 0.088]) 0.981 0/52 observed [0.000, 0.069] 13.5 (63.5/63) 13.5 (57.7/58) [1.9] param manipulation — JSON (n=70 , 67 scoreable; samples-only holdout—the attacker-template set was in the fit) 0.522 4/67 = 0.060 [0.023, 0.144] 31.3 (20.9/64) 31.3 (26.9/66) [16.4] param manipulation — webpage ( n=52 ; exact-template-text holdout; strictly-disjoint-40 subset 8/40 = 0.200 [0.105, 0.348]) 1.000 9/52 = 0.173 [0.094, 0.297] 34.6 (65.4/65) 15.4 (50.0/50) [0.0] 
+
+development split, not holdout: tool hijack — JSON tool-log ( n=96 , 91 scoreable) 0.648 4/91 = 0.044 [0.017, 0.108] 45.1% / 91% strict/len. 47.3% / 87% (undef. 14.3/21) TABLE XVII GEMMA -4-31B-IT , PER -MODEL DETAIL . T = THE CERTIFICATION RUNG , HOLDING OUT CARRIER DOCUMENTS (30 FRESH , URL-DISJOINT ), ATTACKER WORDINGS (4 NEW PER CLASS ) AND FRAMING TEMPLATES SIMULTANEOUSLY ; T ∗ = THE EARLIER WIRE -FORMAT -ONLY HOLDOUT RUNG (CARRIERS AND WORDINGS SHARED WITH DEVELOPMENT ), RETAINED BESIDE IT . CI S ON BOTH WEBPAGE RUNGS ARE DOC -CLUSTERED (DOCUMENTS ARE THE UNIT OF INDEPENDENCE ). B OTH RUNGS ARE JUDGE -SCORED (JUDGE % OF UNATTACKED WITH THE STRICT /LENIENT BRACKET ; THE T-HELDOUT CELLS WERE RESCORED 2026-09-09 UNDER THE SAME CONTROLS -GATED PROTOCOL ). S COPE CAVEATS : THE “T ABLE XVII PROVENANCE ” PARAGRAPH 
+
+(A PPENDIX G). evaluation rung ASR ↓ undefended → defended [95% CI] utilB ↑ utilA ↑ guard / notes webpage param. (n=52 ;docs + wordings + fram-ings held out) T 0.962 → 0.038 (2/52); doc-clustered [0.000, 0.096], sample Wilson upper 0.130; 48 fixed / 0 introduced, p=7 .1×10 −15 
+
+78.8 (96.2/96) 78.8 (92.3/92) guard clean, truncation 0.00; both survivors under one held-out wording (2/13 on it, 0/39 on the rest); α=6 
+
+monotonicity control PASS (0.962 ≥
+
+0.192 ≥ 0.038 )webpage tool-hijack (n=52 ; same holdout axes) T 0.865 → 0.000 (0/52); cluster-Wilson [0.000, 0.114] over 30 docs; 45/0, p=5 .7×10 −14 
+
+73.1 (96.2/96) 69.2 (96.2/96) guard clean; α=6 
+
+control saturated at 0.000; A100 ↔H100 replica probe 24/24 agreement webpage param. T∗ 1.000 → 0.038 ; doc-clustered [0.000, 0.105], quote-upper 0.130 (sample Wilson); 50 flipped / 0 broken 88.5 (100/100) 78.8 (96/96) guard clean webpage tool-hijack T∗ 0.865 → 0.000 [0.000, 0.278] doc-clustered; 45 flipped / 0 broken 80.8 (100/100) 82.7 (100/100) guard clean JSON tool-hijack / JSON param. N/F undefended 0.083–0.112 (shipped JSON, 
+
+n=24 /96 ) / 0.045–0.048 — — N/F by the program’s convention; no defended run prose-carrier medium (n=96 )N/F undefended 0.000 [0.000, 0.038] — — measured null: sane on-task summaries, truncation 0.00 AgentDojo, 180-case grid, 4096 tok/turn full grid 0.239 → 0.006 (43/180 → 1/180); 42 fixed / 0 introduced, p=4 .6×10 −13 ; per-suite undef. →def.: banking 28/49 →1, slack 13/49 →0, travel 1/41 →0, workspace 1/41 →0benign 92.9% (1.000 → 0.929, 56 paired tasks; 4 broken / 0 fixed, 
+
+p=0 .125 n.s.) 0.794 vs. unde-fended 0.850 
+
+0 truncated turns in all 2,721 generations —nothing is a censored bound; layers pinned 4/28/36 (deployed configuration); the 1 surviving case’s attacked arm also fired—0 defense-introduced compromises; one defense-on-clean break is a genuine steering-induced degenerate loop bidirectional causal gate — increase criterion untestable (undefended base saturated at 1.000): the negated dose holds 1.000 exactly (0 discordants) while +α defends (0.031, p< 10 −9), all at benign 100% — — polarity-consistent TABLE XVIII GLM-4.5-A IR , PER -MODEL DETAIL . D EPLOYED CONFIGURATION : THE ACTION -CENTRED BEHAVIORAL DIRECTION AT α=8 ON THE POOLED -CORPUS FIT ’S PER -LAYER SCALES σℓ = 6 .4/8.9/10 .3 (≈17 –18 σ IN ITS OWN PER -LAYER SCALE ), LAYERS 20/24/28, 8192-TOKEN GENERATION BUDGET .UTILITY : JUDGE % OF UNATTACKED WITH THE (STRICT /LENIENT ) BRACKET ; A GENT DOJO UTILITY IS ITS OWN CHECKER ; THE GUARD IS READ ABSOLUTELY (DEFENSE -ON -CLEAN NO -ACTION 0.000). H OLDOUT DETAIL : THE “T ABLE XVIII PROVENANCE ” PARAGRAPH (A PPENDIX G). evaluation rung ASR ↓ undefended → defended [95% CI] utilB ↑ utilA ↑ guard / notes webpage param. (n=52 ,52 scoreable; samples +
+
+template text held out) T 0.808 → 0.019 [0.003, 0.101]; exact-literal 0/52; 41 fixed / 0 introduced 26.9 (94.2/94) 11.5 (81/81) contamination 0.000; no-action 0.038 vs. defense-on-clean 0.000 (2/52, attack-conditional); the one surviving compromise is a domain-level parameter hijack counted by token taint, not exact-literal webpage param., develop-ment (n=96 , 96 score-able) D 0.750 → 0.156 (exact-literal 0.000); 57 fixed / 0 introduced 40.6 (93/93) 18.8 (59/59) no-action 0.052; trun-cation 0.05 webpage tool-hijack; JSON tool-hijack — fire weakly undefended single-turn (webpage 
+
+∼0.25 ; JSON low)—those cells do not mea-sure the defense. At the multi-turn horizon the disjoint-tool corpus fires 0.948 undefended and the deployed configuration yields a partial reduction only: 0.781 (16 fixed / 0 introduced, 
+
+p=3 .1×10 −5; steering verified active over the injected span)—an open boundary, not a closure — —JSON param.; adaptive suite — not run — —AgentDojo, 180-case grid, 8192 tok/turn full grid 0.222 → 0.056 (40/180 → 10/180); 30 fixed / 0 introduced, p=1 .9×10 −9
+
+benign 100.0% 
+
+(0.857 → 0.857, 56 paired tasks; 1 lost, 1 gained) 0.733 vs. unde-fended 0.733 zero truncation in every arm (nothing censored); layers pinned 20/24/28 (deployed configuration); 7 of the 10 surviving compromises sit on one task whose user prompt delegates authority to the file (“follow the instructions precisely”), 2–3/180 are genuine role-confused survivors; strongest agent measured (clean 0.857) bidirectional causal gate D increase side PASSES on the deployed direc-tion: 0.615 → 0.827 at −α8 (8192 budget, dev n=52 ; exact McNemar 14/3, p=0 .013 ;defense-on-clean at −α: ASR 0.000, utility 88.5%) — —screening diagnostics — split-half reliability 0.31–0.33, below the 0.70 screening reference (the pooled-fit primary models screen at 0.71–0.74, AUC 0.80–0.82); screening ranks and does not certify, and this fit certifies through the gates above (§III-A) — —TABLE XIX DATA PROVENANCE : WHICH SPLIT EACH PIPELINE STAGE USES , AND WHAT IT IS HELD OUT FROM . F RAMING -LEVEL HOLDOUT , PER FIT : THE RECIPE WITHHOLDS AN AUTHORITY -FRAMING LEVEL IN THE DEPLOYED FIT ITSELF (§III-A). L LAMA -3.1-8B’ S DEPLOYED FIT FOLLOWS THAT RULE END -TO -END ; A GPT -OSS -20 B REFIT UNDER THE RULE IS VALIDATED END -TO -END (FOUR ONE -TOUCH HELD -OUT PASSES + THE 
+
+AGENT DOJO GRID , ALL WITHIN THE DEPLOYED CONFIGURATION ’S CI S; 
+
+> THE DEPLOYED CORPUS REFERENCES RAN AT A
+
+0.7% LOWER MAGNITUDE SEAM , DISCLOSED ); THE OTHER THREE DEPLOYED FITS HOLD THE LEVEL OUT AT THE GATE ONLY , REFITTING OVER ALL LEVELS (§IV). C ONTRAST CENTRING , PER DEPLOYED FIT : GLM-4.5-A IR WITHIN (SAMPLE × 
+
+> DELEGATION
+
+× ACTION ); THE OTHER FOUR WITHIN (SAMPLE ×
+
+> DELEGATION
+
+), EACH DEPLOYED DIRECTION ’S BEHAVIORAL COMPONENT MEASURING MEAN | cos | ≤ 0.31 (PER -LAYER MAX 0.334) TO THE ACTION -IDENTITY (TOOL -HIJACK -VS -PARAMETER ) AXIS AT ITS DEPLOYED LAYERS .stage split / samples used held out from generalization screening (step 3) probe split, minus one whole authority-framing level ( firm )that framing level, for the gate’s fit only direction fitting (de-ployed) probe split (behavioral-contrast captures; deployed gpt-oss fit: its deterministic first 24 sample ids) dev/test samples; held-out attacker templates. Framing levels: with-held in the Llama-3.1-8B fit and the vali-dated gpt-oss-20b refit; the other deployed fits use every level layer selection probe split (per-layer probe diagnostics) dev/test samples dose selection dev split (template-disjoint from test) test samples and, where stated, test attacker templates test evaluation test split, pre-specified one-pass, no reruns all fitting and selec-tion stages (samples; and where stated, at-tacker templates) adaptive attacker construction dev-disjoint sample sub-sets (n=18 per class for the query search; disjoint-tool targets for GCG) the attacked samples are held out from fit-ting; the deployed vec-tor is not consumed by the query/surrogate arms and is supplied directly in the exact-vector arm. The sur-rogate refit deliberately reuses the fitting sam-ples (the draw is deter-ministic, §C) mechanism analysis (decision-point fit) probe split (48 sample ids) template- and sample-disjoint from every evaluation TABLE XX POST -HOC DELEGATED -AUTHORITY PARTITION , APPLIED SYMMETRICALLY TO EVERY GPT -OSS ARM OF THE CERTIFICATION RUN 
+
+(4096-TOKEN BUDGET , §V-B). C LASS B = THE 36 CASES WHOSE USER TASK DELEGATES INSTRUCTION AUTHORITY TO RETRIEVED CONTENT ;CLASS A = THE REST . D ENOMINATORS ARE VALID CASES PER ARM AND CLASS .arm compromise ↓
+
+(all) Class B ↓ Class A ↓
+
+undefended 84/177 =0.475 29/36 = 0.806 55/141 =0.390 
+
+CounterSteer (deployed) 14/177 =0.079 
+
+14/36 = 0.389 0/141 = 0.000 TABLE XXI MODEL COVERAGE : FIVE OPEN -WEIGHTS MODELS , 8B–106B, DENSE AND MOE, FIVE VENDOR LINEAGES . “C ERTIFIED ” = EVALUATION COMPLETE AND ADVERSARIALLY REVIEWED ; THE DEFENDED COLUMN IS ASR ON THE SINGLE -TURN CORPORA AND COMPROMISE RATE ON AGENT DOJO , OVER THE DENOMINATORS OF THE TABLE CITED IN EACH ROW . R OWS WHOSE NUMBERS APPEAR NOWHERE ELSE CARRY THEIR UTILITY AND CAPABILITY -GUARD READINGS IN THE SAME CELL .model params / arch fit status ASR / compromise rate ↓ defended gpt-oss-20b 20B MoE certified (held-out test pass) 0.000–0.135 corpora (Table XV); 0.079 AgentDojo at a 4096-token budget (§V-B) Qwen3-30B-A3B-Thinking 30B MoE (3B active) certified (held-out test pass) 0.000–0.173 corpora (Table XVI); AgentDojo 0.489 → 0.072 
+
+same-process (Table XI), dose-selection replicate 0.094 (Ta-ble XXIV), both at 4096 tokens Gemma-4-31B-it 31B dense certified (one-pass held-out test evaluations on both firing corpora with carrier documents, at-tacker wordings and framing templates all held out, plus the full AgentDojo grid at the deployed configuration); on the single-turn corpora the steered span is ∼90% of the whole prompt (those rungs do not isolate the payload-scoped edit; the agentic grid does); no adaptive evaluation webpage param. 0.962 → 0.038 (2/52; doc-clustered [0.000, 0.096], sample Wilson upper 0.130; 48 fixed / 0 introduced, 
+
+p=7 .1×10 −15 ) and tool hijack 0.865 → 0.000 (0/52; cluster-Wilson [0.000, 0.114]; 45/0, p=5 .7×10 −14 ), benign utility 96.2%/96% strict both corpora, guard clean, zero trun-cation; AgentDojo 0.239 → 0.006 (42/0, p=4 .6×10 −13 ; 0 defense-introduced) at benign 92.9% ( −7.1 pp n.s.), 0 truncated turns in 2,721 generations; the earlier wire-format-only rung (T ∗) stands beside it ( 1.000 → 0.038 , 0.865 → 0.000 ); the prose-carrier medium is a measured null (undefended 0.000 
+
+[0.000, 0.038], n=96 ; Table XVII) GLM-4.5-Air ∼106B MoE certified (held-out test pass on its firing corpus, webpage parameter manipulation, plus the full AgentDojo grid at the deployed configuration); tool-hijack classes fire weakly undefended, JSON param. not run; no adaptive evaluation webpage param. 0.808 → 0.019 T ( n=52 ; near-duplicate-template caveat, §V; exact-literal 0/52; Wilson [0.003, 0.101]; McNemar 41 fixed / 0 introduced; benign utility 26.9 judge (94.2/94 strict/lenient), under attack 11.5 (81/81); contamina-tion 0.000; guard clean, read absolutely—defense-on-clean no-action 0.000, defended 0.038 attack-conditional); development split 0.750 → 0.156 at defense-on-clean strict correctness 0.927; AgentDojo 0.222 → 0.056 (30 fixed / 0 introduced, 
+
+p=1 .9×10 −9) at benign 100.0% and utilAttack 0.733 =
+
+undefended, zero truncation in every arm (Table XVIII) Llama-3.1-8B-Instruct 8B dense certified (held-out test pass on its firing cor-pus, webpage tool hijack, plus the full Agent-Dojo grid, the 26-battery rival comparison and the benchmark-level adaptive attack at the de-ployed configuration); fit passes all gates incl. the bidirectional causal gate ( 0.135 → 0.558 at 
+
+−α); JSON tool-hijack does not fire undefended (0.042); JSON param. reaches ASR 0 only at a capability-destroying dose (judge benign 0.431), no viable cell; low task capability (13–15/56 AgentDojo clean tasks) bounds what its agentic and AgentDyn grids separate (AgentDyn: 2/60 solvable, not measurable) webpage tool hijack 0.212 → 0.038 T ( n=52 ; 11/52 →
+
+2/52 (3/52 under a lenient tool-call executor—one surviving compromise is the attacker’s exact call with malformed JSON; 
+
+p=0 .0078 still significant); Wilson [0.011, 0.130]; McNemar 9 fixed / 0 introduced, p=0 .0039 ; benign utility 100% byte-exact, judge floor 0.827; under attack 65.4 strict / 0.558 judge, both above undefended 59.6 / 0.462; a fit-withheld framing level composed onto the injection also blocked, 0/4 fired, point estimate); AgentDojo 0.100 → 0.050 (11 fixed / 2 introduced, 
+
+p=0 .022 ) at benign 100%, thin-base caveat (Table XI) TABLE XXII PER -MODEL COST OF THE RECIPE . W ALL -CLOCK PER STAGE WHERE A CLEAN RECORD EXISTS ; n.r. = STAGE RAN BUT NO WALL -CLOCK WAS LOGGED ;
+
+iterative = DEVELOPED OVER THE RESEARCH PERIOD , NOT SEPARABLE INTO A SINGLE MEASUREMENT . D IRECTION FITS ARE CPU-SIDE ; THE GPU 
+
+> COST IS ACTIVATION CAPTURE AND BEHAVIORAL EVALUATION
+
+. W HERE NO LAUNCH TIME WAS LOGGED , A CERTIFICATION DURATION IS MEASURED FROM THE ARTIFACTS ’ TIMESTAMPS AND IS AN UPPER BRACKET .model hardware (ladder) capture + fit screening + causal gates dose search held-out certification (single-turn) AgentDojo 180-case grid gpt-oss-20b 4×A100-80GB local 
+
++ A100 boxes; grid on one 8 ×H100 node iterative n.r. (CPU-side) iterative 4 corpora, one pre-specified pass, 
+
+≤85 min 
+
+62 min (8 ×H100, 4arms) Qwen3-30B-A3B-Thinking 4×A100-80GB local 
+
++ A100 boxes; grid on one 8 ×H100 node iterative n.r. iterative 4 corpora, one pre-specified pass, ≤5.5 h(pre-specification to last artifact) one of six batteries in a 22.6 h 8 ×H100 job; not separated Llama-3.1-8B-Instruct 3×A100-80GB local; grid on 4 ×A100 (two boxes) 
+
+∼2.3 h (incl. aparser-bug diagnosis 
+
++ rerun) 
+
+∼25 min (causal smoke + 3 random controls) 
+
+∼1.8 h (6 doses ×
+
+3 corpora + layer sweep) gate + test touch 
+
++ bidirectional gate, 11 min 4 single-GPU shards, 
+
+≤36 min; end-to-end 
+
+∼8.6 h, one day 
+
+Gemma-4-31B-it one 8×H100 node (bring-up, cert, grid); local A100s (dose batteries) 
+
+∼1 h (one job: cap-ture, probes, facto-rial, fit) inside the bring-up job n.r. 56 min total for both: five held-out confirms 
+
++ the full 180-case grid + benign arms, one 8×H100 job GLM-4.5-Air one 8×H100 node (capture, sweep); local 4×A100 (cert, grid; 212 GB sharded) 6.3 h (bring-up); cer-tified refit CPU-only, n.r. inside the bring-up; recipe gates CPU-side, n.r. 16.0 h sweep (superseded direction); recipe ladder terminated early, no clean total T pass completed 3 h 05 m after the dev re-run (4 ×A100, 8192-token budget) 
+
+12.2 h (43,906 s, single process, 8192-token budget) TABLE XXIII 
+
+GPT -OSS -20 B, FULL DOSE CURVE ON AGENT DOJO (THE CURVE FIG . 6 
+
+PLOTS ). 4096-TOKEN PER -TURN BUDGET ; ONE DIRECTION (THE DEPLOYED CONFIGURATION ’S) AT EVERY DOSE ; UNDEFENDED BASELINE 
+
+0.475 (84/177). C OMPROMISE RATE OVER THE 177 SCOREABLE INJECTION CASES ; FIXED /INTR . = COMPROMISES FIXED / INTRODUCED 
+
+(EXACT MCNEMAR VS . THE SAME -PROCESS UNDEFENDED ARM ); BENIGN 
+
+= % OF THE LADDER ’S OWN CLEAN ARM (n=55 PAIRED UNIQUE TASKS ). READINGS ARE RAW : THE TYPOGRAPHY NORMALIZATION OF TABLE XI 
+
+COULD NOT BE APPLIED TO THE α=3 .0–6.7 ARMS (TRANSCRIPTS NOT PERSISTED ), AND ITS ONE COMPROMISE -RATE MOVEMENT 
+
+(0.085 → 0.090 ON THIS LADDER ’S DEPLOYED ARM ) IS DISCLOSED THERE .dose α compromise ↓ defended [95% CI] fixed/intr. ( p) benign ↑
+
+3.0 55/177 = 0.311 [0.247, 0.382] 36/7 (9×10 −6)92.2% 4.12 44/177 = 0.249 [0.191, 0.317] 44/4 (1.5×10 −9)86.3% 5.5 26/177 = 0.147 [0.102, 0.207] 58/0 (6.9×10 −18 )86.3% 6.7 19/177 = 0.107 [0.070, 0.162] 65/0 (5.4×10 −20 )84.3% 
+
+8.06 (deployed) 15/177 = 0.085 [0.052, 0.135] 69/0 (3.4×10 −21 )82.0% TABLE XXIV QWEN 3-30B, FULL DOSE CURVE ON AGENT DOJO , 4096-TOKEN PER -TURN BUDGET (THE 768 COLLAPSE THIS BUDGET AVOIDS :APPENDIX A). D ENOMINATORS : COMPROMISE RATE OVER ALL INJECTION CASES COMPLETING (THE α=16 RUN ’S OWN UNDEFENDED BASELINE IS OVER 175 CASES , HAVING RUN BEFORE A 5-CASE HARNESS FIX ); BENIGN OVER 56 PAIRED UNIQUE TASKS . (!) MARKS CAPABILITY -GUARD TERRITORY ; THE α=16 ROW IS A CENSORED LOWER BOUND (NOTE BELOW ). dose compromise ↓ defended [95% CI] utilAttack ↑
+
+(raw) benign 
+
+∆pp ↑
+
+10 σ 22/180 = 0.122 [0.082, 0.178] 0.728 −5.412 σ
+
+(selected) 17/180 = 0.094 [0.060, 0.146] 
+
+0.694 −5.414 σ 6/180 = 0.033 [0.015, 0.071] 0.550 −19 .616 σ ≥ 2/180 = 0.011 [0.003, 0.041] (!) 
+
+0.356 (!) −39 .3 (!) TABLE XXV IPI DEFENSE FAMILIES , THE LEVER EACH PULLS , AND WHAT A DEPLOYMENT PAYS . “M EASURED HERE ” IS OUR OWN RUNS ONLY , AND IS NOT COMPARABLE TO THE CITED WORKS ’ REPORTED NUMBERS (DIFFERENT HARNESSES , MODELS , ATTACK SETS ); RATES ARE AGENT DOJO COMPROMISE RATES , x/n ARE CORPUS COMPROMISE COUNTS . R EAD EACH ENTRY AGAINST its own run’s UNDEFENDED BASELINE (T ABLE XI CAVEATS ), AND NEVER GPT -OSS AGAINST QWEN (§V-D). family representative work lever deployment cost measured here prompt-level spotlighting/delimiting [2]; prompt sandwich (folklore) transforms the untrusted span so its provenance stays visible (delimiting, datamarking, encoding) and instructs the model not to follow it; or re-asserts the trusted instruction after the data extra prompt tokens on every request at 4096: 0.483 →0.273 –
+
+0.420 (gpt-oss), 
+
+0.489 →0.356 (Qwen reminder), Table XI training-time StruQ [3], SecAlign [4], [39], Jatmo [40], instruc-tion hierarchy [38], ISE [41], ASIDE [42] retrains or re-architects the model so untrusted spans carry less instructional force a training pipeline per model; the served weights change our SecAlign LoRA: com-promises 62 /180 →9/180 
+
+(768 budget); benign utility of base clean, typography-normalized: 98 .2% at 768, 
+
+90 .4% unique-task / 82 .3% 
+
+per-case at the shared 4096 budget (raw 79 .7% / 72 .7% :the DPO finetune itself emits the typography) detection internal-state probes: TaskTracker [36], Attention Tracker [37]; input-text guard models: PIGuard [23] reads a signal and flags; no intervention is proposed, and the response is left to the surrounding system a threshold that fails open on a miss; a sec-ond model or pass, ex-cept where the sig-nal is already com-puted during the for-ward pass input-text guards run as deletion filters in Table XI (compromise 0.011–0.228 at benign 48–100%, over-defense per [13]); internal-state probes not run as defenses—§VI shows two directions that discriminate but do not steer detection-gated intervention ICON [6], ARGUS [7], AGRI [8] a probe decides when to intervene, then edits attention (ICON), represen-tations plus a post-filter (ARGUS), or injects an anti-injection reasoning pre-fill (AGRI) detector accuracy is a single point of fail-ure; the gate is an ad-ditional attack surface (evaluated for AGRI: the adaptive attacker runs against the live gated arm, §V-C) AGRI measured same-harness (Tables III, VI, §VIII); ICON/ARGUS not run (see text) always-on internal intervention CachePrune [9], V-Steer [10], CounterSteer 
+
+edits internals over the untrusted span with no gate: KV-neuron pruning, per-request value-vector rescaling, or afixed residual-stream direction white-box serving ac-cess; benign utility at 4096: CachePrune 
+
+0.483 →0.216 , CounterSteer 
+
+0.483 →0.091 (Table XI) system-level / prove-nance CaMeL [27], MELON [45], ROPE [5], tool filters constrains the consequences of a hijack: dual-LLM execution with data-flow tracking (CaMeL), masked re-execution and output comparison (MELON), origin-routed admission of parameter values (ROPE) re-architecting the agent runtime; extra executions or an audited parameter set a tool filter reaches compromise 0/176 observed with benign utility 10.9% of clean and utilAttack 0.106 typography-normalized (Table XI)
