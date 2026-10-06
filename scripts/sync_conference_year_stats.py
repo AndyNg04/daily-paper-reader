@@ -55,6 +55,9 @@ OFFICIAL_ACCEPTED_COUNTS: Dict[Tuple[str, int], int] = {
     # ECCV 官方 poster 列表去重计数，与 Springer Part LXI 一致（2026-09-09）。
     # https://link.springer.com/book/10.1007/978-3-032-37095-2
     ("eccv", 2026): 2834,
+    # https://2026.ijcai.org/accepted-papers/：All Tracks 989；
+    # Proceedings 页面当前论文数可能较少，库存必须单独统计。
+    ("ijcai", 2026): 989,
     ("osdi", 2024): 53,
     ("osdi", 2025): 53,
     ("osdi", 2026): 136,

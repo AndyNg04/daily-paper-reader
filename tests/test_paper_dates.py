@@ -19,6 +19,13 @@ def test_verified_registry_and_explicit_paper_dates():
     assert resolve_publication_date(paper, 'ICML', 2025, {'items': [entry]})['publication_date'] == '2025-10-05'
 
 
+def test_ijcai_2026_uses_official_proceedings_publication_day():
+    result = resolve_publication_date({'source': 'IJCAI-2026-Accepted'}, 'IJCAI', 2026)
+    assert result['publication_date'] == '2026-09-16'
+    assert result['publication_date_precision'] == 'day'
+    assert result['publication_date_kind'] == 'proceedings'
+
+
 def test_arxiv_uses_first_submission_not_update():
     result = resolve_publication_date({'source': 'arxiv', 'published': '2025-09-10T12:00:00Z', 'updated': '2026-09-10'})
     assert result['publication_date'] == '2025-09-10'

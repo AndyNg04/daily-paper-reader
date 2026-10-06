@@ -60,11 +60,10 @@ window.DPRTopicResearch = (function () {
       <div class="dpr-task-action-grid dpr-task-action-grid--radio" role="radiogroup" aria-label="专题研究模式">
         <label class="chat-quick-run-item dpr-task-radio-card"><input type="radio" name="dpr-topic-mode" value="90" checked><span class="dpr-task-action-title">90天 arXiv</span><span class="dpr-task-action-cost">聚焦近期研究</span></label>
         <label class="chat-quick-run-item dpr-task-radio-card"><input type="radio" name="dpr-topic-mode" value="365"><span class="dpr-task-action-title">365天 arXiv</span><span class="dpr-task-action-cost">梳理一年进展</span></label>
-        <label class="chat-quick-run-item dpr-task-radio-card"><input type="radio" name="dpr-topic-mode" value="starter"><span class="dpr-task-action-title">研究方向大礼包</span><span class="dpr-task-action-cost">365天 arXiv + 近24个月会议</span></label>
+        <label class="chat-quick-run-item dpr-task-radio-card dpr-topic-starter-card" title="365天 arXiv + 近24个月会议"><input type="radio" name="dpr-topic-mode" value="starter"><span class="dpr-topic-starter-content"><span class="dpr-topic-starter-icon" aria-hidden="true">🎁</span><span class="dpr-task-action-title">研究方向大礼包</span><span class="dpr-task-action-cost">arXiv + 顶会</span></span></label>
       </div>
       <p class="dpr-task-hint">大礼包包括调研问题、方法与子方向、数据与评测、近期进展、局限与待研究问题、阅读路线及资源。资料不足会明确标注，不编造结论。</p>
       <p class="dpr-task-hint">会议范围沿用“会议论文”中勾选的会议名称；未选择则全部支持会议，年份勾选不限制近24个月窗口。</p>
-      <label>UTC 截止日期（不含当天） <input id="dpr-topic-as-of" type="date" value="${new Date().toISOString().slice(0, 10)}"></label>
       <p class="dpr-task-hint">每任务最多评审300篇，最终结果最多100篇；内容每批生成10篇。继续生成仅补已有结果内容，不重新检索或扩大评审预算。仅在 GitHub Pages 通过 Actions 执行。</p>
       <button id="dpr-topic-start" class="chat-quick-run-run-btn dpr-task-start-btn" type="button">预览并开始专题研究</button>
       <div id="dpr-topic-status" class="chat-quick-run-msg" role="status" aria-live="polite"></div>
@@ -118,7 +117,7 @@ window.DPRTopicResearch = (function () {
         if (profiles.length !== 1) throw new Error('请恰好选择一个已保存词条。');
         const runner = window.DPRWorkflowRunner;
         if (!runner || !runner.isStarterPackSupported()) throw new Error('请在 GitHub Pages 站点使用专题研究；不会在本地执行。');
-        const request = runner.buildTopicResearchRequest({ profile: profiles[0], mode: root.querySelector('input[name="dpr-topic-mode"]:checked').value, as_of: el('dpr-topic-as-of').value, conferences: context.getConferences() });
+        const request = runner.buildTopicResearchRequest({ profile: profiles[0], mode: root.querySelector('input[name="dpr-topic-mode"]:checked').value, as_of: new Date().toISOString().slice(0, 10), conferences: context.getConferences() });
         draft = { profile: JSON.parse(request.inputs.profile_snapshot), mode: request.inputs.mode, asOf: request.inputs.as_of, conferences: request.inputs.conferences.split(',') };
         status('正在预览候选范围…');
         const result = await preview();
