@@ -1,0 +1,3135 @@
+Learning to Clarify Underspecified Intents Under Limited Interaction
+PRANAV M R∗, BITS Pilani & MIT
+MANUEL CHEREP∗, MIT
+PATTIE MAES, MIT
+NIKHIL SINGH, Dartmouth College
+1
+REDACT k DETAILS FROM THE FULL DESCRIPTION
+USER EXPECTATION
+DETAILS (D)
+IMPORTANCE (wi)
+Ford F-450 truck
+red (redacted)
+side view (redacted)
+white dirt road
+patch of dead trees (redacted)
+USER REQUEST (x)
+“Show me a Ford F-450
+with a long bed, thick
+tires, and black stepping
+poles parked on a white
+dirt road during a bright,
+sunny day. …”
+2
+ASSISTANT ASKS  CLARIFYING QUESTIONS
+“A side view of a red Ford F-450 … on the right side there is a patch of dead trees …”
+FULL DESCRIPTION (HIDDEN FROM ASSISTANT)
+q
+What specific appearance or details should …
+ASSISTANT
+Ask me about one specific thing.
+USER
+What specific color , model year, or …
+ASSISTANT
+It's red , has a long bed, thick tires …
+USER
+How should the Ford F-450 be positioned …
+ASSISTANT
+It is shown from a side view .
+USER
+3
+MEASURE RECOVERY
+χi
+wi
+red
+0.8
+side view
+0.7
+dead trees
+0.4
+urec =
+wi·χi /
+wi = 0.79
+“The image depicts a red Ford F-450
+truck … from a side view …”
+COMPOSED DESCRIPTION (y)
+Σ
+i
+Σ
+i
+BEFORE (BASE MODEL)
+What time of day should the scene take place?
+What color is the rusted container?
+What kind of trees are shown in the scene?
+urec = 0.00
+AFTER (TRAINED MODEL)
+What specific appearance or details should …
+What specific color, model year, or …
+How should the Ford F-450 be positioned …
+urec = 0.79
+5
+EVALUATE VS. BASE MODEL
+GRPO-STYLE ADVANTAGES
+× g ROLLOUTS
+4
+TRAINING
+REWARD
+urec
+Fig. 1. A simplified overview of our training pipeline on a single instance. A set H of 𝑘details is redacted from the full set
+of details D, and the kept details D \ H are rewritten into a natural user request 𝑥. The assistant asks the simulated user
+clarifying questions and composes, from 𝑥and the answers, the description 𝑦used to generate the image. The judge then
+decides which details in H the assistant recovered by checking 𝑦against their checks 𝜒𝑖, giving the recovered utility 𝑢rec.
+Training uses 𝑢rec as reward over 𝑔rollouts per instance, and the trained assistant is finally evaluated against the base model.
+AI assistants receive requests that leave out information needed for a good outcome, for example about users’ preferences
+or goals. They must then either speculate or ask for more information before proceeding. We reconceptualize this as a
+value-of-information problem: the assistant should acquire information whose absence causes the greatest avoidable loss in
+user utility. This is rarely known ex ante; rather, assistants must predict it in order to optimally allocate limited user interactions.
+We instantiate this problem in image generation and derive a reinforcement learning framework1 using multi-turn simulated
+users to maximize utility recovery under uncertainty. In a preregistered study with 456 interactive sessions across 76 human
+∗Both authors contributed equally to this research.
+1https://github.com/PapayaResearch/clarifying
+Authors’ Contact Information: Pranav M R, pranavmr@mit.edu, BITS Pilani & MIT; Manuel Cherep, mcherep@mit.edu, MIT; Pattie Maes,
+pattie@media.mit.edu, MIT; Nikhil Singh, nikhil.u.singh@dartmouth.edu, Dartmouth College.
+arXiv:2610.04719v1  [cs.AI]  3 Oct 2026
+
+
+2
+•
+M R, Cherep, Maes, and Singh
+participants, this helped users significantly better match reference images with significantly fewer questions, less total
+interaction time, and lower cost. This points toward a simple and scalable framework for training language model assistants
+to better disambiguate user intent by asking more informative questions.
+CCS Concepts: • Computing methodologies →Machine learning; • Human-centered computing →Human computer
+interaction (HCI).
+Additional Key Words and Phrases: AI Assistants, Agents, Human-AI Interaction, Machine Learning
+1
+Introduction
+The cartographers of Jorge Luis Borges’ Del rigor en la ciencia [5] are faced with a puzzling trade-off. To make
+their map perfectly accurate, they must ultimately grow it to the scale of the empire itself. At this point, however,
+it ceases to be a map in any useful sense. A version of this fate befalls those who seek to delegate to AI systems.
+Take image generation, for example. Language is inherently imprecise [51, 52]; to truly specify every detail of a
+desired image (every object, relation, geometry, light and shadow, texture), one might ultimately need to grow
+the prompt to the scale of the pixels themselves. This is, however, an absurd exercise; such prompts are nearly
+never needed. Much like the useful maps of rigor, good prompts are abstractive. They articulate what is essential,
+and leave implicit what is not. Where we err, then, is not necessarily in saying too little, but also in leaving the
+wrong things unsaid. To get the best from us, in turn, it would help if our AI assistants [26, 35] could simply ask
+all the right questions.
+What makes a given question a good one to ask? Suppose, for instance, that a user requests an image of a
+family having breakfast. The assistant is faced with virtually infinite possible questions, like: What are they
+eating? What kind of wood is the table made of? Both of these questions might help to resolve something unclear
+from the original request. Their value, however, may not be equal: this depends on what the user wants the image
+to accomplish. For example, if it is intended as an ad for a furniture catalog, characteristics of the table are likely
+more important than those of the food. Selecting from even these two options, let alone the full vast space of
+possible questions, requires a judgment call about which would be more valuable; a judgment we might like our
+agents to make well. One way to accomplish this is clarification: querying the user about unarticulated aspects of
+their desired result so that these may be fulfilled.
+We study clarification as a value-of-information problem, drawing on decision-theoretic accounts of mixed-
+initiative interaction and preference elicitation [cf. 6, 23]. Formally, let 𝑈𝑢(𝑦) be the utility of an outcome 𝑦to
+user 𝑢. Given a conversation history ℎ, the value of asking a candidate question 𝑎and then acting is:
+𝑉(𝑎| ℎ) = E𝑜|ℎ,𝑎
+
+max
+𝑦
+E[𝑈𝑢(𝑦) | ℎ,𝑎,𝑜]
+
+−max
+𝑦
+E[𝑈𝑢(𝑦) | ℎ]
+(1)
+The term on the left is the best expected outcome after elicitation, and on the right is the best expected outcome
+with information already available. The difference is thus the expected benefit arising from clarification.
+We construct a framework in which this missing information is known to the training environment but hidden
+from the assistant. Beginning with a fully specified intent, we decompose it into atomic details, redact a subset of
+them, and rewrite the remainder as a naturalistic user request. We produce a privileged simulated user which
+retains access to the complete intent in order to answer assistants’ questions. The assistant must then use its
+limited questions to recover information that was withheld and finally compose its best estimate of the intended
+result. Because the environment preserves redacted content, we can measure the share of omitted information
+recovered through the interaction and use it directly as a reward signal.
+We instantiate this framework in the special case of text-to-image generation, a suitable first testbed because
+(1) requests are routinely underspecified, (2) complete specifications can be found in the form of hyper-detailed
+image descriptions [41], and (3) the output is inspectable: we can render the interaction-informed prompt and
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+3
+evaluate the result. We then post-train Qwen3-8B [72] against simulated users of varying patience and evaluate
+the resulting assistants under varying question budgets.
+We show, in both simulated and real user experiments, that this training substantially improves output fidelity,
+that its improvement comes from better interaction rather than better guessing, and that it can under some
+metrics even improve the efficiency with which results are attained. This pipeline requires no human interaction
+data beyond the original task descriptions, making it a practical route for building competent assistants that ask
+before they act.
+In all, this work makes the following contributions:
+(1) We develop a value-of-information formulation of clarification for AI assistance, in which questions are
+valued by their expected effect on the user’s eventual outcome under limited interaction.
+(2) We introduce a general method for learning natural-language clarification policies from underspecified
+intent, which includes:
+(a) A dataset-construction procedure that begins from a complete specification, decomposes it into
+atomic details, selectively redacts them, and rewrites the remainder as a naturalistic underspecified
+request.
+(b) A privileged user-simulation framework which retains access to the complete intent but selec-
+tively reveals information in response to the assistant’s questions. This includes simulating varying
+levels of user patience, which affect the interaction budget under which the assistant must draw its
+inferences.
+(c) A reinforcement-learning post-training recipe that rewards clarification policies according to the
+utility they recover over multi-turn interactions, using group-relative policy-gradient updates [57] to
+learn which questions are most useful to ask.
+(3) We provide empirical evidence that language models can learn substantially better information-
+acquisition policies through simulated interaction, and that this transfers effectively to human user
+behavior.
+2
+Related Work
+2.1
+The value of asking
+Decisions about when and what to ask users have a storied history in intelligent and mixed-initiative systems [2,
+16, 20, 23, 34, 66, 74]. For instance, Horvitz’s second and fifth principles [23] discuss “uncertainty about a user’s
+goals” and using, in a cost-aware way, “dialog to resolve key uncertainties.” One way to formalize these notions
+is in terms of preference or utility elicitation [6, 9, 17], for example modeling uncertainty over a user’s utility as a
+sequential decision process where queries have costs but answers to them can improve downstream decisions.
+This accounts for how questions may also be useful because their answers enable useful subsequent questions
+even if not initially high-value [6, 37]; this sequential interactive structure is thus essential to our task here, and
+also demonstrates the complexity of the problem.
+The value of asking a question can thus be analyzed via the improvement its answer facilitates [38, 39, 65].
+This gives a value-of-information account of clarification, which is our starting point in this work. This basic idea
+has been used to query users, for instance ranking candidate questions for StackExchange posts [49] according
+to how informative their anticipated answers might be, generating questions using answer-conditioned utility
+models [50], and evaluating clarification through downstream retrieval performance [1]. More recently, Zhang
+et al. [73] evaluate such downstream consequences by training language models on preferences informed by
+simulated future conversation turns. They simulate users with different interpretations of a target ambiguous
+question, and then prefer the single clarification question that, when provided with an answer from a given
+
+
+4
+•
+M R, Cherep, Maes, and Singh
+simulator, most helps recover the respective interpretation. Recent work has also used language-model-driven
+interaction to elicit preferences and missing task specifications [25, 32, 47].
+Language models have recently been trained to elicit information through simulated interaction, for instance
+selecting multi-turn conversations according to the likelihood of an oracle-generated response [3], or learning
+from demonstrations [47]. Broader approaches to collaborative assistance have also been proposed, including
+optimizing simulated future conversations using rewards that combine task performance, interaction efficiency,
+and engagement, including in open-ended writing tasks with real users [71]. These works help establish that
+questioning can be fruitfully learned from its downstream consequences. Our focus is then on quantifying the
+omitted intent which learning can help recover in interactions, and how this recovery depends on the extent of
+underspecification and level of interaction users are willing to provide.
+We build on this line of work by developing a construction that leverages omitted information explicitly in the
+training and evaluation processes while keeping it hidden from the assistant. This in turn supports (1) measuring
+utility through satisfaction of intended properties in open-ended generation (where multiple outputs can fulfil
+the same specification); (2) training multi-turn elicitation policies through reinforcement learning; (3) studying
+variable interaction budgets, including training with simulated users whose willingness to answer is limited and
+unknown to the assistant; (4) controlling the degree of underspecification through specification redaction; and (5)
+evaluating transfer to real users who write their own requests and decide when to stop, measuring result fidelity,
+interaction burden, and other attributes. Together, these experiments allow us to examine training such assistants
+within the effort users choose to expend, thus offering a concrete way to incorporate value-of-information
+objectives into the modern AI assistant post-training stack.
+2.2
+Proactive clarification
+Perhaps the closest interactive image generation setting to our work comes from Hahn et al. [19]. They introduce
+agents that ask questions before generating an image, using editable belief graphs and prompting principles (e.g.
+avoiding redundancy). Their simulated users have access to the intended image and can answer questions about
+it, which allows clarification to be evaluated through, for instance, the generated outputs. Here, questioning
+behavior is specified through heuristics and prompts. The same applies to CLAM [29] outside image generation,
+as it classifies whether a user’s request is ambiguous and only then prompts the model to ask a clarifying question.
+The decision of whether and what to ask is based on few-shot prompting rather than optimization. Recently,
+A-MPQC [67] studies a similar problem in design generation, and accounts for how questions might differ in the
+effort required to answer them. Here, the agent adapts its questioning strategy as the user answers or rejects
+questions, in part using a curriculum of question types including free-response, multiple-choice, and binary
+formats that require different levels of user effort.
+We build on the simulated-user approach implicit in these works, along with the value-of-information principle
+discussed previously, to explicitly train AI assistants to perform better at this type of clarification question
+generation by deriving a measurable training objective. Our setup also facilitates more systematic comparison of
+different question budgets, levels of underspecification, and potential user behaviors.
+2.3
+Preference feedback
+Effective delegation also requires decisions about how much of the work of specifying outcomes resides with the
+user. In image generation, PromptCharm [69] supports users in refining their own prompts, but does not model
+what the user wants, so the burden of recognizing what is missing remains with the user. APPO [33] redistributes
+this work partially to the system through an adaptive, preference-informed prompt optimization method in
+which users select preferred images and the optimizer infers useful prompt changes from those selections. APPO
+assumes, implicitly, that the user’s initial prompt contains essential elements of the desired image, thus allowing
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+5
+subsequent search to focus largely on implicit preferences. They state that “recovering missing key elements (e.g.,
+the primary object in an image) remains challenging due to the vast search space.”
+Our work also assigns to the assistant the responsibility for identifying and acquiring such properties; we
+explicitly allow important details to be absent from the initial request, and train the assistant to elicit information
+that improves recovery of such details. We believe this is thus complementary to APPO’s interactive optimization
+and could be meaningfully combined to scaffold multiple levels of outcome specification, however we note that
+this is speculative and leave investigating such potential combinations to future work.
+2.4
+Learning via simulated interaction
+Finally, our work deals with teaching an AI assistant to interact more effectively with a user. Learning useful
+interactive behavior normally requires repeated opportunities to act, observe results, and improve on the basis
+of those observations. A natural formulation of this is as a (partially observable) Markov Decision Process
+(MDP) (as discussed in Section 2.1 [6, 62]). Reinforcement learning offers algorithms for learning to improve such
+sequential decisions through their eventual rewards. The issue here is that learning in this fashion can require
+many trial interactions (i.e. it is sample-inefficient), each demanding user participation and, for language-model
+assistants, this is compounded by the substantial computation involved in generating dialogue and updating
+many parameters. User simulation makes such experimentation feasible at scale without requiring people to
+participate in every training interaction [55, 59], a principle that dates back to early work on learning dialogue
+policies [31, 53].
+In HCI and specifically computational interaction, reinforcement learning has been used both to construct
+models of user behavior [21] and to optimize interface adaptations using predicted or simulated user responses [10,
+30, 40, 63]. These approaches thus allow interaction strategies to be explored before evaluating their performance
+with people, an opportunity which has recently been extended to language-model agents, for example learning
+improved social interaction [68].
+Most relevant for us, UserRL [48] involves training assistants using multi-turn interactions with simulated
+users, studying how different task success rewards improve assistance in settings like travel planning and puzzle
+solving. We extend this line of work to open-ended generation, where the output space is far more complex and
+consequential details may be missing from the initial request. We deliberately withhold aspects of a complete
+specification to efficiently train multi-turn clarification under systematically varying underspecification and
+interaction budgets, and evaluate the resulting assistants with users, measuring both output quality and interaction
+burden. We also emphasize the assistant’s impact on real users, while [48] reports a preliminary study with only
+five participants and a simplified protocol that is vulnerable to data leakage.
+3
+Methods
+We define a general framework in which a user’s utility is known but hidden from an AI assistant, train the
+model underlying the assistant by rewarding it with the recovered utility 𝑢rec obtained through interacting with
+simulated users (who may or may not run out of patience), and evaluate the trained assistant with real users in a
+study.
+We begin with a fully specified intent (here, a highly detailed image caption) and redact 𝑘details to generate
+a partial intent in which missing information (i.e., missing utility) is known exactly. Thus, what the assistant
+recovers can be compared against ground truth. Besides the assistant 𝜋𝜃, we use four language model instances
+in our pipeline, each prompted to accomplish a different piece of the task: a decomposition model and a redaction
+model that we use to build task instances (full specifications are in Appendix B), a user simulator model 𝜋𝑢, and a
+judge J which is used to compare recovered prompts against ground truth. Section 3.1 describes the setup first
+in the general case, and then for the image generation task we study. All prompts are listed in Appendix I.
+
+
+6
+•
+M R, Cherep, Maes, and Singh
+3.1
+Problem setup
+Intent and utility. Let 𝑠★denote a complete natural language specification of the task the user wants done. The
+decomposition model transforms it into 𝑚atomic details D = {𝑑1, . . . ,𝑑𝑚}, where each 𝑑𝑖= (𝛿𝑖,𝑤𝑖, 𝜒𝑖) includes
+the content 𝛿𝑖itself, an associated importance weight 𝑤𝑖∈[0, 1] (how much the detail is expected to influence
+the outcome of the task), and a check 𝜒𝑖: Y →{0, 1}, which is a binary question about 𝑑𝑖that the judge uses as
+an evaluation signal (e.g. “Is the car red?” or “Is there a cat on the left side?”). The assistant’s outcome is 𝑦∈Y,
+the specification it composes after clarifying with the user, from which the task’s output is produced. In this
+framework, we model the user’s utility from 𝑦as the importance-weighted share of the full task specification
+(here, represented as the set of details) it contains:
+𝑈𝑢(𝑦) =
+Í𝑚
+𝑖=1 𝑤𝑖𝜒𝑖(𝑦)
+Í𝑚
+𝑖=1 𝑤𝑖
+.
+(2)
+Redaction. For each task instance, we hide some portion of the 𝑚details from 𝑠★, a set H ⊂D with |H| =
+𝑘drawn sequentially without replacement with probability proportional to the importance weight 𝑤𝑖(see
+Appendix B). The count 𝑘is itself drawn per instance uniformly from {1, . . . , 𝐾} for a set-wide maximum 𝐾, so
+that instances differ in the level of underspecification to avoid the assistant relying on a fixed number of queries.
+The redaction model then writes the request 𝑥, a concise natural request that contains only those retained details
+D \ H. The assistant observes only 𝑥and is tasked with querying 𝜋𝑢to recover as much of H as possible.
+Dialogue. The assistant 𝜋𝜃is a language model instance instrumented with three task-specific prompts leading
+to three instantiations which toggle depending on the state of the interaction: 𝜋ask
+𝜃, 𝜋decide
+𝜃
+and 𝜋compose
+𝜃
+. The
+three share the same weights and receive the same dialogue history so far, and differ only in their system prompt
+and in what they emit: 𝜋ask
+𝜃
+asks the user a clarification question, 𝜋decide
+𝜃
+decides whether to ask another, and
+𝜋compose
+𝜃
+writes the final outcome 𝑦once questioning ends. 𝜋𝑢denotes a privileged user simulator, which has
+access to 𝑠★but is instructed to carefully answer only what is actually asked; i.e., it is guided to never volunteer
+unasked details and to avoid giving responses that are not clearly supported by 𝑠★. The assistant asks atomic
+queries, questions that 𝜋𝑢should, in the ideal case, answer with at most one detail.
+An episode begins with history ℎ0 = 𝑥. At turn 𝑡the assistant asks 𝑎𝑡∼𝜋ask
+𝜃
+(· | ℎ𝑡−1), the user answers
+𝑜𝑡= 𝜋𝑢(𝑎𝑡,ℎ𝑡−1;𝑠★), and the history is updated as ℎ𝑡= ℎ𝑡−1 ⊕(𝑎𝑡,𝑜𝑡). We denote the number of questions
+answered in an episode by 𝑞, with the episode ending when either the assistant decides not to ask another
+question or the user declines to answer additional questions. The assistant then composes 𝑦∼𝜋compose
+𝜃
+(· | ℎ𝑞),
+the specification of what it infers the user wants. This is the assistant’s best response to its own implicit estimate
+b
+𝑈𝑢(· | ℎ𝑞) of the user’s utility, formed from 𝑥and the answers {𝑜1, . . . ,𝑜𝑡}, and then 𝑈𝑢(𝑦) can be used to score it
+against the ground truth.
+Recovered utility. We split the sum in Equation (2) into retained vs. redacted details. The retained details are
+in 𝑥and the assistant is instructed to preserve them, so we treat their contribution to 𝑈𝑢(𝑦) as constant. What
+varies then is the redacted part, and normalizing it gives the recovered utility:
+𝑢rec(𝑦) =
+Í
+𝑖∈H 𝑤𝑖𝜒𝑖(𝑦)
+Í
+𝑖∈H 𝑤𝑖
+∈[0, 1],
+(3)
+the share of the missing utility (which, in our model, the user desires but did not explicitly state) that the assistant
+recovers after interaction. Under the assumption above that the retained details are preserved, Equation (2) is
+an increasing affine function of this share, 𝑈𝑢(𝑦) = 𝑐+ (1 −𝑐) · 𝑢rec(𝑦) with 𝑐= Í
+𝑖∉H 𝑤𝑖/Í𝑚
+𝑖=1 𝑤𝑖the retained
+share of the weight, so maximizing 𝑢rec on an instance maximizes the user’s utility. We compute it under both
+importance weights 𝑤𝑖and uniform weights (𝑤𝑖= 1 ∀𝑖), and report the uniform-weighted value throughout
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+7
+as a simple and interpretable baseline (importantly, they correlate at 0.985 or above and rank every evaluation
+identically, more details in Appendix C).
+Asking modes. Within any interaction, an assistant can adopt a number of different policies related to how
+much to ask. We simplify this to three distinct policy types, or asking modes:
+• No-asking: the assistant asks no questions, composing 𝑦from 𝑥+ any implicit-detail inference alone.
+This measures what the request and the assistant’s prior already yield, the floor of 𝑢rec.
+• Fixed-asking: the assistant asks exactly 𝑘questions (one per hidden detail) so an optimal policy can
+recover every hidden detail. Here, it chooses what to ask but not how much.
+• Open-asking: before each question the assistant decides via 𝜋decide
+𝜃
+whether to ask another one. Ques-
+tioning terminates at the first stop decision or upon exhausting the budget, whichever occurs first. We set
+the budget to 2𝑘, so the assistant can both under-ask and over-ask.
+The assistant knows neither the hidden count 𝑘nor the budget of its mode in advance.
+Users. In addition to different asking behaviors, we consider variation in answering behavior. Intuitively, just
+because an assistant asks a question does not mean the user is obliged to answer it. They may abandon the
+interaction at any time, or abandon by way of refusing to answer additional questions before production. We thus
+design two forms of user simulator which differ only in when they stop answering the assistant’s questions. The
+patient user answers every question, and the impatient user can stop answering at any point. To simulate this
+latter behavior, we draw its patience 𝑝, the number of questions it answers before asking for the outcome, from:
+Pr(𝑝≤𝑏) =
+𝑏
+𝐵
+𝛼
+,
+𝑏∈{1, . . . , 𝐵},
+𝛼> 0.
+(4)
+Here 𝐵is the budget of the asking mode, 𝐵= 𝑘under fixed asking and 𝐵= 2𝑘under open asking. Since a
+uniform stopping distribution corresponds to 𝛼= 1, we choose 𝛼> 1 so that the user’s patience follows a waning
+schedule; i.e. the chance of a question being the last one answered grows as the conversation carries on, as we
+might intuitively expect of real users. In our experiments, we heuristically set 𝛼= 1.5, an intermediate value, so
+the user answers roughly two thirds of the questions on average if the assistant uses its whole budget.
+Combinations of asking modes and user simulator behaviors. The 3 asking modes × 2 user simulators give the
+following conditions, with the answered count 𝑞of each being:
+Patient user
+Impatient user
+No-asking
+𝑞= 0
+𝑞= 0
+Fixed-asking
+𝑞= 𝑘
+𝑞= 𝑝
+Open-asking
+0 ≤𝑞≤2𝑘
+0 ≤𝑞≤𝑝
+Image generation. We instantiate the setup for image generation (Figure 1) using the DOCCI [41] dataset. We
+choose DOCCI because of its high-density, human-annotated descriptions that target key challenges in image
+generation such as spatial reasoning or world knowledge. The specification 𝑠★is one of the hyper-detailed image
+descriptions in the dataset, each written for a photograph that we keep as the reference image. The outcome 𝑦is
+the image description composed by the assistant, which a text-to-image model G renders into the image G(𝑦)
+the user receives. Since we focus on elicitation, we first score 𝑦directly and separately verify that improvements
+in 𝑦carry over to the rendered images G(𝑦). We set 𝐾= 15 as the maximum number of redactions, take a subset
+of 2,000 DOCCI descriptions, and keep those that decompose into at least 𝐾+ 5 details (so that there is enough
+residual structure to produce reasonable starting prompts). This produces 479 instances, which we split by source
+into 290 for training, 111 for validation, and 78 for testing.
+
+
+8
+•
+M R, Cherep, Maes, and Singh
+3.2
+Training to maximize the recovered utility
+Models. The model we use as the assistant is Qwen3-8B [72] with reasoning on; we use it because it is a popular
+choice for fine-tuning2. For every question, decision and description, the model has a sampling cap of 4,096
+tokens shared by the reasoning and visible text, and only the visible text becomes part of the history and is given
+to the user and the judge. The remaining models use Gemini 3.5 Flash-Lite, a popular and inexpensive workhorse
+model. As a supplementary analysis, we audit the simulator’s answers with a judge to check how often they state
+about one hidden detail each and only when asked (Appendix D).
+Objective and update. Let 𝜏= (ℎ𝑞,𝑦) denote an episode and 𝑟(𝜏) = 𝑢rec(𝑦) its reward, the uniform-weighted
+version of Equation (3). We maximize the expected reward E𝑥E𝜏∼𝜋𝜃(·|𝑥) [𝑟(𝜏)] using policy gradients over rollout
+groups (Algorithm 1). This objective approximates Equation (1) summed over the episode with 𝜋𝑢in place of
+the user and 𝑢rec in place of 𝑈𝑢(Equation (3)). The per-question values telescope to the expected recovery (with
+optimal composition) after the dialogue minus that of 𝑥alone, a constant. Assuming the assistant’s composition
+function is near-optimal, maximizing the expected reward therefore approximately maximizes the total value
+of information. Each iteration draws 𝑀= 8 training instances and 𝑔= 32 episodes per instance, judges every
+episode, and centers the rewards within each instance’s group, 𝐴𝑗= 𝑟𝑗−1
+𝑔
+Í𝑔
+𝑗′=1 𝑟𝑗′, a GRPO-style advantage
+function [57] without standard-deviation normalization. Centering helps to debias the reward signal, since details
+guessable from 𝑥alone are in expectation recovered by multiple rollouts alike, so the update rewards questions
+that helped recover more relative to this group average. Under the impatient user, 𝑝is drawn once per group,
+so the rollouts of one instance compete under the same patience budget. We then use an importance-sampled
+policy-gradient step to update low-rank adapter (LoRA) [24] parameters 𝜃(an efficient fine-tuning approach). We
+set LoRA hyperparameters as rank 32 and learning rate 4 × 10−5, with 𝐴𝑗applied to every token the assistant
+sampled in episode 𝑗, reasoning included.
+Training against patient and impatient users. As noted, we train against two versions of the user simulator.
+Both are trained in fixed-asking mode with 𝐵= 𝑘and 𝑟(𝜏) = 𝑢rec(𝑦), so that the gradient pushes the assistant
+toward better clarifying questions at the same budget. The patient-trained assistant’s reward is what it was able
+to recover with 𝑘answered rounds, and the impatient-trained assistant is rewarded in proportion to what it
+could recover within an unknown time limit, which we hypothesize could learn to favor asking the most valuable
+questions first. Each run trains up to 300 iterations from the base weights, with early stopping on reasoning
+length, and the best checkpoint of each run is chosen on validation recovery under the patient or the impatient
+user respectively (Appendix C). The untrained weights in the same modes are the base model.
+3.3
+User study
+We ran a preregistered study3 to validate the effectiveness of the trained assistant with real users who can decide
+to stop answering questions at any point. The study was determined to be exempt by our institutions’ IRBs.
+Task. In each round, the participant sees one target image out of 78 possible test instances. The task consists
+of writing a prompt in order to maximally reconstruct the seen reference image, and answering the assistant’s
+clarifying questions one at a time, for as long as they like, up to the global cap of 𝐾= 15 questions. The image is
+only generated once, at the end of the round, from the description the assistant composes, which the participant
+does not directly observe. The real user here plays the role of the impatient simulated user during training, but
+using their authentic human impatience. To incentivize them to iterate (and not always click through to the final
+result to save time), we offered a bonus based on performance (discussed below).
+2Qwen3-8B is both a highly popular choice for fine-tuning (huggingface.co/blog/state-of-open-models-summer-2026) and a highly effective
+one (distillabs.ai/blog/what-small-language-model-is-best-for-fine-tuning).
+3Pre-registration on AsPredicted #310,205 (anonymized link: aspredicted.org/mx4wx3.pdf)
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+9
+Algorithm 1 Training an assistant on recovered utility
+Require: instances (𝑥, H,𝑠★) built by redaction (Appendix B), assistant 𝜋𝜃, user simulator 𝜋𝑢, judge J, iterations
+𝑁, instances per iteration 𝑀, rollouts per instance 𝑔
+1: for 𝑁iterations do
+2:
+sample 𝑀training instances
+3:
+for each instance (𝑥, H,𝑠★) with 𝑘= |H| do
+4:
+draw the user’s patience 𝑝once for the group
+⊲𝑝= 𝑘if patient, else Equation (4) with 𝐵= 𝑘
+5:
+for 𝑗= 1, . . . ,𝑔do
+⊲the rollout group of the instance
+6:
+ℎ←𝑥
+7:
+for 𝑡= 1, . . . , 𝑝do
+⊲fixed-asking, one question per hidden detail
+8:
+𝑎𝑡∼𝜋ask
+𝜃
+(· | ℎ),
+𝑜𝑡←𝜋𝑢(𝑎𝑡,ℎ;𝑠★),
+ℎ←ℎ⊕(𝑎𝑡,𝑜𝑡)
+9:
+end for
+10:
+𝑦𝑗∼𝜋compose
+𝜃
+(· | ℎ)
+11:
+𝑟𝑗←𝑢rec(𝑦𝑗) = 1
+𝑘
+Í
+𝑖∈H J (𝜒𝑖,𝑦𝑗)
+⊲Equation (3) under uniform weights
+12:
+end for
+13:
+𝐴𝑗←𝑟𝑗−1
+𝑔
+Í𝑔
+𝑗′=1 𝑟𝑗′ for every 𝑗
+⊲group-centered advantage
+14:
+end for
+15:
+one policy-gradient step on 𝜃, 𝐴𝑗applied to every token the assistant sampled in rollout 𝑗
+16: end for
+17: return the checkpoint with the best validation 𝑢rec against 𝜋𝑢
+Design. The within-subjects study compares two models: the base model and the patient-trained assistant (we
+discuss the rationale for this in the simulated results section). Both were run with the prompts and settings of
+Section 3.2 in fixed-asking form, but since we have no explicit redactions here, they are fixed to ask as many of
+the 𝐾= 15 questions as the user will allow. Therefore, the assistant asks a question every turn and the participant
+decides when to stop. Each participant completes six such task rounds (split evenly by model, in randomized
+order), on six target images drawn at random without replacement.
+Recruitment. Participants were recruited on Prolific; screened for age, English as a native language, and normal
+or corrected vision. We compensated them at $12/hour, plus a $2 bonus based on performance to incentivize them
+as described above (we ultimately awarded the bonus to all). All participants had to pass a task comprehension
+check before the first round. Additional details are given in Appendix E.
+3.4
+Evaluation and analysis
+We evaluate clarification primarily through detail recovery, changes in similarity to the reference images/captions,
+and features of interaction required to achieve these outcomes (e.g. number of questions). We first analyze results
+with simulated users on test-set image instances, which allows us to establish that the training has the intended
+effect, and to conduct comprehensive controlled comparisons across assistants, asking policies, and user patience
+levels. Importantly, this data has a known number of redactions, so we can directly estimate the utility gain as
+defined previously.
+We then analyze our human evaluation, as described, to study how the trained assistant performs with real
+users in interactive tasks. We use a similar estimation and inference approach across these evaluations.
+3.4.1
+Evaluation conditions. The simulated evaluation consists of 78 held-out (test set) DOCCI image sources,
+with 1–15 redacted details per instance. We compare the Qwen3-8B base model with the patient-trained and
+
+
+10
+•
+M R, Cherep, Maes, and Singh
+impatient-trained assistants as described previously. We test each of these assistants in two regimes: fixed asking
+𝐵= 𝑘(recall that𝑘is the number of redactions), and open asking 𝐵= 2𝑘, with both patient and impatient simulated
+test users. We additionally evaluate each assistant in a no-asking mode to establish a baseline (in this condition,
+the training shouldn’t confer a significant advantage). This gives 3 assistants (base/patient-trained/impatient-
+trained) × 2 conditions (fixed/open) × 2 user-simulators (patient/impatient) = 12 asking conditions + 3 no-asking
+conditions (corresponding to the 3 assistants), for a total of 15 evaluation conditions.
+In human interactions, we compare only the base and patient-trained assistants.
+3.4.2
+Outcome measures. In the simulated study, our primary outcome is recovered utility (with equal weights for
+all details; we additionally test importance-weighted results as a robustness check). We express this as percentage
+of hidden details recovered in the final description, and report changes in absolute terms (percentage points). Since
+recovery can include both information acquired through answers as well as simply correct ex ante inferences,
+the no-asking conditions estimate performance without dialog. In the human study, the number of redactions is
+implicit and never precisely known, and so we do not measure this outcome there.
+Across both evaluations, we measure semantic change using unit-normalized embeddings from Gemini
+Embedding 2 (denoted 𝑒(·) below). For an initial output 𝑧init, final output 𝑧fin, and reference 𝑧ref, we compute
+change in cosine similarity:
+Δsim(𝑧init,𝑧fin;𝑧ref) = sim(𝑧fin,𝑧ref) −sim(𝑧init,𝑧ref) = 𝑒(𝑧fin)⊤𝑒(𝑧ref) −𝑒(𝑧init)⊤𝑒(𝑧ref),
+∥𝑒(𝑧)∥2 = 1
+(5)
+We apply this across multiple modality conditions. For the prompt text, we compare the redacted request and
+final description with the complete reference description. For images, we compare images generated from those
+two texts with the reference photograph (upscaled for machine study, original for human study since it is what
+they see and try to match). We also compute both cross-modal comparisons: text against reference image, and
+generated image against reference text.
+We also log interaction measures: question-answer counts, question and answer word counts, and words
+per answered question and answer. The human interactions additionally give us wall-clock durations, and we
+measure token usage as a proxy for cost. Together, these measures help to distinguish the number of exchanges
+from the effort and time they require. The per-question and per-answer measures exclude logged interactions
+without any answered questions.
+3.4.3
+Regression analysis. We then estimate condition differences using OLS regressions with reference-image
+fixed effects (to account for stable differences between tasks) and cluster-robust standard errors. We cluster
+standard errors by source image in simulated evaluation, where conditions share the same redacted request,
+and by participant in human evaluation, where participants compose their own requests but complete multiple
+tasks. We adjust for answered-question count, except when question count or a count-derived measure is the
+outcome, and in the simulated-performance overviews (Figures 2 and 3), which retain source-image fixed effects
+but omit question-count adjustment (since there is a no-asking condition). In the plot annotations, we use 𝑝-values
+derived from contrasts between conditions from these models. Tests and contrast confidence intervals use a
+𝑡(𝐶−1) reference distribution, where 𝐶is number of clusters. We adjust 𝑝-values using the Benjamini–Hochberg
+procedure to control the false discovery rate across the specified control comparisons within each simulated
+evaluation outcome, and separately across quality and process outcomes in the human evaluation.
+For condition comparisons, we plot estimated marginal means (EMMs), with all reference images weighted
+equally and answered-question count at its pooled mean wherever included as a covariate. The error bars show
+95% confidence intervals using the model’s cluster-robust covariance matrix and 𝑡(𝐶−1) critical values, and
+significance stars are BH-adjusted contrasts between these EMMs.
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+11
+For simulated asking interactions, we fit additive, two-way, and three-way specifications to examine how
+assistant differences depend on features like asking policy, user patience, and dialogue measures (e.g. question
+count). For the human quality models, we similarly compare specifications with and without question-count
+adjustment and also image fixed effects.
+4
+Results
+4.1
+Model Results
+Unless otherwise stated, differences discussed below are regression-adjusted contrasts with 95% confidence
+intervals and BH-adjusted 𝑝-values.
+4.1.1
+Can models learn to ask more effective questions? We find that training increases recovered utility in
+all asking conditions (Figure 2). Across all eight trained-versus-base comparisons, adjusted gains range from
+image-adjusted gains range from 37.6 to 57.7 pp., all 𝑝BH < .0001. With a patient user and fixed asking, the
+patient-trained checkpoint gains 50.6 points [43.8, 57.3] and the impatient-trained checkpoint gains 48.7 points
+[42.4, 55.0]. Observed recovery is 27.7% for base, 78.2% for patient-trained, and 76.4% for impatient-trained.
+Gains persist with impatient simulated users. Under fixed asking, adjusted gains are 40.7 points [33.3, 48.2] for
+patient-trained and 37.6 points [30.0, 45.2] for impatient-trained. Under open asking, the corresponding gains are
+57.7 and 50.9 points with patient users, and 49.2 and 44.9 points with impatient users. The gains are also robust
+across alternative specifications (Table 6).
+Without asking, these effects largely disappear. Patient-trained differs from base by −1.2 points [−3.5, 1.2],
+𝑝BH = .354; impatient-trained gains 3.4 points [0.3, 6.5], 𝑝BH = .041. Observed recovery is 14.8%, 13.6%, and
+18.2% for base, patient-trained, and impatient-trained, respectively. The gains from asking thus support the
+interpretation that the benefit arises from learned interaction, not just e.g. improved zero-shot inference of
+missing details.
+*
+****
+****
+****
+****
+****
+****
+****
+****
+No interaction
+Patient user
+Impatient user
+None
+Fixed
+Open
+Fixed
+Open
+0
+25
+50
+75
+100
+Asking policy
+Recovery (%)
+Model checkpoint
+Base model
+Patient-trained
+Impatient-trained
+Fig. 2. Recovered utility in simulated evaluation, measured as percentage of hidden details recovered by the final description.
+Points show estimated marginal means; bars are 95% source-image-clustered regression confidence intervals. Brackets
+compare trained checkpoints vs. base using source-image fixed effects and source-image-clustered standard errors. Asterisks
+denote BH-adjusted significance: ∗𝑝< .05, ∗∗∗∗𝑝< .0001.
+4.1.2
+Do better questions lead to better output fidelity? Training also improves reference-similarity gains across
+all four text/image comparisons (Figure 3). The image-adjusted advantages are positive in every asking condition,
+
+
+12
+•
+M R, Cherep, Maes, and Singh
+ranging from 0.040–0.195 for patient-trained and 0.016–0.113 for impatient-trained. All comparisons are significant
+at 𝑝BH < .05. The alternative specifications largely reproduce this pattern (Tables 7 and 8).
+****
+****
+******
+****
+****
+****
+****
+****
+****
+****
+****
+****
+****
+****
+****
+****
+****
+****
+****
+****
+****
+****
+****
+*****
+****
+****
+*******
+****
+****
+****
+****
+****
+****
+No interaction
+Patient user
+Impatient user
+Text to full reference text
+sim(Tfin, Tref)−sim(Tinit, Tref)
+Image to reference image
+sim(Ifin, Iref)−sim(Iinit, Iref)
+Text to reference image
+sim(Tfin, Iref)−sim(Tinit, Iref)
+Image to reference text
+sim(Ifin, Tref)−sim(Iinit, Tref)
+None
+Fixed
+Open
+Fixed
+Open
+-0.1
+0.0
+0.1
+0.2
+0.3
+0.00
+0.05
+0.10
+-0.05
+0.00
+0.05
+0.10
+0.00
+0.05
+0.10
+0.15
+Asking policy
+Δ cosine similarity
+Model checkpoint
+Base model
+Patient-trained
+Impatient-trained
+Fig. 3. Change in cosine similarity across text/image comparisons in simulated evaluation, using complete descriptions and
+upscaled source images as references. Positive values indicate improvement over the initial request or its generated image.
+Points show estimated marginal means; bars are 95% source-image-clustered regression confidence intervals. Brackets show
+trained-vs.-base contrasts with source-image fixed effects and source-image-clustered uncertainty. BH-adjusted significance:
+∗𝑝< .05, ∗∗𝑝< .01, ∗∗∗𝑝< .001, ∗∗∗∗𝑝< .0001.
+4.1.3
+Can models decide how much information to elicit? With patient simulated users, open asking reduces
+answered-question counts relative to fixed asking by 1.86 [0.73, 2.99] for patient-trained, 𝑝BH = .002, and 4.78
+[3.78, 5.78] for impatient-trained, 𝑝BH < .0001 (Figure 4). With impatient users, the reduction is 2.27 [1.47, 3.07]
+for impatient-trained, 𝑝BH < .0001 and 0.45 for patient-trained which is not significant, 𝑝BH = .404.
+Both trained checkpoints under-ask in open asking protocol, relative to the 𝑘-anchored fixed-asking baseline
+(Figure 4). Mean answered-question counts fall by 0.45–4.78 across user conditions and 3/4 reductions are
+significant (𝑝BH < .005; patient-trained under impatient users is the exception, 𝑝BH = .404). This reduced
+elicitation accompanies lower observed recovery in every setting, with average declines of 7.2–13.3 percentage
+points.
+Adjusting for question count predictably makes these recovery differences non-significant (−5.5–4.8 points,
+all 𝑝BH ≥.120), which is consistent with an effect from reduced elicitation. Together, these results suggest that
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+13
+models learn to ask when given discretion, but their stopping behavior leaves information unrecovered relative
+to the fixed-asking baseline calibrated to the number of redactions.
+Base model
+Patient-trained
+Impatient-trained
+Patient user
+Impatient user
+1
+5
+10
+15
+1
+5
+10
+15
+1
+5
+10
+15
+0
+5
+10
+15
+0
+5
+10
+15
+Missing details
+Mean answered questions
+Fixed asking
+Open asking
+Fig. 4. Mean answered-question count by number of redacted details, 𝑘, for each checkpoint and simulated-user type. Solid
+lines show fixed asking with budget 𝑘and dashed lines show open asking with cap 2𝑘. Each point averages source-images
+with the relevant redaction count and impatient simulated users may terminate dialogue before the budget is exhausted.
+4.1.4
+How does user behavior affect performance? Interestingly, training with impatient users does not produce a
+clear advantage when evaluation users are also impatient. In these settings, the impatient-trained checkpoint
+has lower observed recovery than patient-trained under both fixed (65.9% vs. 69.1%) and open asking (57.7% vs.
+61.9%). Impatient training also does not seem to eliminate sensitivity to early dialogue termination. Thus, these
+results provide no clear evidence that exposure to impatient users produces questioning strategies better suited
+to them, and we focus our human study on the patient-trained asker.
+4.1.5
+How might this impact interaction burden? Looking at properties of the simulated interaction allows us to
+initially speculate about potential consequences for interaction burden; in other words, the cost (time, cognitive,
+or otherwise) that the user might incur to reap the benefits from these askers.
+We find that training increases the length of exchanges even with equivalent question counts. Across fixed-
+asking comparisons, adjusted increases are 21.9–36.8 words per question and 7.2–10.3 words per answer, all
+𝑝BH < .0001. Total dialogue consequently increases by 189.7–368.4 words. Recovery gains within a fixed number
+
+
+14
+•
+M R, Cherep, Maes, and Singh
+of questions may therefore be accompanied by greater reading and response demands, although we acknowledge
+word counts are a very imperfect proxy for this.
+Patient user
+Impatient user
+0
+10
+20
+30
+0
+10
+20
+30
+-50
+0
+50
+100
+Change in answered questions
+Recovery gain (pp)
+0
+500
+1000
+1500
+0
+500
+1000
+1500
+-50
+0
+50
+100
+Change in total question words
+Recovery gain (pp)
+0
+200
+400
+0
+200
+400
+-50
+0
+50
+100
+Change in total answer words
+Recovery gain (pp)
+Patient-trained
+Impatient-trained
+Fig. 5. Recovery gain vs. change in interaction measure under open asking. Each point compares trained vs. base checkpoints
+on the same source image and simulated-user type; gray lines mark no change. Even low-change examples often produce
+non-zero recovery gain, suggesting the gains are not only driven by more complexity in interaction.
+In Figure 5, we plot changes in question count, question words, and answer words against recovery gains
+under open asking, paired at the source-image level. Gains generally accompany additional interaction, but
+positive gains also appear near zero change, suggesting improvements in how effectively the exchanges are used.
+Consistent with this interpretation, regression-adjusted training advantages remain positive after controlling
+for question count and question, answer, and output lengths, ranging from 6.0 to 17.2 percentage points (3/4
+contrasts are significant, 𝑝< .05; with the exception of impatient-trained with impatient users, 𝑝= .242).
+4.2
+Human Results
+We filter the human data at 25 minutes (our preregistered 30-minute exclusion threshold plus a small grace
+window of 5 minutes for those who were close; a modest relaxation from our preregistration to account for our
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+15
+overestimation which affects only 3 participants), resulting in 76 valid participants’ data (from 79 total) and 456
+rounds in total. These retained rounds cover 77 reference images of which 71 appear in both conditions.
+The median session duration was 52.9 minutes (IQR: 41.9–64.9). Across conditions, participants answered 1,757
+total questions, with a median of three answers per round (IQR: 1–5) and a median round duration of 7.1 minutes
+(IQR: 4.8–10.3). Participants’ initial prompts contained a median of 74 words (IQR: 43–121).
+4.2.1
+Do simulated-trained policies improve results from interaction with people? The trained assistant results in
+significant reference-similarity gains across all text/image comparisons (Figure 6). After adjustment for question
+count and source image, advantages range from 0.0141–0.0337 cosine similarity, all 𝑝BH < .005. These include
+improvements in both the final description, with a text–text advantage of 0.0337 [0.0159, 0.0515], and the
+generated image, with an image–image advantage of 0.0141 [0.0045, 0.0237]. Thus, the learned policy improves
+final outcomes even when people formulate their own requests and answer the assistant’s questions.
+This effect persists across regression specifications; training coefficients are positive for every quality measure
+with and without question-count adjustment and source-image fixed effects, all 𝑝< .02 (Tables 10 to 13). Observed
+text–text gains average 0.0350 for the trained model vs. 0.0177 for base; image–image gains average 0.0160 vs.
+0.0085, and image–text gains average 0.0251 vs. 0.0111. Text–image gains are negative in both conditions, which
+may reflect sensitivity in this cross-modal metric to changes in description length, specificity, and other such
+features. However, training still produces a relative advantage here.
+***
+**
+**
+***
+Text to reference text
+sim(Tfin, Tref) −sim(Tinit, Tref)
+Image to reference image
+sim(Ifin, Iref) −sim(Iinit, Iref)
+Text to reference image
+sim(Tfin, Iref) −sim(Tinit, Iref)
+Image to reference text
+sim(Ifin, Tref) −sim(Iinit, Tref)
+0.00
+0.01
+0.02
+0.03
+0.04
+-0.02
+-0.01
+0.00
+0.00
+0.01
+0.02
+0.03
+0.00
+0.02
+0.04
+0.06
+Δ cosine similarity
+Base model
+Trained model
+Fig. 6. Fidelity improvement (cosine-similarity gains) in human interactions across text/image comparisons, using reference
+descriptions and images. Points show estimated marginal means; bars are 95% participant-clustered regression confidence
+intervals. Brackets show trained-vs.-base contrasts adjusted for question count and source image, with participant-clustered
+standard errors. All contrasts favor the trained checkpoint. BH-adjusted significance: ∗∗𝑝< .01, ∗∗∗𝑝< .001.
+4.2.2
+Do gains persist under comparable amounts of interaction? Our primary comparisons account for question
+count, but effectively assume a common training advantage across counts. In Figure 7, we relax this assumption
+to study how advantage varies with the number of answers participants actually provide. Since estimates at
+individual counts are noisy, we interact training condition with a natural cubic spline of question count, keeping
+intact the source-image fixed effects and participant-clustered standard errors. This allows training advantage to
+
+
+16
+•
+M R, Cherep, Maes, and Singh
+vary smoothly with question count, sharing information across nearby counts, but also not requiring a more
+restrictive linear or monotonic relationship.
+***
+****
+***
+***
+**** *
+***
+***
+Text to reference
+text
+Image to reference
+image
+Text to reference
+image
+Image to reference
+text
+0
+5
+10
+15
+0
+5
+10
+15
+0
+5
+10
+15
+0
+5
+10
+15
+-0.04
+0.00
+0.04
+0.08
+-0.04
+0.00
+0.04
+-0.025
+0.000
+0.025
+0.050
+-0.2
+-0.1
+0.0
+0.1
+Questions answered
+Trained − base cosine gain
+Fig. 7. Adjusted differences (trained - base) in human reference-similarity gains by question count. Estimates come from
+a regression using a natural cubic spline, with source-image fixed effects. Bars are 95% participant-clustered regression
+confidence intervals and the dashed line marks no difference. All shown count-by-outcome contrasts are BH-adjusted:
+∗𝑝< .05, ∗∗𝑝< .01.
+Training advantages are positive and significant across all four quality measures at 3–5 answered questions, all
+𝑝BH < .05. At four answers, for instance, the text–text advantage is 0.057 [0.026, 0.088] and the image–image
+advantage is 0.023 [0.009, 0.038]. Evidence at other counts varies by measure but importantly, no comparison is
+significant at zero or one answer, which is consistent with the interaction being what matters in practice. The
+estimate at high count (15) has limited support and thus very wide CIs; we do not draw any conclusions from this.
+4.2.3
+How does this affect the realized burden on actual users? We find that participants answer fewer questions
+with the trained assistant despite getting improved results, as shown in Figure 8 (adjusted difference is −2.27
+answers [−2.82, −1.72], 𝑝BH < .0001; observed means are 2.81 versus 4.90). This differs from the simulated open
+asking setting, wherein training increased questioning over the base model which rarely asks.
+The exchanges themselves are longer; after adjustment, questions are on average 20.9 words longer [19.1, 22.7]
+and answers are 16.8 words longer [11.4, 22.2], both 𝑝BH < .0001. At common question count, we estimate 189.8
+additional total dialogue words with the trained assistant [134.6, 245.1], 𝑝BH < .0001. However, since the observed
+conversations are marked by fewer interactions with the trained model, the realized difference is smaller at
+72.3 words, with means of 266.8 versus 194.5. Observed rounds are also faster with the trained assistant overall,
+averaging 439.9 seconds versus 533.7 for base.
+The training therefore appears to change how the work is distributed, i.e. participants respond fewer times,
+but read and write more text when doing so. Paired with the improved results, we hypothesize that this may
+reflect fewer, more precise questions that elicit more consequential responses from users (although we caution
+against treating these results as strong evidence of this interpretation). We note that these measures do not, of
+course, constitute a reduction in subjective cognitive load.
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+17
+****
+****
+****
+****
+****
+****
+***
+Words per
+answer
+Total dialogue
+words
+Total round
+time (s)
+Time per answer
+(s)
+Questions
+answered
+Total question
+words
+Total answer
+words
+Words per
+question
+20
+30
+40
+40
+60
+80
+100
+90
+120
+150
+400
+450
+500
+550
+100
+125
+150
+175
+200
+200
+250
+300
+350
+3
+4
+5
+6
+20
+30
+40
+50
+Mean
+Base model
+Trained model
+Fig. 8. Interaction measures from the human study. Points show estimated marginal means; bars are 95% participant-
+clustered regression confidence intervals. Brackets show trained-vs.-base regression-adjusted contrasts and all tests use
+participant-clustered standard errors. BH-adjusted significance: ∗𝑝< .05, ∗∗∗𝑝< .001, ∗∗∗∗𝑝< .0001.
+4.2.4
+Does better clarification come at a cost? We find that training improves reference similarity while reducing
+token usage (Figure 9). Even after accounting for question count and source image, the trained assistant uses
+1,420 fewer tokens per round [1,146, 1,695], 𝑝BH < .0001. This reduction therefore persists when comparing
+conversations with the same number of answers.
+The change is most apparent in internal reasoning tokens, which decrease by 1,551 per round, while visible-
+output tokens increase by 131; both 𝑝BH < .0001. Observed total usage averages 2,698 tokens with trained
+versus 5,563 with base. The assistant thus produces effective user-facing exchanges with less internal reasoning,
+suggesting that learning useful clarification behavior can also reduce the inference-time computation needed to
+support it.
+4.2.5
+How do the model-generated questions and human-given answers change after training? To investigate this,
+we use the Matryoshka interpretability technique [11, 58] to recursively summarize over source-image-paired
+question sets and answer sets from control vs. treatment conditions. The summaries suggest differences in
+question format and response style, including e.g. fewer binary/polar questions and less hedging and speculative
+answers. See Appendix F for more details on the procedure and examples.
+
+
+18
+•
+M R, Cherep, Maes, and Singh
+****
+****
+****
+Reasoning
+tokens
+Visible output
+tokens
+Total sampled
+tokens
+3000
+4000
+5000
+6000
+7000
+320
+360
+400
+2000
+3000
+4000
+5000
+6000
+7000
+Mean tokens
+Base model
+Trained model
+Fig. 9. Model-side token usage per human-study round. Points show estimated marginal means; bars are 95% participant-
+clustered regression confidence intervals. Brackets show regression-adjusted trained-vs.-base contrasts with participant-
+clustered standard errors. Results indicate that the trained model uses fewer reasoning and total sampled tokens but more
+visible-output tokens. All contrasts have 𝑝BH < .0001 (∗∗∗∗).
+5
+Discussion
+Overall, our results indicate that assistants can learn to clarify with real users through simulated interaction.
+A broader design question we might then ask is what this capability should accomplish for the user. In other
+words, why should we want this, and what might its impacts be? We argue that productive clarification should
+render users’ knowledge, judgments, and preferences more valuable in the long term, and develop this and related
+implications here.
+5.1
+Eliciting authorship through participation
+In our study, learned clarification changed the trade-offs of delegation. Participants using the trained assistant
+answered fewer questions but wrote longer responses while obtaining better results. One way to look at this is that
+clarifying before proceeding gives the user an opportunity to determine part of the outcome. Such participation
+may support authorship by making the user’s judgments more operative in an artifact that the model produces.
+Kreminski [27], for instance, describes the dearth of the author as a condition in which generated output
+contains many decisions but the amount of human expressive intent is not commensurate with it, and proposes
+that assistants could invert this by drawing out intentions and helping users refine them [cf. 28]. Learning to
+clarify offers a concrete mechanism for this, since questions can return otherwise automated decisions to users.
+Such exchanges might also encourage users to examine what they want before accepting assistants’ responses,
+conceptually in line with evidence from cognitive forcing functions and overreliance [8]. Relatedly, human writers
+have been shown to sometimes even revise their work to accommodate machine suggestions [60]. Effective
+clarification could help assistants discover constraints their suggestions should satisfy before producing them,
+facilitating a more reciprocal adaptation between writer and assistant. Questions can also draw attention to
+overlooked details or help users recognize what needs to be stated explicitly [61]. Arguably, these stakes extend
+to delegated action broadly: legal questions about responsibility and intent under AI use have the potential to
+make such opportunities to exercise intent even more consequential [4].
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+19
+5.2
+Without clarification, missing intent may leave room for undesirable influence
+Underspecified requests leave assistants reliant on their priors, and these can in turn be undesirable at times.
+For instance, implicit perceptual priors of multimodal language models appear to even include negative stereo-
+types [14]. Under uncertainty, LLM-based agents might also be more susceptible to external influences such as
+nudges and visual presentation [11, 13]. In one study [12], matching product ratings and prices left many LLMs
+strongly susceptible to nudges, but explicit user profiles suppressed these effects. This suggests that resolving
+uncertainty about user preferences for AI assistants may also serve to affect which other signals govern their
+decisions. Future work might thus investigate whether improved clarification also constrains sensitivity to
+external influence in delegated work.
+5.3
+Learning to establish common ground
+Users cannot be realistically expected to anticipate every detail their assistant will need in advance. In our
+task, participants could freely and limitlessly inspect the reference image throughout the interaction, and yet
+still omitted details, enough that an improved clarification policy was able to help significantly. As Vafa et al.
+note [64], model-producible results may not even be reachable by human prompters. Additionally, prompting
+even image generators (where there is readily-apparent visual evidence) can be quite unintuitive, involving
+specialized practices [42, 43]. Questions could thus help draw attention to something overlooked, or recognize
+the need to state some aspect of the task specification explicitly. Clarification can therefore help users decide
+what to communicate, as well as help assistants interpret what they say.
+We could look at this as part of establishing common ground, wherein participants in a conversation work
+together to establish sufficient understanding for the task at hand [15]. This is arguably a broader ambition in the
+history of HCI and AI [7, 18]. As illustrated by Picard, now more than three decades ago [46]:
+“When I say ‘city scene,’ ” said Arthur, “I want a lot of skyscrapers, a skyline; the prototypical city—you know, cars, smog.”
+“When I think of a city,” said Beth, “I think of beautiful cities—with nicely landscaped green areas around each building, and
+colorful people milling about.”
+— Picard, 1995 [46]
+Here, Arthur and Beth use similar words to describe different implicit expectations; this is being revealed
+perhaps in response to a clarification question. Our results suggest that AI assistants can learn to support this
+process through interaction, therefore reducing the need for users to anticipate, in their initial requests, all the
+ways assistants might misunderstand them.
+5.4
+Mutually improving simulation and human-AI interaction
+The transfer effects we observe suggest that simulated users can support learning useful interaction strategies
+even when they imperfectly reproduce human behavior. Prominent recent work has demonstrated the potential
+of such simulations [22, 36, 44]. However, recent findings also document systematic distortions in the behavior of
+such simulations [45]. Such distortions make human evaluation necessary, but can also give it a constructive role
+in bettering the simulations: experiments can help identify which aspects of simulated behavior need refinement
+to support the interactions we wish to learn.
+Our results already suggest one such refinement. Participants answered fewer questions with the trained
+assistant, a pattern our heuristic model of impatience was not designed to capture. We hypothesize that users may
+proceed to generation once they feel they have communicated enough useful information, while continuing to
+interact when important information remains uncommunicated. User patience may thus depend on the perceived
+value of further information exchange. Future simulations could use privileged knowledge of uncommunicated
+
+
+20
+•
+M R, Cherep, Maes, and Singh
+factors to model this dependence. This would allow human participation to inform many simulated interactions,
+reducing the burden for users to supply the training trajectories themselves.
+6
+Limitations
+The value-of-information interpretation we take depends on how faithfully our objective represents what users
+value. We operationalize utility as recovery of initially unspecified details, which is one specific choice, and
+evaluate generated outputs through embedding similarity to a reference. Though these measures help to make
+information acquisition tractable, we acknowledge that they cannot establish the relative value of each recovered
+detail or that greater scores improve subjective satisfaction. We use a heuristic LLM-as-judge importance-
+weighting scheme to help mitigate this and test robustness to nonuniform value, but we believe future efforts will
+need to test other operationalizations which are sensitive to differing users’ and circumstances’ specific goals.
+Importantly, the reference reconstruction task we use with participants gives them a stable target that they can
+inspect throughout the interaction. This makes the whole study tractable, but we acknowledge that delegation may
+often involve uncertain or evolving preferences, degrees of tolerable variation, and decisions that users explicitly
+want their assistants to make. Extending our conclusions to such settings requires further experimentation, and
+we believe this is necessary.
+More broadly, the transfer effects we document are bounded by the single task domain, single assistant
+model, and a comparison with its untrained counterpart. Our human evaluation provides an independent test
+of interaction behavior, but there is a wide space of different simulators, generators, or alternative clarification
+methods one could test; we see our work as the first step on this path, and almost surely not the global optimum.
+Testing such changes is necessary to determine which learned behaviors generalize beyond these conditions into
+the broader space of possible tasks and interactions involving clarification.
+7
+Conclusion
+Even as more task execution work is automated, we have reason to expect that task specification will remain
+challenging. We typically cannot declare in advance everything that might matter to us, and our omissions are
+not random: we often leave out what seems obvious when making a request, even though it may admit several
+reasonable interpretations from the assistant that receives it. The task can therefore be ill-posed even when the
+assistant possesses the capability to execute any of those interpretations. Clarification policies help re-center
+interaction, giving it the role of establishing the desired interpretations. This suggests an ambition well beyond
+completing individual requests: developing systems that become better at making good use of what their users
+know. We invite the community to build on our framework toward assistants that make human knowledge and
+judgment more, not less, consequential as their capabilities grow.
+Acknowledgments
+We received funding from SK Telecom with MIT’s Generative AI Impact Consortium (MGAIC). Research reported
+in this publication was supported by an Amazon Research Award, Fall 2024. Experiments conducted in this
+paper were generously supported via API credits provided by Thinking Machines and Google. MC is supported
+by a fellowship from “la Caixa” Foundation (ID 100010434) with code LCF/BQ/EU23/12010079. The authors
+acknowledge the MIT Office of Research Computing and Data for providing high performance computing
+resources that have contributed to the research results reported within this paper.
+References
+[1] Mohammad Aliannejadi, Hamed Zamani, Fabio Crestani, and W Bruce Croft. 2019. Asking clarifying questions in open-domain
+information-seeking conversations. In Proceedings of the 42nd international acm sigir conference on research and development in
+information retrieval. 475–484.
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+21
+[2] Saleema Amershi, Dan Weld, Mihaela Vorvoreanu, Adam Fourney, Besmira Nushi, Penny Collisson, Jina Suh, Shamsi Iqbal, Paul N
+Bennett, Kori Inkpen, et al. 2019. Guidelines for human-AI interaction. In Proceedings of the 2019 chi conference on human factors in
+computing systems. 1–13.
+[3] Chinmaya Andukuri, Jan-Philipp Fränken, Tobias Gerstenberg, and Noah D Goodman. 2024. Star-gate: Teaching language models to
+ask clarifying questions. arXiv preprint arXiv:2403.19154 (2024).
+[4] Ian Ayres and Jack M Balkin. 2024. The law of AI is the law of risky agents without intentions. U. Chi. L. Rev. Online (2024), 1.
+[5] Jorge Luis Borges. 1960. Del rigor en la ciencia. El hacedor 45 (1960).
+[6] Craig Boutilier. 2002. A POMDP formulation of preference elicitation problems. In AAAI/IAAI. Edmonton, AB, 239–246.
+[7] Susan E Brennan. 1998. The grounding problem in conversations with and through computers. Social and cognitive approaches to
+interpersonal communication 201 (1998), 225.
+[8] Zana Buçinca, Maja Barbara Malaya, and Krzysztof Z Gajos. 2021. To trust or to think: cognitive forcing functions can reduce overreliance
+on AI in AI-assisted decision-making. Proceedings of the ACM on Human-computer Interaction 5, CSCW1 (2021), 1–21.
+[9] Urszula Chajewska, Daphne Koller, and Ronald Parr. 2000. Making rational decisions using adaptive utility elicitation. In Aaai/Iaai.
+363–369.
+[10] Xiuli Chen, Gilles Bailly, Duncan P Brumby, Antti Oulasvirta, and Andrew Howes. 2015. The emergence of interactive behavior: A
+model of rational menu search. In Proceedings of the 33rd annual ACM conference on human factors in computing systems. 4217–4226.
+[11] Manuel Cherep, Pranav M R, Pattie Maes, and Nikhil Singh. 2026. Visual Persuasion: What Influences Decisions of Vision-Language
+Models?. In International Conference on Machine Learning. https://arxiv.org/abs/2602.15278
+[12] Manuel Cherep, Chengtian Ma, Abigail Xu, Maya Shaked, Pattie Maes, and Nikhil Singh. 2025. A Framework for Studying AI Agent
+Behavior: Evidence from Consumer Choice Experiments. arXiv preprint arXiv:2509.25609 (2025).
+[13] Manuel Cherep, Pattie Maes, and Nikhil Singh. 2026. AI agents are sensitive to nudges. Proceedings of the National Academy of Sciences
+123, 25 (2026), e2537030123.
+[14] Manuel Cherep, Pattie Maes, and Nikhil Singh. 2026. Probing Perceptual Priors of MLLMs via Gibbs Sampling with Interpretable
+Generative Controls. arXiv preprint arXiv:2608.27727 (2026).
+[15] Herbert H Clark and Susan E Brennan. 1991. Grounding in communication. (1991).
+[16] Herbert H Clark and Deanna Wilkes-Gibbs. 1986. Referring as a collaborative process. Cognition 22, 1 (1986), 1–39.
+[17] Krzysztof Gajos and Daniel S Weld. 2005. Preference elicitation for interface optimization. In Proceedings of the 18th annual ACM
+symposium on User interface software and technology. 173–182.
+[18] Barbara J Grosz. 1996. Collaborative systems (AAAI-94 presidential address). AI magazine 17, 2 (1996), 67–67.
+[19] Meera Hahn, Wenjun Zeng, Nithish Kannen, Rich Galt, Kartikeya Badola, Been Kim, and Zi Wang. 2024. Proactive Agents for Multi-Turn
+Text-to-Image Generation Under Uncertainty. arXiv:2412.06771 [cs.AI]
+[20] Peter A Heeman and Graeme Hirst. 1995. Collaborating on referring expressions. Computational linguistics 21, 3 (1995), 351–382.
+[21] Lorenz Hetzel, John Dudley, Anna Maria Feit, and Per Ola Kristensson. 2021. Complex interaction as emergent behaviour: Simulating
+mid-air virtual keyboard typing using reinforcement learning. IEEE Transactions on Visualization and Computer Graphics 27, 11 (2021),
+4140–4149.
+[22] John J Horton, Apostolos Filippas, and Benjamin S Manning. 2023. Large language models as simulated economic agents: What can we
+learn from homo silicus? Technical Report. National Bureau of Economic Research.
+[23] Eric Horvitz. 1999. Principles of mixed-initiative user interfaces. In Proceedings of the SIGCHI conference on Human Factors in Computing
+Systems. 159–166.
+[24] Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu Chen. 2022. LoRA:
+Low-Rank Adaptation of Large Language Models. In International Conference on Learning Representations. https://openreview.net/
+forum?id=nZeVKeeFYf9
+[25] Katarzyna Kobalczyk, Nicolas Astorga, Tennison Liu, and Mihaela van der Schaar. 2025. Active task disambiguation with llms. In
+International Conference on Learning Representations, Vol. 2025. 37823–37847.
+[26] Robyn Kozierok and Pattie Maes. 1993. A learning interface agent for scheduling meetings. In Proceedings of the 1st international
+conference on Intelligent user interfaces. 81–88.
+[27] Max Kreminski. 2024. The Dearth of the Author in AI-Supported Writing. arXiv preprint arXiv:2404.10289 (2024).
+[28] Max Kreminski and John Joon Young Chung. 2024. Intent Elicitation in Mixed-Initiative Co-Creativity.
+[29] Lorenz Kuhn, Yarin Gal, and Sebastian Farquhar. 2022. Clam: Selective clarification for ambiguous questions with generative language
+models. arXiv preprint arXiv:2212.07769 (2022).
+[30] Thomas Langerak, Sammy Christen, Mert Albaba, Christoph Gebhardt, and Otmar Hilliges. 2022. MARLUI: Multi-agent reinforcement
+learning for adaptive UIs. arXiv preprint arXiv:2209.12660 (2022).
+[31] Esther Levin and Roberto Pieraccini. 1997. A stochastic model of computer-human interaction for learning dialogue strategies. In Proc.
+Eurospeech 1997. 1883–1886.
+
+
+22
+•
+M R, Cherep, Maes, and Singh
+[32] Belinda Li, Alex Tamkin, Noah Goodman, and Jacob Andreas. 2025. Eliciting human preferences with language models. In International
+Conference on Learning Representations, Vol. 2025. 80984–81013.
+[33] Zhipeng Li, Yi-Chi Liao, and Christian Holz. 2026. Preference-Guided Prompt Optimization for Text-to-Image Generation. In Proceedings
+of the 2026 CHI Conference on Human Factors in Computing Systems. 1–29.
+[34] Diane Litman and James Allen. 1984. A plan recognition model for clarification subdialogues. In 10th International Conference on
+Computational Linguistics and 22nd Annual Meeting of the Association for Computational Linguistics. 302–311.
+[35] Pattie Maes and Robyn Kozierok. 1993. Learning interface agents. In AAAI, Vol. 93. 459–465.
+[36] Benjamin S Manning and John J Horton. 2026. General social agents. Technical Report. National Bureau of Economic Research.
+[37] Carlos Martin, Craig Boutilier, and Ofer Meshi. 2023. Model-free preference elicitation. In NeurIPS 2023 Workshop on Adaptive
+Experimental Design and Active Learning in the Real World.
+[38] Björn Meder and Jonathan D Nelson. 2012. Information search with situation-specific reward functions. Judgment and Decision Making
+7, 2 (2012), 119–148.
+[39] Jonathan D Nelson. 2005. Finding useful questions: on Bayesian diagnosticity, probability, impact, and information gain. Psychological
+review 112, 4 (2005), 979.
+[40] Peter O’Donovan, Aseem Agarwala, and Aaron Hertzmann. 2015. Designscape: Design with interactive layout suggestions. In Proceedings
+of the 33rd annual ACM conference on human factors in computing systems. 1221–1224.
+[41] Yasumasa Onoe, Sunayana Rane, Zachary Berger, Yonatan Bitton, Jaemin Cho, Roopal Garg, Alexander Ku, Zarana Parekh, Jordi
+Pont-Tuset, Garrett Tanzer, Su Wang, and Jason Baldridge. 2024. DOCCI: Descriptions of Connected and Contrasting Images. In ECCV.
+[42] Jonas Oppenlaender. 2024. A taxonomy of prompt modifiers for text-to-image generation. Behaviour & Information Technology 43, 15
+(2024), 3763–3776.
+[43] Jonas Oppenlaender, Rhema Linder, and Johanna Silvennoinen. 2025. Prompting AI art: An investigation into the creative skill of
+prompt engineering. International journal of human–computer interaction 41, 16 (2025), 10207–10229.
+[44] Joon Sung Park, Joseph O’Brien, Carrie Jun Cai, Meredith Ringel Morris, Percy Liang, and Michael S Bernstein. 2023. Generative agents:
+Interactive simulacra of human behavior. In Proceedings of the 36th annual acm symposium on user interface software and technology.
+1–22.
+[45] Tianyi Peng, Melanie Brucks, George Gui, Daniel J Merlau, Grace Jiarui Fan, Malek Ben Sliman, Eric J Johnson, Abdullah Althenayyan,
+Silvia Bellezza, Dante Donati, et al. 2026. Digital twins are funhouse mirrors: Five systematic distortions. Science Advances 12, 36 (2026),
+eaeh8260.
+[46] Rosalind W Picard. 1995. Computer learning of subjectivity. ACM Computing Surveys (CSUR) 27, 4 (1995), 621–623.
+[47] Cheng Qian, Bingxiang He, Zhong Zhuang, Jia Deng, Yujia Qin, Xin Cong, Zhong Zhang, Jie Zhou, Yankai Lin, Zhiyuan Liu, et al. 2024.
+Tell me more! towards implicit user intention understanding of language model driven agents. In Proceedings of the 62nd Annual Meeting
+of the Association for Computational Linguistics (Volume 1: Long Papers). 1088–1113.
+[48] Cheng Qian, Zuxin Liu, Akshara Prabhakar, Jielin Qiu, Zhiwei Liu, Haolin Chen, Shirley Kokane, Heng Ji, Weiran Yao, Shelby Heinecke,
+et al. 2025. Userrl: Training interactive user-centric agent via reinforcement learning. arXiv preprint arXiv:2509.19736 (2025).
+[49] Sudha Rao and Hal Daumé III. 2018. Learning to ask good questions: Ranking clarification questions using neural expected value of
+perfect information. In Proceedings of the 56th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers).
+2737–2746.
+[50] Sudha Rao and Hal Daumé III. 2019. Answer-based adversarial training for generating clarification questions. In Proceedings of the 2019
+Conference of the North American Chapter of the Association for Computational Linguistics: Human Language Technologies, Volume 1
+(Long and Short Papers). 143–155.
+[51] Bertrand Russell. 1923. Vagueness. The Australasian Journal of Psychology and Philosophy 1, 2 (1923), 84–92.
+[52] Edward Sapir. 1921. Language. Cambridge University Press.
+[53] Jost Schatzmann, Blaise Thomson, Karl Weilhammer, Hui Ye, and Steve Young. 2007. Agenda-based user simulation for bootstrapping a
+POMDP dialogue system. In Human Language Technologies 2007: The Conference of the North American Chapter of the Association for
+Computational Linguistics; Companion Volume, Short Papers. 149–152.
+[54] John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. 2017. Proximal policy optimization algorithms. arXiv
+preprint arXiv:1707.06347 (2017).
+[55] Ivan Sekulić, Mohammad Aliannejadi, and Fabio Crestani. 2022. Evaluating mixed-initiative conversational search systems via user
+simulation. In Proceedings of the Fifteenth ACM International Conference on Web Search and Data Mining. 888–896.
+[56] Madhuri Shanbhogue, Zhe Li, Shanfeng Zhang, Gustavo Hernández Ábrego, Shih-Cheng Huang, Aashi Jain, Daniel Salz, Sonam
+Goenka, Chaitra Hegde, Ji Ma, et al. 2026. Gemini Embedding 2: A Native Multimodal Embedding Model from Gemini. arXiv preprint
+arXiv:2605.27295 (2026).
+[57] Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, YK Li, Yang Wu, et al.
+2024. Deepseekmath: Pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 (2024).
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+23
+[58] Omar Sharif, Soroush Vosoughi, and Nikhil Singh. 2026. Improving Information Extraction with Learned Queries. arXiv preprint
+arXiv:2608.31058 (2026).
+[59] Weiyan Shi, Kun Qian, Xuewei Wang, and Zhou Yu. 2019. How to build user simulators to train RL-based dialog systems. In Proceedings
+of the 2019 conference on empirical methods in natural language processing and the 9th international joint conference on natural language
+processing (EMNLP-IJCNLP). 1990–2000.
+[60] Nikhil Singh, Guillermo Bernal, Daria Savchenko, and Elena L Glassman. 2023. Where to hide a stolen elephant: Leaps in creative
+writing with multimodal machine intelligence. ACM Transactions on Computer-Human Interaction 30, 5 (2023), 1–57.
+[61] Nikhil Singh, Lucy Lu Wang, and Jonathan Bragg. 2024. FigurA11y: AI Assistance for Writing Scientific Alt Text. In International
+Conference on Intelligent User Interfaces (IUI). 886–906.
+[62] Satinder Singh, Diane Litman, Michael Kearns, and Marilyn Walker. 2002. Optimizing dialogue management with reinforcement
+learning: Experiments with the NJFun system. Journal of Artificial Intelligence Research 16 (2002), 105–133.
+[63] Kashyap Todi, Gilles Bailly, Luis Leiva, and Antti Oulasvirta. 2021. Adapting user interfaces with model-based reinforcement learning.
+In Proceedings of the 2021 CHI conference on human factors in computing systems. 1–13.
+[64] Keyon Vafa, Sarah Bentley, Jon Kleinberg, and Sendhil Mullainathan. 2026. What’s producible may not be reachable: Measuring the
+steerability of generative models. Advances in Neural Information Processing Systems 38 (2026), 56383–56420.
+[65] Paolo Viappiani and Craig Boutilier. 2010. Optimal bayesian recommendation sets and myopically optimal choice query sets. Advances
+in neural information processing systems 23 (2010).
+[66] Marilyn Walker and Steve Whittaker. 1990. Mixed initiative in dialogue: An investigation into discourse segmentation. In 28th Annual
+Meeting of the Association for Computational Linguistics. 70–78.
+[67] Kuang-Da Wang, Zhao Wang, Wei-Yao Wang, Yotaro Shimose, Jaechang Kim, and Shingo Takamatsu. 2026. Agentic Model Predictive
+Questioning Control in Visual Design. In Forty-third International Conference on Machine Learning.
+[68] Ruiyi Wang, Haofei Yu, Wenxin Zhang, Zhengyang Qi, Maarten Sap, Yonatan Bisk, Graham Neubig, and Hao Zhu. 2024. Sotopia-𝜋:
+Interactive learning of socially intelligent language agents. In Proceedings of the 62nd Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers). 12912–12940.
+[69] Zhijie Wang, Yuheng Huang, Da Song, Lei Ma, and Tianyi Zhang. 2024. Promptcharm: Text-to-image generation through multi-modal
+prompting and refinement. In Proceedings of the 2024 CHI conference on human factors in computing systems. 1–21.
+[70] Ronald J Williams. 1992. Simple statistical gradient-following algorithms for connectionist reinforcement learning. Machine learning 8,
+3 (1992), 229–256.
+[71] Shirley Wu, Michel Galley, Baolin Peng, Hao Cheng, Gavin Li, Yao Dou, Weixin Cai, James Zou, Jure Leskovec, and Jianfeng Gao. 2025.
+Collabllm: From passive responders to active collaborators. arXiv preprint arXiv:2502.00640 (2025).
+[72] An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, et al.
+2025. Qwen3 technical report. arXiv preprint arXiv:2505.09388 (2025).
+[73] Michael Zhang, W Bradley Knox, and Eunsol Choi. 2025. Modeling future conversation turns to teach llms to ask clarifying questions.
+In International Conference on Learning Representations, Vol. 2025. 60722–60742.
+[74] Jie Zou, Mohammad Aliannejadi, Evangelos Kanoulas, Maria Soledad Pera, and Yiqun Liu. 2023. Users meet clarifying questions: Toward
+a better understanding of user interactions for search clarification. ACM transactions on information systems 41, 1 (2023), 1–25.
+
+
+24
+•
+M R, Cherep, Maes, and Singh
+A
+Examples
+Figure 10 shows example images from trained and untrained models, next to the reference and user request
+images. Figure 11 shows one complete episode of the trained assistant, from the request to the judge’s verdicts.
+Reference
+7 details redacted
+User Request
+no questions asked
+Base Model
+Fixed-Asking
+7 questions asked
+Trained Model
+Fixed-Asking
+7 questions asked
+Trained Model
+Open-Asking
+6 questions asked
+12 details redacted
+no questions asked
+12 questions asked
+12 questions asked
+10 questions asked
+8 details redacted
+no questions asked
+8 questions asked
+8 questions asked
+6 questions asked
+8 details redacted
+no questions asked
+8 questions asked
+8 questions asked
+7 questions asked
+9 details redacted
+no questions asked
+9 questions asked
+9 questions asked
+5 questions asked
+9 details redacted
+no questions asked
+9 questions asked
+9 questions asked
+4 questions asked
+Fig. 10. Generated images for six test instances, next to the reference photograph and the image from the request alone.
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+25
+1
+FULL DESCRIPTION
+A long-shot view of the ocean and a
+low-resolution sunrise. The ocean is dark blue,
+and there are small waves forming along it. On
+the right side of the water, the sun's rays can
+be seen. Above the water that is being lit up, a
+large sun can be seen. The sun is round, sits
+close to the water, and is white, along the edge
+of the sun there is an orange line. Underneath
+the sun and on the water are two large boats,
+one on the right and another on the left. Both
+boats are facing right, further to the left of …
+2
+USER REQUEST
+A long-shot view of dark blue water with small
+waves forming along it. On the right side, rays
+are visible. Underneath and to the right, a large
+boat faces right, and further to the left of
+these, a smaller boat is sitting close. All three
+boats are submerged in shade.
+REDACTED DETAILS
+A sunrise is present in the scene. (entity, 0.9)
+The sun is white in color. (attribute, 0.8)
+Two large boats are situated underneath the sun and on the water. (entity, 0.8)
+The ocean is present in the scene. (entity, 0.9)
+A large sun is positioned above the water that is being lit up. (relation, 0.9)
+The sun is round in shape. (attribute, 0.8)
+The sun sits close to the water. (relation, 0.8)
+An orange line runs along the edge of the sun. (attribute, 0.7)
+The sky is bright orange along the bottom. (attribute, 0.8)
+The sunrise has a low-resolution appearance. (attribute, 0.7)
+One large boat is on the left. (layout, 0.6)
+The top portion of the sky is slightly darker. (attribute, 0.7)
+3
+CLARIFICATION
+What elements should be included in the scene's composition, such as background elements, other objects, or
+specific details about the boats, rays, or the surrounding environment?
+ASSISTANT QUESTION 1
+A low-resolution white sunrise with an orange outline
+should sit close to the water.
+USER ANSWER 1
+What should be the main subject or any specific elements in the foreground, such as people, animals, or additional
+details about the water, waves, or the boats' positions and features?
+ASSISTANT QUESTION 2
+There are three boats submerged in shade, with two
+large ones facing right and a smaller one to their left.
+USER ANSWER 2
+What should be the visual style, such as color palette, texture, lighting effects, or any specific details about the rays,
+waves, or the overall atmosphere and composition of the scene?
+ASSISTANT QUESTION 3
+The ocean is dark blue with small waves, and the sky
+has a bright orange bottom and a slightly darker top.
+USER ANSWER 3
+What should be included in the scene's foreground elements, such as any specific details about the boats' features,
+the rays' appearance, the small waves, or any additional elements like people, animals, or text that should be present
+in the image?
+ASSISTANT QUESTION 4
+The sun's rays are visible on the right side of the water.
+USER ANSWER 4
+What specific details should be included in the scene's main subject, such as any figures, animals, text, or additional
+elements like the horizon, depth of field, or any specific atmospheric effects like reflections, fog, or clouds?
+ASSISTANT QUESTION 5
+It is a long-shot view.
+USER ANSWER 5
+What specific details should be included in the scene's other elements, such as any text, labels, special effects, or
+additional visual components like the surrounding environment, objects in the water, or any specific details about
+the boats' positions, sizes, or features?
+ASSISTANT QUESTION 6
+The two large boats are positioned on the right and left
+of the water underneath the sun, and both are facing
+right.
+USER ANSWER 6
+4
+FINAL OUTPUT
+A long-shot view of dark blue
+water with small waves
+forming along its surface,
+featuring a low-resolution white
+sunrise with an orange outline
+close to the water's edge. On
+the right side, rays are visible,
+illuminating the water as two
+large boats, positioned on
+either side of the water and
+beneath the sun, both facing …
+5
+JUDGE
+✓Does the sunrise have a low-resolution
+appearance?
+✓Is a large sun positioned above the lit-up
+water?
+✓Is there an orange line along the edge of
+the sun?
+✓Are there two large boats situated
+underneath the sun and on the water?
+✓Is the sky bright orange along the
+bottom?
+✓Is the top portion of the sky slightly
+darker?
+✓Is the ocean present in the scene?
+✓Is a sunrise present in the scene?
+✗Is the sun round in shape?
+✓Does the sun sit close to the water?
+✓Is the sun white in color?
+✗Is one large boat on the left?
+UTILITY RECOVERED
+0.83 (details weighed equally)
+0.85 (details weighed by importance)
+Fig. 11. One test episode of the patient-trained assistant in open-asking mode, from the reference image to the judge’s
+verdicts.
+
+
+26
+•
+M R, Cherep, Maes, and Singh
+B
+Instance Synthesis
+Every instance is built from a single DOCCI description [41], which passes through the decomposition model
+and then the redaction model. Both are Gemini 3.5 Flash-Lite, prompted as shown in Appendix I. All random
+choices are seeded by the source, so that the same source always yields the same instance. Table 1 shows the
+resulting request and hidden details for one test instance (the caution sign of Figure 10).
+Sources. We take the first 2,000 DOCCI descriptions of at least 400 characters. Each description is paired with
+the photograph it describes, which serves as the reference image.
+Decomposition. The decomposition model reads the full description 𝑠★and returns the details D as structured
+output. For every detail, it produces a self-contained sentence, an importance weight in [0, 1], and the binary
+check that the judge later answers. We drop sources whose decomposition yields fewer than 𝐾+ 5 = 20 details,
+so that every instance keeps at least five details after hiding up to 𝐾of them. This removes 1,521 of the 2,000
+sources and leaves 479 instances with between 20 and 45 details each.
+Redaction. For each instance, we first draw the hidden count 𝑘∼Uniform{1, . . . , min(𝐾,𝑚−1)} and then draw
+𝑘details one at a time without replacement, with probability proportional to max(𝑤𝑖, 0.05). Important details are
+thus hidden more often, but no detail is unreachable. Across the 479 instances, this hides 3,791 details in total (7.9
+per instance), spread almost evenly over the counts 1 to 15 with between 23 and 39 instances per count.
+Request. The redaction model receives the full description together with the texts of the hidden details, and
+writes the request 𝑥: one to three sentences in the register of a real user request that state every kept detail and
+none of the hidden ones. In Table 1, for instance, the request states the 14 kept details of its source and none of
+the 8 hidden ones. An instance whose request came back empty would have been dropped, but this did not occur.
+Splits. We assign sources to the training, validation, and test splits with shares of 0.6, 0.2, and 0.2, using a
+seeded hash of the source id. This yields 290, 111, and 78 instances, respectively.
+Table 1. The request and the hidden details of one test instance.
+Request
+An outdoor medium shot looks up at a yellow, diamond-shaped caution sign attached to a large, dark vertical pole stretching
+from top to bottom. The sign displays shadows and light reflections. A light pole is in the bottom corner of the shot with two
+birds sitting on it during daytime.
+Hidden detail (𝛿𝑖)
+Importance (𝑤𝑖)
+Check (𝜒𝑖)
+The caution sign is weathered.
+0.6
+Is the caution sign weathered?
+The caution sign has a black-line outline.
+0.7
+Does the caution sign have a black-line outline?
+The caution sign features a black horse and buggy.
+0.9
+Does the caution sign feature a black horse and
+buggy?
+The black horse and buggy on the sign are facing
+the right.
+0.7
+Are the horse and buggy facing the right?
+The background consists of a blue sky.
+0.7
+Is the background a blue sky?
+A tree is present in the scene.
+0.5
+Is a tree present in the scene?
+The light pole extends to the left in the bottom cor-
+ner of the shot.
+0.7
+Does the light pole extend to the left in the bottom
+corner of the shot?
+The two birds are sitting apart from each other on
+the light pole.
+0.6
+Are the two birds sitting apart on the light pole?
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+27
+C
+Training and Evaluation Details
+This appendix provides the implementation details behind Sections 3.2 and 3.4. We describe how the assistant
+and the environment models are called, how the reward is computed, the training hyperparameters (Table 2),
+how we selected checkpoints, and the settings used for evaluation and for rendering images.
+Assistant calls. The assistant is Qwen3-8B, which we serve and train through the Tinker API using the model’s
+recommended chat template with its reasoning mode on. Each call samples at most 4,096 tokens, shared between
+the reasoning and the visible text. If a completion hits this cap or leaves a reasoning tag in its visible text, we
+discard it and sample once more. Only the visible text enters the history and reaches the user and the judge,
+while the reasoning is stored with the episode.
+Environment calls. The decomposition model, the redaction model, the user simulator, and the judge each make
+one structured call to Gemini 3.5 Flash-Lite. The system message consists of the prompt in Appendix I followed
+by the list of input fields the call receives, the user message carries the field values under the same names, and
+the response is JSON that we validate against the output schema (whose fields are listed with each prompt). A
+failed call is retried up to three times with exponential backoff. In our runs, the simulator ran out of retries in
+only ten of the roughly 150,000 training episodes.
+Judge. For every hidden detail, the judge receives its check 𝜒𝑖together with the composed description 𝑦alone,
+and returns whether 𝑦states or clearly entails the fact. The 𝑘checks of an episode run concurrently. We then
+compute 𝑢rec both under the importance weights (floored at 0.05, as in the redaction sampling) and under uniform
+weights.
+Importance and uniform weights. Every evaluation computes 𝑢rec under both weightings, and the two move
+closely together. Across the 15 evaluations of the test split in Section 3.4 (one per combination of assistant, asking
+mode, and user, 1,170 episodes in total), the mean under importance weights exceeds the mean under uniform
+weights by 0.007 on average and by at most 0.014. Within an evaluation, the two values of an episode correlate at
+0.985 or above (median 0.994), and ranking the 15 evaluations by either mean gives the same order. The validation
+split gives the same picture, with a gap of at most 0.012 and again an identical ranking. The importance-weighted
+value runs slightly higher because the assistants recover the heavier hidden details somewhat more often than
+the lighter ones. The choice of weighting therefore changes no comparison between assistants, modes, or users.
+Policy gradient. Table 2 lists the settings shared by both training runs, which differ only in the user simulator.
+Each iteration draws 𝑀= 8 training instances with a seeded sampler, so that a resumed run continues the same
+schedule, and collects 𝑔= 32 episodes per instance. Under the impatient user, the patience 𝑝is drawn once per
+instance and iteration from the seed, the iteration, and the instance id, so that all 32 rollouts of a group face the
+same patience and the luck of the draw does not enter the group-centered advantage. Every rollout is judged, its
+reward is 𝑢rec under uniform weights, and its advantage is 𝐴𝑗= 𝑟𝑗−1
+𝑔
+Í𝑔
+𝑗′=1 𝑟𝑗′, the reward minus the mean of its
+group. The group mean serves as a baseline: it estimates the reward the current policy earns on the instance,
+including the share of hidden details the assistant tends to state from 𝑥alone, so that each rollout is scored
+against the other rollouts on the same instance rather than against rollouts on easier or harder instances. Which
+of those details a particular rollout happens to state, and how well the simulator answers it, still vary from rollout
+to rollout. Centering does not remove this variation, which stays in 𝐴𝑗as zero-mean noise, but subtracting a
+baseline does not change the direction of the expected gradient and lowers its variance [70], so the update favors
+questions that recovered more than the group average.
+
+
+28
+•
+M R, Cherep, Maes, and Singh
+We then take one step on the LoRA parameters 𝜃(rank 32) [24] that descends the importance-sampled
+policy-gradient loss
+L(𝜃) = −
+∑︁
+𝑗
+𝐴𝑗
+∑︁
+𝑡∈T𝑗
+𝜋𝜃(𝑤𝑡| 𝑐𝑡)
+𝜋𝜃old(𝑤𝑡| 𝑐𝑡),
+(6)
+where 𝑗runs over the 𝑀𝑔episodes of the iteration, T𝑗over every token the assistant sampled in episode 𝑗(in its
+questions and its description, reasoning included), 𝑤𝑡is such a token, 𝑐𝑡the prompt and the tokens before it, and
+𝜃old are the weights the episodes were sampled from. Prompt tokens, which include the user’s answers, carry no
+weight. Because the policy is updated once per batch, 𝜃= 𝜃old when the gradient is taken and every ratio equals
+one, so the update reduces to the policy gradient Í
+𝑗𝐴𝑗
+Í
+𝑡∈T𝑗∇𝜃log 𝜋𝜃(𝑤𝑡| 𝑐𝑡) (i.e., REINFORCE with a group
+baseline), and the ratio only corrects for numerical differences between the sampling and the training weights.
+The loss has no clipping of the ratio as in PPO [54], no KL penalty toward the base model, no entropy bonus, and
+no length normalization: it sums over tokens, so an episode’s advantage is applied once for each token it sampled.
+The step is an Adam step with learning rate 4 × 10−5 and otherwise the defaults of the Tinker API (𝛽1 = 0.9,
+𝛽2 = 0.95, 𝜖= 10−12, no weight decay, no gradient clipping). A checkpoint is saved every five iterations.
+Table 2. Training settings shared by the patient-trained and the impatient-trained assistant.
+Base model
+Qwen3-8B, reasoning mode on
+Adapter
+LoRA, rank 32
+Optimizer
+Adam, learning rate 4 × 10−5, 𝛽1 = 0.9, 𝛽2 = 0.95, 𝜖= 10−12
+Regularization
+no weight decay, no gradient clipping
+Instances per iteration 𝑀
+8
+Rollouts per instance 𝑔
+32
+Asking mode in training
+fixed-asking, 𝐵= 𝑘
+Reward 𝑟(𝜏)
+𝑢rec under uniform weights
+Advantage 𝐴𝑗
+reward minus the group mean, no normalization
+Loss
+importance-sampled policy gradient (Equation (6)), one step per batch
+Omitted terms
+no ratio clipping, no KL penalty, no entropy bonus, no length normalization
+Credited tokens
+every sampled token of every assistant call, reasoning included
+Sampling cap
+4,096 tokens per call
+Iterations
+283 (patient), 300 (impatient)
+Checkpoints
+every 5 iterations
+Random seed
+42
+Checkpoint selection. We evaluate every checkpoint in fixed-asking mode on the validation split, against the
+user it was trained with (Figure 12). The patient run was stopped at iteration 283 when the reasoning length
+started to grow (about 1,300 tokens per call at iteration 275 and 2,200 at iteration 282). We take iteration 219, the
+earliest checkpoint on the plateau, which reaches a validation 𝑢rec of 0.740 under importance weights and 0.732
+under uniform weights at 7.28 answered questions (i.e., the mean hidden count of the validation split, since the
+patient user answers all 𝑘questions). The impatient run trained for the full 300 iterations. Its iteration 294 scores
+best under the impatient user, with 0.647 and 0.643 at 4.75 answered questions, and reaches 0.717 and 0.711 at
+7.28 answered questions under the patient user.
+Evaluation. An evaluation runs one assistant over one split using the prompts, judge, and instances of training.
+Under the impatient user, the patience 𝑝is drawn per instance from the seed and the instance id, so that it is
+identical for every assistant and mode and comparisons across assistants are paired.
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+29
+Training
+Validation
+0
+100
+200
+300
+0
+100
+200
+300
+0%
+25%
+50%
+75%
+100%
+Training step
+Utility recovery
+Patient-trained
+Impatient-trained
+Fig. 12. Mean training reward per iteration and validation recovery of the checkpoints saved every five iterations, for each
+run against the user it was trained with.
+Images and embeddings. We render both the request and the composed description of every episode once with
+Gemini 3.1 Flash Image at 512 × 512 pixels (aspect ratio 1:1), with the instruction of Appendix I appended and up
+to three retries. Similarities are cosine similarities between Gemini Embedding 2 [56] embeddings of these texts
+and images and those of the DOCCI description and photograph, within and across modalities.
+D
+User Simulator Audit
+Table 3. Audit of the simulator’s answers in fixed-asking mode under the patient user.
+Patient-trained
+Impatient-trained
+Hidden details per answer
+1.06
+0.74
+Answers with two or more hidden details
+31%
+20%
+Stated details asked for specifically
+18%
+15%
+Stated details asked for by topic
+81%
+83%
+Stated details volunteered
+1%
+3%
+Deflected answers
+5%
+15%
+No-preference answers
+15%
+17%
+The simulator is instructed to answer only what was asked, one detail at a time, to deflect open-ended questions,
+and to state no preference where the description is silent. To check that the trained assistants earn their recovery
+through their questions rather than by exploiting the simulator (e.g., by asking broad questions that draw out
+several details at once), we audited its answers with a judge (Gemini 3.5 Flash-Lite).
+Of the 15 evaluation conditions described in Section 3.4, we audit the two in which the patient-trained and the
+impatient-trained assistant run in fixed-asking mode under the patient user, the setting in which every question
+is answered and recovery is highest. This gives one answer per hidden detail of the 78 test instances, i.e., 667
+answers per assistant. For each answer, the judge receives the full description and the list of details, and reports
+
+
+30
+•
+M R, Cherep, Maes, and Singh
+which hidden details it states or entails, and whether the question asked for each of them specifically, by topic
+(i.e., naming the entity or aspect without naming the property), or not at all.
+Table 3 summarizes the verdicts. Answers stay on topic: nearly every hidden detail that an answer states was
+asked for, either specifically or by topic, and volunteered details are rare. This suggests that the trained assistants
+do not simply exploit the simulator, and that what they recover, they largely recover by asking for it.
+E
+User Study Materials
+The study ran as a web application, Picture Match, which participants opened from Prolific with their Prolific ID
+attached. Below we reproduce what participants read, in the order they read it. Figure 13 shows the round screen.
+Consent. The landing page is headed “Recreate a photo with an AI image tool” and says: “You will try to
+recreate photos with an AI image generator that can ask you questions before it draws. The whole study takes
+about 45 minutes.” and, below it, “The session ends 90 minutes after you start, so please finish it in one sitting.”
+The consent form then lists the following:
+• Study purpose. We study how well AI assistants help people get the image they have in mind.
+• What you will do. In each round you see a target photo, write a prompt for it the way you would in an
+image tool, answer the assistant’s questions for as long as you like, and receive a generated image.
+• Data collected. The text you type, the assistant’s questions, the generated images, timestamps, your
+answers to a few screening questions, and your Prolific ID for payment. No other personal information.
+• Duration. About 45 minutes.
+• Payment. You receive the base payment for completing the study, plus a bonus that depends on how
+closely each image you generate matches its target, scored after the study.
+• Voluntary participation. You may stop at any time by closing this tab, but only completed sessions are
+compensated.
+It closes with “By clicking ‘I consent’ you confirm that you are at least 18 years old, that you have read the
+information above, and that you agree to take part and to the use of your anonymized responses for research.”
+Screening. Three yes/no questions follow, introduced as “These decide whether the study will work well for
+you.” Answering no to any of them ends the session.
+(1) Are you 18 years old or older?
+(2) Are you a native English speaker?
+(3) Is your vision normal or corrected to normal (glasses or contacts are fine), including normal color vision?
+Instructions. The instructions are headed “How it works”:
+• Look at the target. Each round shows you a photo. Your goal is to get the AI to generate an image as
+close to that photo as you can.
+• Write a prompt, then answer questions. Type what you want, the way you would in an image tool.
+The assistant then asks you questions about the picture, one at a time. Answer from what you see, as
+specifically as you like.
+• Stop when you are ready. Click Stop and generate the image whenever you think the assistant knows
+enough, or keep answering, up to 15 questions. The image is generated once, at the end, and you cannot
+go back to it.
+Below them, a highlighted box says “Your payment depends on how well you perform the task.”, followed by the
+payment note of the consent form.
+Comprehension check. Participants then answer three multiple-choice items under “Check your understanding”,
+which are repeated until all three are correct. The correct option is shown in italics.
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+31
+(1) When is the image generated? After every answer I give / Once, when I stop or the assistant runs out of
+questions / Before the assistant asks anything.
+(2) Can you stop answering questions before the assistant runs out of them? Yes, at any time / No, I have to
+answer all of them / Only after the first five.
+(3) What does your bonus depend on? How many questions I answer / How closely each generated image
+matches its target / How quickly I finish.
+Round screen. Figure 13 shows the round screen. The target is shown with the instruction “Get the assistant to
+generate an image as close to this photo as you can. Your bonus depends on how well you do.” The participant
+writes the request, answers the assistant’s questions one at a time, and can stop and generate the image after any
+question. When the cap is reached, the screen says “The assistant has no more questions.” After the image is
+shown, the screen notes that the match score is calculated after the study. The end screen shows the six target
+and result pairs, asks “Anything you want to tell us? (optional)”, and returns the participant to Prolific.
+Assistant and image model. Both models use the ask and compose prompts of Appendix I with the call structure
+of Appendix C, with reasoning mode on and 4,096 sampled tokens per call. The decide prompt is not used, since
+the participant decides when to stop. The final description is rendered with the image model and settings of
+Appendix C. Every model call logs its reasoning tokens, its visible tokens, and its latency.
+Fig. 13. The round screen of the study, with the target on the left and the conversation on the right.
+F
+Auto-Interpretability Results
+Below we report themes from the Matryoshka summarization [11, 58] of the human-study rounds (see Section 4.2).
+For each reference image played under both models, a language model describes how the trained-model questions,
+and separately the participants’ answers, differ from those of the base model, and these descriptions are then
+clustered and summarized recursively into top/root-level themes using Gemini 3.8 Flash. Table 4 lists themes for
+the assistant’s questions and Table 5 those for the participants’ answers, each with example quotations from
+the trained-model rounds followed by the base-model quotations they are contrasted with. Note: we report
+second-from-top-level themes, in order to balance capturing variation with meaningful abstraction.
+
+
+32
+•
+M R, Cherep, Maes, and Singh
+Table 4. Second-from-top-level themes of how the trained vs. base assistant’s questions differ.
+Theme
+Description
+More questions asking
+what should be included
+“What details should be included in the background elements”; “What specific elements should be included
+in the scene composition,”; “What should be included in the depiction of the elephant sculpture”, compared
+with “What color are the lanterns?”; “What color palette or textures should emphasize the urban
+atmosphere,”; “What time of day is it during daylight?”.
+Fewer polar or binary
+questions
+“What should be included in the background or any other elements”; “What should be included in the scene
+besides”; “What should be included in the foreground”, compared with “Is the translucent sunlight ray
+hitting the framed calligraphy”; “Is the toy car and horse positioned on”; “Are the castles and purple lions
+part of the flag’s design”.
+More questions opening
+with What specific
+“What specific details should be included in the visual style”; “What specific details should be included for
+the buildings”; “What specific elements should be included”, compared with “What atmosphere or time of
+day would you like”; “What time of year is this scene set?”; “Could you clarify which part of the bed”.
+Less questions starting with
+Is or Are
+“What elements should be included in the scene”; “What should be included in the scene”; “What should be
+included in the composition,”, compared with “Is the sun positioned directly above the main boat”; “Is the
+statue meant to represent a Roman or Greek figure”; “Is the phrase "u can" intended to be "you can"”.
+Table 5. Second-from-top-level themes of how participants’ answers to the trained vs. base assistant differ.
+Theme
+Description
+Longer full sentences and
+descriptions
+“Both cats are sitting upright looking forward toward the camera.”; “A high-resolution, clear, and detailed
+digital photograph emphasizing natural textures, vibrant colors,”; “The boat is a fishing boat. There is only
+rippling water in”, compared with “Brown table”; “about the same shade of bright lite green”; “Looks like a
+red container”.
+Less hedging and
+speculative wording
+“The background is medium colored wood”; “The foreground includes a paved sidewalk and a dark metal
+fence”; “two dark brick chimneys rising from the roof”, compared with “Im not sure but maybe the left”; “I
+think maybe gothic revival”; “It looks like there could be a chimney”.
+More spelling mistakes and
+typos
+“bright perhaps flourescent.”; “liver shiny lok handle attached to the fence”; “Th walls are a deep”, compared
+with “I purple dial lock behind the pink main one.”; “stationary decorative sculpture.”; “standalone carousel
+rooster sculpture displayed on its own,”.
+Longer descriptions using
+complete sentences
+“The composition is almost entirely filled with dense, layered tree branches”; “The left side of the house has
+a projecting bay section”; “The mattress itself is covered with white soft bed sheets and comforter,”,
+compared with “warm lights, orange/yellow”; “light blue”; “Bed head rest and the front bed edge”.
+G
+Regression Tables
+Below we report the full regression tables behind the contrasts of Section 4. All models follow the estimation
+approach of Section 3.4, and coefficient 𝑝-values are unadjusted, unlike the BH-adjusted contrasts in the figures.
+G.1
+Model Results
+Tables 6 to 9 are the tables for the simulated evaluation, covering recovered utility, the within-modality and
+cross-modal similarity gains, and the dialogue measures. All use source-image fixed effects and source-image-
+clustered standard errors, where the base model under fixed asking with the patient user is the reference level.
+The additive, two-way, and three-way columns add interactions between assistant, asking mode, and user, and
+the remaining columns add the dialogue measures as covariates.
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+33
+Table 6. Regressions of recovered utility in the simulated evaluation.
+Dependent Variable:
+Equal-weighted recovery
+Specification
+Additive Two-way Three-way + Count + Q. length + A./output
+Model:
+(1)
+(2)
+(3)
+(4)
+(5)
+(6)
+Variables
+Patient-trained
+0.496∗∗∗∗
+0.502∗∗∗∗
+0.506∗∗∗∗
+0.506∗∗∗∗
+0.391∗∗∗∗
+0.277∗∗∗∗
+(0.024)
+(0.033)
+(0.034)
+(0.034)
+(0.048)
+(0.041)
+Impatient-trained
+0.455∗∗∗∗
+0.475∗∗∗∗
+0.487∗∗∗∗
+0.487∗∗∗∗
+0.318∗∗∗∗
+0.219∗∗∗∗
+(0.022)
+(0.030)
+(0.032)
+(0.032)
+(0.052)
+(0.051)
+Open
+-0.113∗∗∗∗-0.165∗∗∗∗
+-0.155∗∗∗∗
+0.210∗∗∗
+0.143∗
+0.107∗
+(0.017)
+(0.024)
+(0.024)
+(0.057)
+(0.055)
+(0.052)
+Impatient
+-0.053∗∗∗
+-0.004
+0.007
+0.105∗∗
+0.090∗∗
+0.082∗∗
+(0.013)
+(0.024)
+(0.030)
+(0.032)
+(0.033)
+(0.030)
+Patient-trained × Open
+0.078∗
+0.072
+-0.210∗∗
+-0.146∗
+-0.105
+(0.035)
+(0.044)
+(0.063)
+(0.062)
+(0.055)
+Impatient-trained × Open
+0.048
+0.022
+-0.183∗∗
+-0.124∗
+-0.117∗
+(0.033)
+(0.041)
+(0.054)
+(0.057)
+(0.054)
+Patient-trained × Impatient
+-0.092∗∗
+-0.098∗
+-0.098∗
+-0.084
+-0.082∗
+(0.034)
+(0.041)
+(0.041)
+(0.043)
+(0.040)
+Impatient-trained × Impatient
+-0.086∗∗
+-0.112∗∗
+-0.112∗∗
+-0.105∗∗
+-0.106∗∗
+(0.027)
+(0.039)
+(0.040)
+(0.039)
+(0.036)
+Open × Impatient
+0.020
+-0.002
+-0.102∗∗
+-0.089∗
+-0.081∗
+(0.029)
+(0.035)
+(0.035)
+(0.036)
+(0.035)
+Patient-trained × Open × Impatient
+0.013
+0.063
+0.055
+0.046
+(0.058)
+(0.051)
+(0.053)
+(0.050)
+Impatient-trained × Open × Impatient
+0.052
+0.068
+0.066
+0.064
+(0.055)
+(0.053)
+(0.052)
+(0.048)
+Any answer
+0.121∗∗
+0.017
+-0.117∗∗
+(0.036)
+(0.043)
+(0.041)
+Questions
+0.034∗∗∗∗
+0.027∗∗∗∗
+0.029∗∗∗∗
+(0.004)
+(0.003)
+(0.003)
+Words/question
+0.005∗∗∗∗
+0.004∗∗∗
+(0.0010)
+(0.0010)
+Words/answer
+0.013∗∗∗∗
+(0.003)
+Output words / 100
+0.029
+(0.025)
+Fixed-effects
+Source image
+Yes
+Yes
+Yes
+Yes
+Yes
+Yes
+Fit statistics
+Observations
+936
+936
+936
+936
+936
+936
+Within R2
+0.563
+0.570
+0.570
+0.653
+0.665
+0.689
+Clustered (Source image) standard-errors in parentheses
+Signif. Codes: ****: 1e-04, ***: 0.001, **: 0.01, *: 0.05
+
+
+34
+•
+M R, Cherep, Maes, and Singh
+Table 7. Regressions of the text-to-text and image-to-image similarity gains in the simulated evaluation.
+Dependent Variables:
+Text–text
+Image–image
+Specification
+Additive Three-way + A./output Additive Three-way + A./output
+Model:
+(1)
+(2)
+(3)
+(4)
+(5)
+(6)
+Variables
+Patient-trained
+0.171∗∗∗∗
+0.157∗∗∗∗
+0.120∗∗∗∗
+0.053∗∗∗∗
+0.050∗∗∗∗
+0.032∗∗∗
+(0.014)
+(0.015)
+(0.016)
+(0.006)
+(0.007)
+(0.008)
+Impatient-trained
+0.100∗∗∗∗
+0.112∗∗∗∗
+0.090∗∗∗∗
+0.029∗∗∗∗
+0.032∗∗∗∗
+0.017
+(0.012)
+(0.015)
+(0.018)
+(0.005)
+(0.007)
+(0.009)
+Open
+-0.042∗∗∗∗
+-0.058∗∗∗∗
+0.019
+-0.016∗∗∗∗
+-0.021∗∗∗
+0.006
+(0.006)
+(0.011)
+(0.018)
+(0.004)
+(0.006)
+(0.009)
+Impatient
+-0.012∗∗
+0.006
+0.039∗∗∗∗
+-0.005∗
+0.004
+0.018∗∗∗
+(0.004)
+(0.009)
+(0.009)
+(0.002)
+(0.004)
+(0.005)
+Patient-trained × Open
+0.038∗∗
+-0.018
+0.013
+-0.006
+(0.013)
+(0.018)
+(0.007)
+(0.009)
+Impatient-trained × Open
+0.002
+-0.022
+0.002
+-0.003
+(0.013)
+(0.021)
+(0.008)
+(0.011)
+Patient-trained × Impatient
+-0.018
+-0.017
+-0.011
+-0.010
+(0.009)
+(0.009)
+(0.006)
+(0.006)
+Impatient-trained × Impatient
+-0.045∗∗∗
+-0.044∗∗∗
+-0.017∗∗
+-0.017∗∗
+(0.012)
+(0.012)
+(0.006)
+(0.006)
+Open × Impatient
+-0.012
+-0.046∗∗∗
+-0.006
+-0.021∗∗∗
+(0.010)
+(0.011)
+(0.005)
+(0.006)
+Patient-trained × Open × Impatient
+0.017
+0.033∗
+0.007
+0.014
+(0.015)
+(0.014)
+(0.008)
+(0.009)
+Impatient-trained × Open × Impatient
+0.038∗
+0.042∗
+0.017
+0.019∗
+(0.017)
+(0.016)
+(0.010)
+(0.009)
+Any answer
+-0.060∗
+-0.035∗∗
+(0.024)
+(0.011)
+Questions
+0.013∗∗∗∗
+0.005∗∗∗∗
+(0.001)
+(0.0008)
+Words/question
+0.0003
+0.0002
+(0.0004)
+(0.0002)
+Words/answer
+0.003∗∗
+0.001∗∗
+(0.0010)
+(0.0004)
+Output words / 100
+-0.008
+-0.0004
+(0.011)
+(0.005)
+Fixed-effects
+Source image
+Yes
+Yes
+Yes
+Yes
+Yes
+Yes
+Fit statistics
+Observations
+936
+936
+936
+936
+936
+936
+Within R2
+0.476
+0.487
+0.578
+0.272
+0.282
+0.386
+Clustered (Source image) standard-errors in parentheses
+Signif. Codes: ****: 1e-04, ***: 0.001, **: 0.01, *: 0.05
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+35
+Table 8. Regressions of the text-to-image and image-to-text similarity gains in the simulated evaluation.
+Dependent Variables:
+Text–image
+Image–text
+Specification
+Additive Three-way + A./output Additive Three-way + A./output
+Model:
+(1)
+(2)
+(3)
+(4)
+(5)
+(6)
+Variables
+Patient-trained
+0.066∗∗∗∗
+0.057∗∗∗∗
+0.043∗∗∗∗
+0.079∗∗∗∗
+0.074∗∗∗∗
+0.046∗∗∗∗
+(0.007)
+(0.007)
+(0.008)
+(0.008)
+(0.008)
+(0.009)
+Impatient-trained
+0.042∗∗∗∗
+0.044∗∗∗∗
+0.038∗∗∗∗
+0.054∗∗∗∗
+0.059∗∗∗∗
+0.033∗∗
+(0.006)
+(0.007)
+(0.009)
+(0.007)
+(0.008)
+(0.010)
+Open
+-0.017∗∗∗∗
+-0.025∗∗∗
+-0.0009
+-0.021∗∗∗∗
+-0.027∗∗∗
+0.001
+(0.003)
+(0.006)
+(0.010)
+(0.004)
+(0.007)
+(0.011)
+Impatient
+-0.004∗
+0.002
+0.017∗∗∗
+-0.007∗∗
+0.004
+0.021∗∗∗
+(0.002)
+(0.004)
+(0.004)
+(0.003)
+(0.005)
+(0.005)
+Patient-trained × Open
+0.019∗∗
+0.002
+0.017∗
+-0.0010
+(0.007)
+(0.010)
+(0.009)
+(0.011)
+Impatient-trained × Open
+0.004
+0.003
+0.0005
+-0.0007
+(0.007)
+(0.012)
+(0.010)
+(0.014)
+Patient-trained × Impatient
+-0.004
+-0.003
+-0.013
+-0.011
+(0.005)
+(0.005)
+(0.007)
+(0.007)
+Impatient-trained × Impatient
+-0.017∗∗∗
+-0.017∗∗
+-0.020∗∗
+-0.020∗∗
+(0.005)
+(0.005)
+(0.007)
+(0.006)
+Open × Impatient
+-0.007
+-0.021∗∗∗
+-0.011
+-0.027∗∗∗
+(0.005)
+(0.006)
+(0.006)
+(0.007)
+Patient-trained × Open × Impatient
+0.004
+0.012
+0.011
+0.018
+(0.007)
+(0.007)
+(0.010)
+(0.010)
+Impatient-trained × Open × Impatient
+0.019∗
+0.021∗∗
+0.020
+0.022∗
+(0.008)
+(0.007)
+(0.012)
+(0.011)
+Any answer
+-0.036∗∗
+-0.050∗∗∗
+(0.012)
+(0.014)
+Questions
+0.005∗∗∗∗
+0.006∗∗∗∗
+(0.0008)
+(0.0009)
+Words/question
+8.09 × 10−5
+0.0004
+(0.0002)
+(0.0002)
+Words/answer
+0.001∗∗
+0.002∗∗∗
+(0.0004)
+(0.0005)
+Output words / 100
+-0.004
+-0.0008
+(0.005)
+(0.006)
+Fixed-effects
+Source image
+Yes
+Yes
+Yes
+Yes
+Yes
+Yes
+Fit statistics
+Observations
+936
+936
+936
+936
+936
+936
+Within R2
+0.356
+0.368
+0.451
+0.367
+0.376
+0.469
+Clustered (Source image) standard-errors in parentheses
+Signif. Codes: ****: 1e-04, ***: 0.001, **: 0.01, *: 0.05
+
+
+36
+•
+M R, Cherep, Maes, and Singh
+Table 9. Regressions of the dialogue measures in the simulated evaluation.
+Dependent Variables:
+Questions
+Question words
+Answer words
+Output words
+Specification
+Additive
+Three-way Additive
+Three-way
+Model:
+(1)
+(2)
+(3)
+(4)
+(5)
+(6)
+Variables
+Patient-trained
+2.81∗∗∗∗
+218.9∗∗∗∗
+219.3∗∗∗∗
+82.1∗∗∗∗
+82.4∗∗∗∗
+4.05
+(0.201)
+(14.8)
+(16.4)
+(4.62)
+(5.77)
+(3.30)
+Impatient-trained
+1.63∗∗∗∗
+218.0∗∗∗∗
+314.4∗∗∗∗
+50.1∗∗∗∗
+54.0∗∗∗∗
+130.7∗∗∗∗
+(0.076)
+(10.0)
+(20.7)
+(2.05)
+(4.02)
+(4.92)
+Open
+-3.82∗∗∗∗
+-126.6∗∗∗∗
+-155.5∗∗∗∗
+-32.0∗∗∗∗-51.2∗∗∗∗
+-2.27
+(0.326)
+(15.0)
+(12.5)
+(3.72)
+(3.56)
+(2.99)
+Impatient
+-1.78∗∗∗∗
+-80.0∗∗∗∗
+-61.6∗∗∗∗
+-19.0∗∗∗∗
+-12.4∗∗∗
+-2.51
+(0.213)
+(10.0)
+(11.8)
+(2.87)
+(3.15)
+(2.90)
+Patient-trained × Open
+83.1∗
+27.2∗
+0.410
+(33.5)
+(10.7)
+(4.64)
+Impatient-trained × Open
+-127.6∗∗∗∗
+3.21
+-0.385
+(26.6)
+(5.63)
+(6.89)
+Patient-trained × Impatient
+-80.5∗∗∗∗
+-31.5∗∗∗∗
+-2.94
+(15.1)
+(5.79)
+(4.18)
+Impatient-trained × Impatient
+-106.0∗∗∗∗
+-15.9∗∗∗
+0.923
+(19.7)
+(3.94)
+(7.39)
+Open × Impatient
+62.6∗∗∗∗
+12.6∗∗∗
+4.13
+(11.8)
+(3.23)
+(3.62)
+Patient-trained × Open × Impatient
+-6.65
+7.27
+-5.96
+(42.8)
+(12.6)
+(5.70)
+Impatient-trained × Open × Impatient
+81.6∗∗
+9.74
+-10.1
+(28.2)
+(6.02)
+(9.45)
+Fixed-effects
+Source image
+Yes
+Yes
+Yes
+Yes
+Yes
+Yes
+Fit statistics
+Observations
+936
+936
+936
+936
+936
+936
+Within R2
+0.431
+0.445
+0.502
+0.503
+0.536
+0.824
+Clustered (Source image) standard-errors in parentheses
+Signif. Codes: ****: 1e-04, ***: 0.001, **: 0.01, *: 0.05
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+37
+G.2
+Human Results
+Tables 10 to 13 are the tables for the four similarity gains in the human study, without and with adjustment
+for questions answered and source-image fixed effects, and Table 14 those for its process measures. All use
+participant-clustered SEs.
+Table 10. Human-study regressions (Δ text–text).
+Outcome
+Text–text
+Specification
+Training
+Adjusted
+Adjusted + FE
+Model:
+(1)
+(2)
+(3)
+Variables
+Constant
+0.018∗
+-0.013
+(0.008)
+(0.010)
+Trained model
+0.017∗
+0.030∗∗∗
+0.034∗∗∗
+(0.007)
+(0.008)
+(0.009)
+Questions answered
+0.006∗∗
+0.007∗∗
+(0.002)
+(0.002)
+Fixed-effects
+Item
+Yes
+Fit statistics
+Observations
+456
+456
+456
+R2
+0.009
+0.059
+0.199
+Clustered (Participant ID) standard-errors in parentheses
+Signif. Codes: ****: 1e-04, ***: 0.001, **: 0.01, *: 0.05
+Table 11. Human-study regressions (Δ image–image).
+Outcome
+Image–image
+Specification
+Training
+Adjusted
+Adjusted + FE
+Model:
+(1)
+(2)
+(3)
+Variables
+Constant
+0.008∗
+-0.008∗
+(0.003)
+(0.004)
+Trained model
+0.007∗
+0.015∗∗∗∗
+0.014∗∗
+(0.003)
+(0.003)
+(0.005)
+Questions answered
+0.003∗∗∗∗
+0.004∗∗∗∗
+(0.0008)
+(0.0009)
+Fixed-effects
+Item
+Yes
+Fit statistics
+Observations
+456
+456
+456
+R2
+0.008
+0.070
+0.238
+Clustered (Participant ID) standard-errors in parentheses
+Signif. Codes: ****: 1e-04, ***: 0.001, **: 0.01, *: 0.05
+
+
+38
+•
+M R, Cherep, Maes, and Singh
+Table 12. Human-study regressions, Δ text–image similarity.
+Outcome
+Text–image
+Specification
+Training
+Adjusted
+Adjusted + FE
+Model:
+(1)
+(2)
+(3)
+Variables
+Constant
+-0.020∗∗∗∗
+-0.030∗∗∗∗
+(0.003)
+(0.004)
+Trained model
+0.010∗∗∗
+0.015∗∗∗∗
+0.015∗∗
+(0.003)
+(0.004)
+(0.005)
+Questions answered
+0.002∗∗
+0.003∗∗
+(0.0007)
+(0.0008)
+Fixed-effects
+Item
+Yes
+Fit statistics
+Observations
+456
+456
+456
+R2
+0.016
+0.041
+0.234
+Clustered (Participant ID) standard-errors in parentheses
+Signif. Codes: ****: 1e-04, ***: 0.001, **: 0.01, *: 0.05
+Table 13. Human-study regressions, Δ image–text similarity.
+Outcome
+Image–text
+Specification
+Training
+Adjusted
+Adjusted + FE
+Model:
+(1)
+(2)
+(3)
+Variables
+Constant
+0.011∗∗
+-0.008
+(0.004)
+(0.005)
+Trained model
+0.014∗∗
+0.022∗∗∗∗
+0.023∗∗∗
+(0.004)
+(0.005)
+(0.006)
+Questions answered
+0.004∗∗∗∗
+0.004∗∗∗∗
+(0.0010)
+(0.001)
+Fixed-effects
+Item
+Yes
+Fit statistics
+Observations
+456
+456
+456
+R2
+0.018
+0.075
+0.234
+Clustered (Participant ID) standard-errors in parentheses
+Signif. Codes: ****: 1e-04, ***: 0.001, **: 0.01, *: 0.05
+Table 14. Human-study regressions, process measures.
+Outcome
+Questions Question words Round seconds Sampled tokens
+Model:
+(1)
+(2)
+(3)
+(4)
+Variables
+Trained model
+-2.27∗∗∗∗
+111.9∗∗∗∗
+2.00
+-1,420.4∗∗∗∗
+(0.277)
+(12.2)
+(30.8)
+(137.9)
+Questions answered
+31.3∗∗∗∗
+46.2∗∗∗∗
+702.5∗∗∗∗
+(2.48)
+(6.10)
+(28.6)
+Fixed-effects
+Source image
+Yes
+Yes
+Yes
+Yes
+Fit statistics
+Observations
+456
+456
+456
+456
+Within R2
+0.117
+0.733
+0.261
+0.827
+Clustered (Participant ID) standard-errors in parentheses
+Signif. Codes: ****: 1e-04, ***: 0.001, **: 0.01, *: 0.05
+H
+Additional Results
+Here we report the simulated evaluation broken out by the number of hidden details and by dialogue turn,
+following the evaluation protocol of Section 3.4. Figure 14 disaggregates the recovery of Figure 2 by the number
+of hidden details 𝑘, for each assistant, asking mode, and simulated user. Figure 15 shows the distribution of
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+39
+dialogue length as the share of episodes that reach each answered turn, under fixed and open asking. Under
+open asking, the trained assistants ask in most episodes but stop before the fixed-asking budget, which is the
+under-asking discussed in Appendix G.1.
+Patient user
+Impatient user
+Fixed asking
+Open asking
+1
+5
+10
+15
+1
+5
+10
+15
+0
+25
+50
+75
+100
+0
+25
+50
+75
+100
+Missing details
+Mean recovery (%)
+Base model
+Patient-trained
+Impatient-trained
+Fig. 14. Mean recovery on the test split by the number of hidden details, for each assistant, asking mode and simulated user.
+Base model
+Patient-trained
+Impatient-trained
+Patient user
+Impatient user
+0
+10
+20
+30
+0
+10
+20
+30
+0
+10
+20
+30
+0%
+25%
+50%
+75%
+100%
+0%
+25%
+50%
+75%
+100%
+Answered turn
+Episodes reaching this turn
+Fixed asking
+Open asking
+Fig. 15. Share of test episodes reaching each answered turn under fixed asking and open asking, for each assistant and
+simulated user.
+
+
+40
+•
+M R, Cherep, Maes, and Singh
+I
+Prompts
+Here we show all the prompts for reproducibility.
+I.1
+Assistant
+Ask prompt
+You are an assistant preparing to generate an image for a user.
+The user’s request may be missing details that matter to them.
+Ask one short clarifying question about whatever would matter most to the user and is still unclear.
+Don’t ask about anything they already told you or anything obvious.
+Reply with the question only.
+Decide prompt
+You are an assistant preparing to generate an image for a user.
+The user’s request may be missing details that matter to them.
+Decide whether to ask one more clarifying question before making the image.
+If anything that could matter to the user is still unclear, answer yes. If not, answer no.
+Reply with exactly one word: yes or no.
+Compose prompt
+Write the complete, detailed description of the image implied by the user’s request and the conversation.
+Include every detail the user stated, none may be dropped or altered.
+Where something visually important was never specified, fill in the most likely choice so the description
+is complete and concrete.
+Write flowing prose, 100-180 words, like a dense image caption.
+Reply with the description only.
+I.2
+User Simulator
+User simulator prompt
+You are role-playing a user who asked an assistant to generate an image.
+The complete ground-truth description of the image you want is given as INTENT.
+The assistant may ask you clarification questions.
+Rules:
+• Answer only what was asked, truthfully based on the INTENT, in 1-2 short casual sentences.
+• Never volunteer details that were not asked about.
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+41
+• If the question asks about several specific things, answer only the single most relevant one.
+• If the question is open-ended and does not ask about anything specific, do not reveal any detail,
+just say “Ask me about one specific thing.”
+• If the INTENT does not specify the answer, say you have no preference.
+• Never mention the INTENT or that you are role-playing.
+Expect the following inputs:
+INTENT: The complete ground-truth specification of what the user wants.
+CONVERSATION: The conversation so far, with the user’s original request and any question-answer turns.
+QUESTION: The assistant’s clarification question to answer.
+Output. answer: the user’s answer to the question.
+I.3
+Judge
+Judge prompt
+You verify whether a piece of text satisfies a specific yes/no check about an image description.
+Rules:
+• Answer true only if the text explicitly states the fact or clearly entails it, paraphrases and synonyms
+count.
+• If the text is silent, contradicts it, or is only vaguely compatible, answer false.
+• Judge only against the given text, do not use outside knowledge about what is likely.
+Expect the following inputs:
+CHECK: The yes/no question about the text to verify.
+TEXT: The only text to judge the check against.
+Output. satisfied: whether the text states or clearly entails the fact.
+I.4
+Image Model
+Image model instruction
+Return a single image as output, do not give any options.
+
+
+42
+•
+M R, Cherep, Maes, and Singh
+I.5
+Synthesis
+Decomposition prompt
+Given a complete, detailed description of an image, decompose it into a list of atomic details.
+Rules:
+• Each detail states exactly one checkable fact about the image. Split compound sentences.
+• Each detail must be self-contained and objectively verifiable from the description alone.
+• The category must be one of the allowed categories below. Prefer the most precise label.
+• importance is how much the image would change if this detail were different, from 0 (barely
+noticeable) to 1 (defining feature).
+• check is a self-contained yes/no question a judge can ask about any text describing this image.
+• Every concrete visual fact appears in exactly one detail. Do not invent facts.
+Allowed categories:
+• entity: an object or subject is present in the scene.
+• attribute: a visual property (color, material, texture, size, shape, text content) of a named entity.
+• relation: a spatial or interactional relation between two named entities.
+• style: a global rendering or photographic property (medium, lighting, palette, camera angle).
+• count: an explicit quantity of some entity.
+• layout: global composition or positioning within the frame.
+Expect the following inputs:
+TEXT: The complete, fully-specified text to decompose.
+Output. details: every concrete fact in the text, one atomic detail each, where each detail has text (the
+detail as one self-contained factual sentence naming its entities explicitly), category (one of the allowed
+categories), importance (how much the intended output would change if this detail were different, 0 to
+1) and check (a self-contained yes/no question verifying that a text states this detail).
+Redaction prompt
+You are given the complete description of an image and a list of details to remove from it.
+Remove those details and write what remains as the request that a user who wants this image would
+plausibly type into an image-generation tool.
+Rules:
+• Remove every listed detail completely: the request must not state, entail, or hint at any of them.
+• If removing a detail leaves another part of the description depending on it, rephrase that part so
+it reads naturally without revealing the removed detail.
+• Keep every fact of the description that is not listed for removal. Do not add, infer, or compensate
+for what was removed.
+• Write a natural, flowing request of 1-3 sentences, the way a real user writes, not a list or caption.
+
+
+Learning to Clarify Underspecified Intents Under Limited Interaction
+•
+43
+• Keep the register casual and compact. Drop trivially inferable connective phrasing, but never a
+whole fact.
+• Output only the request text.
+Expect the following inputs:
+DESCRIPTION: The complete, fully-specified original description.
+REDACTED: The details to remove, none of them may survive into the request.
+Output. request: natural 1-3 sentence user request stating everything in the description except the
+redacted details.
