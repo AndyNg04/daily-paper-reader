@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-06</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-07</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 38 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 37 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>18</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>17</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-06 20:22:58 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-07 20:37:40 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-06 日报已完成：筛选 38 篇论文，精读 18 篇、速读 20 篇，聚焦购物智能体与多智能体系统。</p>
-<p>最值得关注的是两篇 9.0 分精读：真实电商场景中的对话购物智能体评测与改进，以及 LLM 智能体的信念形成与群体传播动态。</p>
-<p>建议先从更贴近日常体验的购物智能体读起，再按兴趣浏览智能体记忆压缩、社会互动模拟或分布式协作容错方向的 8.0 分速读。</p>
+<p>2026-10-07 日报已完成：共梳理 37 篇论文，精读 17 篇、速读 20 篇，聚焦个性化对话与智能体等方向。</p>
+<p>最值得关注的是个性化对话的结构化记忆管理，以及基于校准用户嵌入的多轮交互评测，相关论文 AMU 与 CUEing User Simulators 均获 9.0/10。</p>
+<p>建议先读这两篇高分推荐，再选读 8.0/10 的邮件智能体研究，关注表达方式变化如何干扰检索与行动。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">18 篇</strong>
+    <strong class="dpr-home-dashboard-count">17 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="RealWorldShop: Benchmarking and Improving Conversational Shopping Agents in Real-World E-commerce">RealWorldShop: Benchmarking and Improving Conversational Shopping Agents in Real-World E-commerce</span></li><li><span class="dpr-home-dashboard-paper-title" title="Coherence-Driven Belief Formation and Population Dynamics of Contagion in LLM Agents">Coherence-Driven Belief Formation and Population Dynamics of Contagion in LLM Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="The Reported Engagement with AI Level (REAL) Rating: A Framework for Disclosing Human-AI Collaboration">The Reported Engagement with AI Level (REAL) Rating: A Framework for Disclosing Human-AI Collaboration</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="AMU:Admission and Memory Update for Personalized Conversations---Structured Memory with SLM Guided Control">AMU:Admission and Memory Update for Personalized Conversations---Structured Memory with SLM Guided Control</span></li><li><span class="dpr-home-dashboard-paper-title" title="CUEing User Simulators: Calibrated User Embeddings for Multi-Turn Benchmarking">CUEing User Simulators: Calibrated User Embeddings for Multi-Turn Benchmarking</span></li><li><span class="dpr-home-dashboard-paper-title" title="PsyEvo: A Personalized Counseling Agent That Self-Evolves at Test Time">PsyEvo: A Personalized Counseling Agent That Self-Evolves at Test Time</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>7</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>4</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>5</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -96,9 +96,9 @@
     <strong class="dpr-home-dashboard-count">20 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="IMPACT: Modeling Socially Interdependent Movement in a Generative Multi-Agent Simulation of a Pompeian Household">IMPACT: Modeling Socially Interdependent Movement in a Generative Multi-Agent Simulation of a Pompeian Household</span></li><li><span class="dpr-home-dashboard-paper-title" title="Persistent Context Graphs for Efficient Memory Compaction in LLM Agents">Persistent Context Graphs for Efficient Memory Compaction in LLM Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="Fault-Tolerant Budget Conservation in Distributed Multi-Agent Delegation">Fault-Tolerant Budget Conservation in Distributed Multi-Agent Delegation</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Lost in the Request: How Communication Variation Disrupts Retrieval and Action in Email Agents">Lost in the Request: How Communication Variation Disrupts Retrieval and Action in Email Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="Turnover-Orthogonal Credit Assignment for Open-Team Multi-Agent Reinforcement Learning">Turnover-Orthogonal Credit Assignment for Open-Team Multi-Agent Reinforcement Learning</span></li><li><span class="dpr-home-dashboard-paper-title" title="Tactile Perception through Fluid-Solid Interaction">Tactile Perception through Fluid-Solid Interaction</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>10</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>3</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>7</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>4</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>4</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span></div>
 </section>
 </div>
 
