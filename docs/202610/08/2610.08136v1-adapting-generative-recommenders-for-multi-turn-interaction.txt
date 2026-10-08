@@ -1,0 +1,286 @@
+Title: Adapting Generative Recommenders for Multi-Turn Interaction
+
+URL Source: https://arxiv.org/pdf/2610.08136v1
+
+Published Time: Wed, 07 Oct 2026 01:17:36 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# Adapting Generative Recommenders for Multi-Turn Interaction 
+
+Yu-Chen Den 1, Zhi Rui Tam 1, Yung-Yu Shih 1, Shih-Hsin Wang 1, Yun-Nung Chen 1, Pu-Jen Cheng 1, and Eugene Yang 2 
+
+> 1
+
+National Taiwan University 
+
+{d13944011,d14922019,f12944007,shwang}@csie.ntu.edu.tw y.v.chen@ieee.org, pjcheng@csie.ntu.edu.tw  
+
+> 2
+
+Johns Hopkins University 
+
+eugene.yang@jhu.edu 
+
+Abstract. Generative recommenders decode items from a user’s in-teraction history, but offer no way for users to correct a recommen-dation that misses their current intent. Adding conversation is natu-ral since items and words share same output space, yet training the model to converse may overwrite the history-to-item mapping it relies on. We introduce INTEGER ( INTE ractive GE nerative Recommendation), which extends generative recommendation to multi-turn interaction with a learned routing token that lets the model decide when to recommend, history re-anchoring that conditions each item on both past behavior and the dialogue, and behavioral replay with instruction-data rehearsal that prevents forgetting during adaptation. Users can thus give feed-back on recommendations within the dialogue, while recommendations stay grounded in behavioral history and accuracy is not traded for flu-ency. On Amazon Beauty and Toys, INTEGER matches or exceeds the strongest baselines in accuracy with competitive conversation quality, improving Hit@10 by 13.3% on Amazon Beauty, and significantly out-performs the generative recommender it starts from. Our analyses show that INTEGER learns behaviors that naive adaptation fails to acquire, recommending once the user’s intent is clear and staying attentive to behavioral history at the moment of recommendation. INTEGER also learns an intent-agnostic replacement over the item space, which sup-presses rejected items but points to attribute-aware feedback as the next step. 
+
+Keywords: Generative Recommendation · Conversational Recommen-dation · Dialogue Systems 
+
+## 1 Introduction 
+
+Generative recommendation has recently emerged as a promising paradigm for sequential recommendation [2,6,7,27,41]. Rather than retrieving items from an external index built over learned user and item embeddings [8,14,29], generative arXiv:2610.08136v1 [cs.IR] 6 Oct 2026 2 Den et al. 
+
+recommendation decodes the identifier of the target item directly, represent-ing each item as a sequence of discrete codes derived from its content embed-ding [12,16]. This places items and words in the same output space and has proven competitive with other strong sequential recommenders [14,15,29]. However, these models rely on a fixed interaction history to infer user prefer-ences and generate recommended items, giving users no direct way to correct the system when its recommendation misses their current intent [27,36,41]. When the user’s preference changes or the recommendation fails to capture what they currently want, the model cannot receive that correction explicitly. Instead, the updated preference must first be reflected in subsequent item interactions before it becomes observable to the model, making preference correction indirect and potentially slow. Conversational recommendation systems (CRS) let users express preferences through dialogue [28,34], but they typically learn to recommend from the con-versational context itself. Generative recommenders, in contrast, learn a direct mapping from interaction history to item identifiers, capturing preference sig-nals accumulated from users’ past actions. When item identifiers are tokens in a language model’s vocabulary, recommending an item and generating a response become the same operation, so conversational ability can be added without ar-chitectural change. However, this shared output space also means that both be-haviors are carried by the same parameters: training the model to converse may overwrite the history-to-item mapping it has already acquired [33]. We therefore ask whether a generative recommender can learn to converse without losing the recommendation behavior it was originally trained on. 
+
+We solve this problem with INTE ractive GE nerative Recommendation (IN-TEGER) , which empowers generative recommendation to interact with users through multi-turn conversation. Its design is grounded in a single principle: conversation acts as a control layer over a generative recommender instead of recommendation signals. Recommendation therefore remains in the history-to-item mapping acquired from interaction sequences, while dialogue governs when 
+
+that mapping is invoked and how its output is presented and revised. Our contributions are threefold. First, we expose recommendation as a learned decoding action, where a routing token decides when to recommend and history re-anchoring re-emits the user history right before item generation. Second, we combine behavioral replay with instruction-data rehearsal to preserve recom-mendation accuracy during conversational adaptation. On Amazon Beauty and Toys [9], INTEGER is competitive with both end-to-end CRS and modular pipelines and significantly outperforms the generative recommender it is adapted from. Third, our analyses show how conversational and behavioral training erode each other and how re-anchoring and rehearsal counteract this, and that re-finement learns a single intent-agnostic replacement. Dataset and code will be released after the paper is accepted. Adapting Generative Recommenders for Multi-Turn Interaction 3
+
+## 2 Background 
+
+2.1 Multi-Turn Interaction 
+
+In multi-turn conversation, a model converses with a user over multiple turns. We write the dialogue up to the t-th turn as Dt = ( u1, a 1, . . . , u t−1, a t−1, u t),where ui and ai denote the i-th user message and assistant response, and Dt ends at the pending user message ut. The response at is generated autoregressively conditioned on Dt. When the interaction serves recommendation, the model needs to identify the turns at which a recommendation is warranted and surface an item consistent with the intent expressed so far in Dt, while still generating fluent responses. Existing work approaches this task in three main ways. Conversational recom-mender systems (CRS) learn recommendation directly from multi-turn dialogue, jointly modeling preference elicitation, item recommendation, and response gen-eration [28,34,42]. Other work treats conversation as an additional feedback channel for an existing recommender, converting it into pseudo-interactions for sequential recommendation [36] or into preference signals [30]. A third line adopts a modular design, in which an LLM handles the interaction and delegates rec-ommendation to an external model or tool [5,11,17,43]. 
+
+2.2 Generative Recommendation 
+
+Conventional sequential recommenders [8,14,22,29] assign each item a unique ID and score items through a large embedding table. Generative recommendation instead represents each item as a sequence of discrete tokens and generates the next item by autoregressive decoding [2,7,27,41]. Existing work has focused on semantic ID design [13,20,46], training and decoding algorithms [6,10,19,35,44], and multimodal item representations [21,32,38,47]. In all of these settings, rec-ommendation is one-shot: the model produces an item from a fixed interaction history, and the user cannot revise its input except through further interactions. Formally, a generative recommender maps a user’s interaction history H =(h1, . . . , h T ) to a ranked list of item identifiers (ItemIDs). Each item is rep-resented by an ItemID z = ( c1, . . . , c L), a sequence of L discrete codewords obtained by RQ-KMeans [13] from the item’s content embedding, so that se-mantically similar items share longer codeword prefixes. The model pθ assigns each ItemID a likelihood autoregressively: 
+
+pθ (z | H) = 
+
+> L
+
+Y
+
+> ℓ=1
+
+pθ (cℓ | c<ℓ , H ) , (1) where c<ℓ = ( c1, . . . , c ℓ−1) denotes the prefix preceding position ℓ. At inference time, the top-N list Z =  z(1) , . . . , z(N ) is obtained by prefix-trie-constrained beam search over this factorization, with pθ (z(1) | H) ≥ · · · ≥ pθ (z(N ) | H). The trie constraint restricts decoding to prefixes of valid ItemIDs, ensuring every generated sequence corresponds to an item in the corpus. 4 Den et al. Model Reply     
+
+> <hist> <rec>
+> System Prompt
+> Task +
+> INTEGER
+> Model Reply Casual Chat No! Yes! Conversation History
+> User Feedback I don’t like it! Turn t Turn t+1 (Item Refinement) INTEGER Model Reply
+> <hist> <rec>
+> History Re-anchoring
+> INTE ractive GE nerative Recommendation ( INTEGER )
+> Enough info to recommend?
+
+Fig. 1. Overview of INTEGER. Starting from a generative recommender trained on interaction sequences, INTEGER uses a learned routing token to choose between chat-ting and recommending. When recommending, it places the user’s behavioral history immediately before ItemID generation. Subsequent user feedback can trigger a revised recommendation. 
+
+INTEGER starts from such a model and adapts it to the conversational task in Section 2.1. As in end-to-end CRS, a single model both converses and recommends; unlike CRS, its recommendation ability comes from the history-to-item mapping learned on interaction sequences, with conversation acting as a control layer over that mapping. Unlike modular pipelines, it requires no separate recommender. 
+
+## 3 INTEGER: Interactive Generative Recommendation 
+
+We start with a generative recommender [27] trained to predict an ItemID from a user’s interaction history H (Section 2.2). To apply this model to conversation, we place H in the system prompt at the beginning of the dialogue. At each turn t,the model receives this prompt and the dialogue context Dt, then decides whether to continue chatting or recommend an item. INTEGER makes recommendation a decoding action and places the interaction history next to the generated ItemID when that action is taken. Figure 1 illustrates the inference process. 
+
+3.1 Recommendation as a Decoding Action 
+
+We introduce a learned routing token <hist> into the model’s vocabulary. At the start of an assistant turn, emitting <hist> initiates a recommendation; other-wise, the model produces a conversational response. The decision to recommend is therefore made by the same model that generates the response, without an external routing classifier [1,25]. Internally, a recommendation turn follows the format <hist> H <rec> z′,where z′ is the recommended item’s ItemID. After the model emits <hist> , the inference procedure inserts H and <rec> into the decoding context. The model Adapting Generative Recommenders for Multi-Turn Interaction 5
+
+Algorithm 1 Routing-aware constrained decoding                                                   
+
+> Require: System prompt M; dialogue context Dt; model pθ; catalog trie Tover ItemID codewords; structural-token set K
+> 1: p←log pθ(· | M, Dt)▷next-token log-probability vector 2: p[K \ { <hist> }]← −∞
+> 3: v∗←arg max vp[v]
+> 4: if v∗=<hist> then ▷recommend 5: Insert H<rec> after <hist>
+> 6: Decode z′under trie T
+> 7: Resume unconstrained response decoding until <|im_end|>
+> 8: else ▷chat 9: Append v∗and continue unconstrained decoding until <|im_end|>
+> 10: end if
+
+then generates z′ under a prefix-trie constraint, which restricts decoding to valid ItemIDs. Once the ItemID is complete, it resumes unconstrained decoding to produce the accompanying response. We call the insertion of H at inference time history re-anchoring . The copy of H in the system prompt remains available while the model interprets the dialogue and decides whether to recommend. Re-anchoring places the same his-tory immediately before ItemID generation, recovering the local history-to-item format used to train the original generative recommender. Item generation can thus draw on the behavioral history together with preferences expressed in the conversation. Algorithm 1 specifies the decoding procedure. 
+
+3.2 Conversational Adaptation with Behavioral Replay 
+
+We adapt the generative recommender with a mixture of three training sources: multi-turn recommendation dialogues, sequential recommendation examples, and general instruction-following examples. Each source teaches a different part of the desired behavior. The multi-turn dialogues teach the model when to emit <hist> , how to respond conversationally, and how to produce recommendations in the format shown in Section 3.1. Training only on these dialogues can weaken the history-to-item mapping acquired during generative recommendation training [33]. We therefore reuse examples from the original sequential recommendation training set during adaptation. We call this behavioral replay : the model continues to train on history-to-ItemID prediction while learning to converse. Behavioral re-play acts on the model parameters during training, whereas history re-anchoring places H in the decoding context when a recommendation is generated. We also include general instruction-following examples [3] to strengthen re-sponse generation alongside the recommendation-focused training data. Together, the three sources train the model to manage a dialogue while retaining the be-havioral mapping used for item generation. We train on their mixture with the 6 Den et al. 
+
+standard next-token prediction loss: 
+
+LSFT (θ) = −E(x,y )∼D mix 
+
+> |y|
+
+X
+
+> i=1
+
+log pθ (yi | x, y <i ), (2) where Dmix combines the three sources, x is the context provided to the model, and y is the target sequence on which the loss is computed. In recommendation turns, the re-anchored history H and <rec> are excluded from the loss, we supervise only <hist> , the ItemID z′, and the subsequent response. 
+
+3.3 Item Refinement 
+
+After receiving a recommendation, a user may reject it or ask for another item similar to one they accepted. INTEGER handles these follow-up requests within the same dialogue: the previous recommendation and the user’s feedback become part of Dt+1 , which let the routing and ItemID decoding procedure can produce a revised recommendation. We train this behavior using preference pairs constructed for two feedback types. For rejection , y− is the model’s erroneous top-1 recommendation and y+
+
+is the ground-truth item. For variety , y− is the currently recommended item and y+ is its nearest neighbor, determined by cosine similarity between item content embeddings. Both pair types share the same structure: the preferred continuation replaces the current item rather than repeating it. We further apply Direct Preference Optimization (DPO) [26]: 
+
+LDPO (θ) = − log σ
+
+
+
+β
+
+
+
+log πθ (y+ | x)
+
+πref (y+ | x) − log πθ (y− | x)
+
+πref (y− | x)
+
+ 
+
+, (3) where x contains the history prompt and the dialogue of the user’s feedback, πref 
+
+is the model before DPO, and β controls the strength of the preference update. 
+
+## 4 Experiments 
+
+4.1 Experimental Settings 
+
+Datasets. We evaluate INTEGER on two public benchmarks derived from the Amazon Product Reviews dataset [9], adopting the “Beauty” and “Toys and Games” categories following common practice in sequential recommenda-tion [27,40]. Since no large-scale dataset pairs behavioral histories with multi-turn dialogue, we synthesize conversations for both categories using Tencent-Hy3-preview [31]. The statistics are summarized in Table 1. 
+
+Baselines. We compare against three groups of baselines. The first consists of sequential recommenders, SASRec [14] and TIGER [27], which provide recommendation-only reference points; TIGER is built on Qwen3-1.7B-Base [39] and is the model Adapting Generative Recommenders for Multi-Turn Interaction 7                             
+
+> Table 1. Dataset statistics. Stage-1 sequential recommendation data is 5-core and split by leave-one-out; #Inter. counts every user–item event and |H|is the average length of each user history. Stage-2 conversational data is synthesized per category; a turn is one user or assistant message, |T|is the average number of turns per trajectory. Statistics are computed over all splits combined.
+> Stage-1: Sequential Stage-2: Conversational Dataset #Inter. #Users #Items |H|#Turns #Traj. |T|
+> Beauty 81,767 9,880 11,707 8.28 46,594 6,302 7.39 Toys & Games 75,855 9,631 11,498 7.88 39,570 5,647 7.01
+
+INTEGER starts from. The second consists of end-to-end conversational recom-menders, GCRS [42] and PECRS [28]. The third consists of modular pipelines that pair the same TIGER recommender with a Qwen3-1.7B generator: Modular (Classic) always retrieves and verbalizes a candidate list, while Modular (Tool-call) lets the generator decide when to invoke the recommender, isolating the benefit of learning the recommendation action rather than delegating it. 
+
+Evaluation Metrics and Statistical Tests. We report Hits@10 and NDCG@10 for recommendation accuracy. For conversational systems, both are computed at the ground-truth recommendation turn of each test dialogue; if a system that decides when to recommend (INTEGER or Modular (Tool-call)) does not rec-ommend at this turn, the turn is counted as a miss, so routing errors are reflected in retrieval performance. For conversation quality, we avoid n-gram overlap met-rics such as BLEU [24] and ROUGE [18], which correlate poorly with human judgment. Instead, we adopt an LLM-as-judge protocol in which DeepSeek-V4-Flash [37] rates each response from 1 to 5 on naturalness, relevance, helpfulness, and coherence, and we report the mean as Conv. Q [4,45]. We use paired t-tests against a reference baseline. For accuracy, the refer-ence is TIGER, from which INTEGER is adapted, paired at the user level. For Conv. Q, the reference is Modular (Tool-call), the strongest conversational base-line on Beauty and the only other one that decides when to recommend, paired at the turn level. 
+
+Implementation Details. Table 2 lists the hyperparameters for training. We use Axolotl 3 for finetuning models in all stages. For semantic ID construction, items are embedded with sentence-t5-base [23] and residual-quantized into three levels of 256 codes, with the fourth level for disambiguity. 
+
+4.2 Main Results 
+
+Table 3 summarizes results on both categories, where the baselines fail in two opposite ways. GCRS attains near-zero accuracy (Hits@10 of 0.004 and 0.002)  
+
+> 3https://axolotl.ai/
+
+8 Den et al. 
+
+Table 2. Training hyperparameters. Effective batch size is micro-batch × gradient ac-cumulation. Stage-1 denotes training generative recommendation and Stage-2 denotes our conversational tuning. 
+
+Stage-1 Stage-2 DPO 
+
+Initialized from Qwen3-1.7B-Base [39] Stage-1 ckpt Stage-2 ckpt Learning rate 5 × 10 −4 1 × 10 −4 5 × 10 −6
+
+Effective batch 8 × 32 = 256 8 × 16 = 128 2 × 8 = 16 
+
+Budget 10 epochs 5 epochs 1 epoch Weight decay 10 −6 10 −6 0
+
+Warmup ratio 0.1 0.1 0.1 RL β – – 0.1 
+
+Table 3. Recommendation accuracy and conversation quality on Amazon Beauty and Toys. Conv. Q is the mean LLM-as-judge score. SASRec and TIGER are recommendation-only models, so conversation quality isn’t applicable. Best results are in bold and second-best are underlined.                                                  
+
+> Beauty Toys & Games Model Hits@10 NDCG@10 Conv. Q Hits@10 NDCG@10 Conv. Q
+> SASRec 0.040 0.018 –0.034 0.015 –TIGER 0.038 0.020 –0.036 0.020 –GCRS 0.004 0.002 4.07 0.002 0.001 4.53 PECRS 0.043 0.019 3.92 0.057 0.032 4.05 Modular (Classic) 0.045 0.024 4.40 0.051 0.021 4.52 Modular (Tool-call) 0.044 0.025 4.58 0.049 0.020 4.55 INTEGER (Ours) 0.051 0.027 4.77 0.057 0.028 4.25
+
+despite competitive conversation quality, while PECRS occupies the opposite, reaching the strongest baseline NDCG@10 on Toys, but at the lowest conversa-tion quality of all systems (3.92 and 4.05). The modular pipelines sit between these extremes, recovering fluency (4.40–4.58) at moderate accuracy. On Beauty, INTEGER obtains the highest score on all three reported mea-sures: its Hits@10 increases from the best baseline value of 0.045 to 0.051, and its NDCG@10 from 0.025 to 0.027, and conversation quality from 4.58 to 4.77, the last significantly above Modular (Tool-call) (paired t-test, p < 0.001 ). On Toys, INTEGER ties PECRS for the best Hits@10 (0.057) with 0.20 points higher in conversation quality, while PECRS retains a higher NDCG@10 (0.032 vs. 0.028) and the modular pipelines receive higher conversation quality. On both datasets, INTEGER significantly outperforms TIGER, the generative recommender it is adapted from, in Hits@10 and NDCG@10 (paired t-test, p < 0.001 ). Conversa-tional adaptation therefore does not erode the history-to-item mapping; com-bined with the preferences expressed in the dialogue, it raises accuracy above what the interaction history alone supports. Adapting Generative Recommenders for Multi-Turn Interaction 9                          
+
+> Table 4. Component ablation on the Amazon Beauty dataset. Removing (4) gives the core interactive recipe (1) + (2) + (3) ; the three rows below it remove one core component from that configuration, so they are read against the −(4) row rather than against the full model. Each variant is evaluated in the input format it was trained on. The last row denotes trained only on the plain multi-turn conversation data. Bold and underline denotes the best and second best results, respectively.
+> Configuration Hits@10 NDCG@10 Conv. Q INTEGER 0.051 0.027 4.77
+> −(4) instruction tuning data 0.049 0.025 4.14
+> −(1) learned routing token 0.045 0.024 4.33
+> −(2) history re-anchoring 0.033 0.017 3.93
+> −(3) behavioral replay 0.034 0.018 4.37 Dialogue-only finetuned 0.029 0.017 2.39
+
+4.3 Ablation Studies 
+
+Table 4 confirms that each component contributes to at least recommendation performance or conversation quality and that the two behavioral safeguards carry most of the weight. Training on dialogues alone collapses on both axes (Hits@10= 0.029 , Conv. Q= 2.39 ). Against the core configuration, removing his-tory re-anchoring or behavioral replay costs roughly 33% of recommendation accuracy (0.049 to 0.033 and 0.034), while removing the learned routing token costs comparatively little, since routing governs when the model recommends rather than how well. That re-anchoring and replay degrade to nearly identical points despite acting through different channels, one at decoding time and one on the parameters, indicates that neither substitutes for the other. Instruction tuning data, finally, is what converts the core recipe into a usable conversational system: it leaves accuracy essentially unchanged (0.049 to 0.051) while lifting conversation quality by 0.63, and removing replay from the core recipe raises conversation quality (4.14 → 4.37), consistent with behavioral data suppressing the language ability that rehearsal restores. 
+
+## 5 Discussions 
+
+5.1 Routing Behavior 
+
+Figure 2 shows, at every assistant turn of the test dialogues, how strongly each model wants to recommend, i.e. the probability of its routing token. We compare INTEGER with bare replay , which is trained on the same dialogues mixed with single-turn replay examples in which a recommendation is the first and only response. INTEGER separates the two kinds of turn: the median probability is 
+
+0.88 on recommendation turns but 0.09 on chat turns before the target recom-mendation and 0.00 after it, giving an AUC of 0.94 . Bare replay’s probability 10 Den et al. Chat, before target Chat, after target Recommen-dation      
+
+> 0.00 0.25 0.50 0.75 1.00 P(routing token)
+> (a) Routing-token probability
+> INTEGER Bare replay
+> 0.00 0.25 0.50 0.75 1.00
+> False-positive rate (chat) 0.00 0.25 0.50 0.75 1.00 True-positive rate (rec)
+> (b) Rec vs. chat turns
+> INTEGER (AUC 0.94) Bare replay (AUC 0.51)
+
+Fig. 2. INTEGER knows when to recommend; bare replay does not. (a) Probability of the routing token at each assistant turn, grouped by whether the turn should chat (before or after the target recommendation) or recommend. Well-separated boxes mean the model tells the two apart. (b) ROC of the same probability for separating recom-mendation turns from chat turns. 
+
+carries no information about the turn type (AUC 0.51 ). Its median on chat turns before the target is 0.99 , higher than on recommendation turns ( 0.86 ). The difference lies entirely in the turns before the target: after it, both models stay quiet on chat turns. Bare replay therefore does not over-recommend in gen-eral; it recommends before the conversation calls for it, as if a recommendation could open a dialogue regardless of what was said, which is what its single-turn replay examples teach. INTEGER wraps each replayed sequence in a dialogue, so its routing decision follows the conversational content instead: it waits while the user is still describing what they want, and recommends once they have. 
+
+5.2 Two Directions of Forgetting 
+
+Figure 3 shows the attention to the prompted history at the moment when the model recommends an item. The model trained on dialogues alone (Table 4, last row) attends slightly less to the history when it recommends than when it chats (0.86 ×), while ours attends 2.11 × more. Focusing on prompted history at the recommendation point is a learned behavior, and dialogue-only finetuning does not acquire it. The right panel shows why an adjacent copy H helps. Attention to the far prompt history falls off as the dialogue pushes it further behind the recommendation point ( 0.81 × for our model, 0.63 × for the dialogue-only model, first to last distance), while attention to the adjacent history recap H is flat (1.00 ×). The decay is therefore not the mechanical consequence of a longer prompt, which would move all three curves together. Re-anchoring works because it puts the same tokens on a channel that dialogue length cannot dilute, and it is the copied content that matters. Figure 4 turns to the opposite direction of forgetting, reporting Hits@10 and conversation quality (Conv. Q) when adding different percentage of instruc-tion following dataset. Conversation quality rises sharply up to 10% and then Adapting Generative Recommenders for Multi-Turn Interaction 11 Dialogue-Only Ours 0.00 0.01 0.02 0.03 0.04 0.05 0.06 0.07 Attention to prompt history 0.86 ×          
+
+> 2.11 ×
+> Rec turn (solid) vs. Chat turn (hatched) 100 150 200 250 300 Tokens from history to rec point 0.00 0.05 0.10 0.15 0.20 0.25
+> Ours recap 1.00 ×
+> Ours history 0.81 ×
+> Dialogue-Only history 0.63 ×
+> Decay with distance (last bin / first bin)
+
+Fig. 3. Left panel shows the attention score of recommendation turn against chat turn of ours and dialogue-only finetuned model. Right panel shows the attention score decay with distance. 0 5 10 15 20 Instruction data percentage (%) 0.035 0.040 0.045 0.050 0.055 0.060 Hit@10     
+
+> Beauty Toys & Games 0510 15 20 Instruction data percentage (%) 3.00 3.25 3.50 3.75 4.00 4.25 4.50 4.75 5.00 Conv. Q
+
+Fig. 4. Recommendation performance and conversation quality over different portion of instruction tuning dataset. 
+
+plateaus, with an effect size of +0 .5 to +1 .2, while recommendation accuracy shows no systematic trend: the curve is non-monotone and its best operating point differs by dataset. 
+
+5.3 Item Refinement 
+
+Table 5 reports refinement behavior under two intents, variety and rejection. The base model fails on both intents by re-offering the rejected item in every case (Repeat@10 = 1 .00 , ∆Rank = 0 ). DPO resolves this failure, pushing the rejected item out of the top ranks (Repeat@10 0.284 and 0.269 ; ∆Rank 22 and 26 ) and nearly doubling recovery of the gold item ( 0.228 → 0.367 and 0.182 → 0.364 ). Sim. measures how far the new recommendation moves from the rejected one, and a lower value is not inherently better. A variety request calls for an item that remains close to the current one, whereas a rejection may call for moving further away. Yet DPO lands at the same distance under both intents ( 0.885 
+
+and 0.886 ), and the two intents also match closely on every other measure. This pattern follows from how the preference pairs are constructed. Both pair types 12 Den et al. 
+
+Table 5. Item refinement on recoverable reject scenarios on Amazon Beauty, where the gold item was originally ranked 2–50 (each value averages three surface phrasings of the intent). Suppression measured with Repeat@10 and ∆Rank of the rejected item applies to both intents. Alternative reports the embedding similarity (Sim.) between the re-offered item and the rejected one (lower is more distinct), and Recovery reports Golden Hit@10, whether the originally ranked gold item is recovered. The base model re-offers the rejected item under both intents, so its alternative is near-identical and 
+
+∆Rank is zero.                         
+
+> Suppression Alternative Recovery Intent Repeat@10 ∆Rank Sim. Golden Hit@10 Variety Base 1.000 00.997 0.228
+> +DPO 0.284 22 0.885 0.367 Rejection Base 1.000 00.995 0.182
+> +DPO 0.269 26 0.886 0.364
+
+reward replacing the current item and neither carries an intent label, so the model learns a single replacement operation over the item space rather than intent-specific behaviors, even though the two intents are expressed by distinct surface phrasings. 
+
+5.4 Case Study 
+
+Figure 5 illustrates the routing difference from Section 5.1 on a single dialogue. The user opens without a clear goal "just browsing" and only gradually re-veals what they want. Bare replay recommends an item at every assistant turn, even before the user has expressed any preference. INTEGER instead responds conversationally, asking about product type and skin concerns, and withholds a recommendation until the third turn, when the user mentions patchy foundation. 
+
+## 6 Conclusion & Future Work 
+
+In this work, we presented INTEGER, a model that extends a generative rec-ommender to multi-turn interaction by exposing recommendation as a decoding action rather than learning it from dialogue. On Amazon Beauty and Toys, IN-TEGER is competitive with both end-to-end conversational recommenders and modular pipelines in accuracy and conversation quality, and significantly outper-forms the generative recommender it starts from. Our analyses show that replay, re-anchoring, and rehearsal together prevent conversational and behavioral train-ing from eroding each other. Our findings are limited by the use of synthesized dialogues and by refinement that recovers near-misses rather than satisfying stated preferences. Handling attribute-level feedback (e.g., too expensive , I want a black one ) would require conditioning refinement on item attributes, whereas the operation we learn is intent-agnostic and moves only within the embedding neighborhood. Adapting Generative Recommenders for Multi-Turn Interaction 13 
+
+u1 “Just browsing for stuff, not sure what I need really.”  
+
+> Aloe Life Skin Gel and Herbs “Got it! got a particular type of product in mind, like skin or hair?”
+
+u2 “Well I’ve been liking that kukui nut oil I picked up, but that’s about it.”     
+
+> New Jwoww Tanning Lotion, Black Bronzer
+> “Nice, so you’re into natural oils. any partic-ular skin or body concerns you want to look into?”
+
+u3 “Sometimes I put on foundation but it gets patchy, I guess I’m just looking around.” ← gold turn  
+
+> Vaseline Spray and Go Moisturizer Caribbean Solutions Self Tanner
+
+Fig. 5. Case study on Amazon Beauty dialogue: bare-replay (left) recommends pre-maturely at every turn (red), while INTEGER (right) asks clarifying questions and recommends only at the gold turn. 
+
+## References 
+
+1. Chen, Z., Xie, B., Srinivasan, S., Ramanathan, M., Maragoud, R., Liu, Q.: Llm-based dialogue labeling for multiturn adaptive rag. In: Proceedings of the 2025 Conference on Empirical Methods in Natural Language Processing: Industry Track. pp. 1044–1056 (2025) 2. Deng, J., Wang, S., Cai, K., Ren, L., Hu, Q., Ding, W., Luo, Q., Zhou, G.: Onerec: Unifying retrieve and rank with generative recommender and iterative preference alignment. arXiv preprint arXiv:2502.18965 (2025) 3. Ding, N., Chen, Y., Xu, B., Qin, Y., Hu, S., Liu, Z., Sun, M., Zhou, B.: Enhanc-ing chat language models by scaling high-quality instructional conversations. In: Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing. pp. 3029–3051 (2023) 4. Doh, S., Sguerra, B., Oramas, S., Epure, E.V., Nam, J.: Llm-as-a-judge for evalu-ating system responses in conversational music recommendation. In: Proceedings of the 20th ACM Conference on Recommender Systems. p. 708–714. RecSys ’26, Association for Computing Machinery, New York, NY, USA (2026) 5. Gao, Y., Sheng, T., Xiang, Y., Xiong, Y., Wang, H., Zhang, J.: Chat-rec: Towards interactive and explainable llms-augmented recommender system. arXiv preprint arXiv:2303.14524 (2023). https://doi.org/10.48550/arXiv.2303.14524 
+
+6. Han, R., Yin, B., Chen, S., Jiang, H., Jiang, F., Li, X., Ma, C., Huang, M., Li, X., Jing, C., et al.: Mtgr: Industrial-scale generative recommendation framework in meituan. In: Proceedings of the 34th ACM International Conference on Information and Knowledge Management. pp. 5731–5738 (2025) 7. He, R., Heldt, L., Hong, L., Keshavan, R., Mao, S., Mehta, N., Su, Z., Tsai, A., Wang, Y., Wang, S.C., et al.: Plum: Adapting pre-trained language models for industrial-scale generative recommendations. In: Proceedings of the ACM Web Conference 2026. pp. 8093–8104 (2026) 8. Hidasi, B., Karatzoglou, A., Baltrunas, L., Tikk, D.: Session-based recommenda-tions with recurrent neural networks. arXiv preprint arXiv:1511.06939 (2015) 14 Den et al. 9. Hou, Y., Li, J., Fu, X., He, Z., Yan, A., Chen, X., McAuley, J.: Bridging lan-guage and items for retrieval and recommendation: Benchmarking llms as seman-tic encoders. In: Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers). pp. 3251–3265 (2026) 10. Hou, Y., Li, J., Shin, A., Jeon, J., Santhanam, A., Shao, W., Hassani, K., Yao, N., McAuley, J.: Generating long semantic ids in parallel for recommendation. In: Proceedings of the 31st ACM SIGKDD Conference on Knowledge Discovery and Data Mining V. 2. pp. 956–966 (2025) 11. Huang, X., Lian, J., Lei, Y., Yao, J., Lian, D., Xie, X.: Recommender ai agent: Inte-grating large language models for interactive recommendations. ACM Transactions on Information Systems 43 (4), 1–33 (2025). https://doi.org/10.1145/3731446 
+
+12. Jegou, H., Douze, M., Schmid, C.: Product quantization for nearest neighbor search. IEEE transactions on pattern analysis and machine intelligence 33 (1), 117– 128 (2010) 13. Ju, C.M., Collins, L., Neves, L., Kumar, B., Wang, L.Y., Zhao, T., Shah, N.: Gener-ative recommendation with semantic ids: A practitioner’s handbook. In: Proceed-ings of the 34th ACM International Conference on Information and Knowledge Management. pp. 6420–6425 (2025) 14. Kang, W.C., McAuley, J.: Self-attentive sequential recommendation. In: 2018 IEEE international conference on data mining (ICDM). pp. 197–206. IEEE (2018) 15. Kim, S., Kang, H., Kim, K., Kim, J., Kim, D., Yang, M., Oh, K., McAuley, J., Park, C.: Lost in sequence: Do large language models understand sequential recom-mendation? In: Proceedings of the 31st ACM SIGKDD Conference on Knowledge Discovery and Data Mining V. 2. pp. 1160–1171 (2025) 16. Lee, D., Kim, C., Kim, S., Cho, M., Han, W.S.: Autoregressive image generation using residual quantization. In: 2022 IEEE/CVF conference on computer vision and pattern recognition (CVPR). pp. 11513–11522. IEEE (2022) 17. Li, C., Deng, Y., Hu, H., Kan, M.Y., Li, H.: Chatcrs: Incorporating external knowledge and goal guidance for llm-based conversational recommender systems. In: Findings of the Association for Computational Linguistics: NAACL 2025. pp. 295–312. Association for Computational Linguistics (2025). https://doi.org/10. 18653/v1/2025.findings-naacl.17 
+
+18. LIN, C.: Rouge: A package for automatic evaluation of summaries. In: Text Sum-marization Branches Out: Proceedings of the ACL-04 Workshop, Barcelona, Spain. pp. 74–81 (2004) 19. Lin, X., Liu, P., Wang, W., Hu, Y., Xu, C., Feng, F., Wang, Q., Chua, T.S.: Bringing reasoning to generative recommendation through the lens of cascaded ranking. In: Proceedings of the ACM Web Conference 2026. pp. 8939–8949 (2026) 20. Liu, E., Zheng, B., Ling, C., Hu, L., Li, H., Zhao, W.X.: Generative recommender with end-to-end learnable item tokenization. In: Proceedings of the 48th Inter-national ACM SIGIR Conference on Research and Development in Information Retrieval. pp. 729–739 (2025) 21. Liu, H., Wei, Y., Song, X., Guan, W., Li, Y.F., Nie, L.: Mmgrec: Multimodal gen-erative recommendation with transformer model. arXiv preprint arXiv:2404.16555 (2024) 22. Ma, C., Kang, P., Liu, X.: Hierarchical gating networks for sequential recommen-dation. In: Proceedings of the 25th ACM SIGKDD international conference on knowledge discovery & data mining. pp. 825–833 (2019) 23. Ni, J., Abrego, G.H., Constant, N., Ma, J., Hall, K., Cer, D., Yang, Y.: Sentence-t5: Scalable sentence encoders from pre-trained text-to-text models. In: Findings of the association for computational linguistics: ACL 2022. pp. 1864–1874 (2022) Adapting Generative Recommenders for Multi-Turn Interaction 15 24. Papineni, K., Roukos, S., Ward, T., Zhu, W.J.: Bleu: a method for automatic evaluation of machine translation. In: Proceedings of the 40th annual meeting of the Association for Computational Linguistics. pp. 311–318 (2002) 25. Pattnayak, P., et al.: Hybrid ai for responsive multi-turn online conversations with novel dynamic routing and feedback adaptation. arXiv preprint arXiv:2506.02097 (2025) 26. Rafailov, R., Sharma, A., Mitchell, E., Manning, C.D., Ermon, S., Finn, C.: Direct preference optimization: Your language model is secretly a reward model. Advances in neural information processing systems 36 , 53728–53741 (2023) 27. Rajput, S., Mehta, N., Singh, A., Hulikal Keshavan, R., Vu, T., Heldt, L., Hong, L., Tay, Y., Tran, V., Samost, J., et al.: Recommender systems with generative retrieval. Advances in Neural Information Processing Systems 36 , 10299–10315 (2023) 28. Ravaut, M., Zhang, H., Xu, L., Sun, A., Liu, Y.: Parameter-efficient conversa-tional recommender system as a language processing task. In: Proceedings of the 18th Conference of the European Chapter of the Association for Computational Linguistics (Volume 1: Long Papers). pp. 152–165 (2024) 29. Sun, F., Liu, J., Wu, J., Pei, C., Lin, X., Ou, W., Jiang, P.: Bert4rec: Sequential recommendation with bidirectional encoder representations from transformer. In: Proceedings of the 28th ACM international conference on information and knowl-edge management. pp. 1441–1450 (2019) 30. Tajiri, M., Inaba, M.: Refining text generation for realistic conversational recom-mendation via direct preference optimization. In: Proceedings of the 2025 Con-ference on Empirical Methods in Natural Language Processing. pp. 28628–28649 (2025) 31. Team, T.H.: Hy3-preview. https://huggingface.co/tencent/Hy3-preview 
+
+(2025) 32. Vandenhirtz, M., Hassani, K., Ghasemlou, S., Shao, S., Eghbalzadeh, H., Peng, F., Liu, J., Iuzzolino, M.L.: Multimodal generative recommendation for fusing seman-tic and collaborative signals. arXiv preprint arXiv:2602.03713 (2026) 33. Verma, N., Mehta, N., Wang, S.C., Zhang, N., Tsai, A., Wei, L., Heldt, L., Hong, L., Chi, E., Yi, X.: Orbit: Preserving foundational language capabilities in genretrieval via origin-regulated merging. arXiv preprint arXiv:2605.12419 (2026) 34. Wang, X., Zhou, K., Wen, J.R., Zhao, W.X.: Towards unified conversational rec-ommender systems via knowledge-enhanced prompt learning. In: Proceedings of the 28th ACM SIGKDD conference on knowledge discovery and data mining. pp. 1929–1937 (2022) 35. Wang, Y., Zhou, S., Lu, J., Liu, Z., Liu, L., Wang, M., Zhang, W., Li, F., Su, W., Wang, P., et al.: Nezha: A zero-sacrifice and hyperspeed decoding architecture for generative recommendations. In: Proceedings of the ACM Web Conference 2026. pp. 8073–8082 (2026) 36. Wang, Y., Gao, S., Fang, J., Yan, R., Chiu, B., Shang, S.: Cesrec: Constructing pseudo interactions for sequential recommendation via conversational feedback. In: EMNLP (Findings). pp. 16227–16239 (2025) 37. Xu, A., Lin, B., Xue, B., Wang, B., Xu, B., Wu, B., Zhang, B., Lin, C., Dong, C., Ling, C., et al.: Deepseek-v4: Towards highly efficient million-token context intelligence. arXiv preprint arXiv:2606.19348 (2026) 38. Xu, Y., Zhang, M., Li, C., Liao, Z., Xing, H., Deng, H., Hu, J., Zhang, Y., Zeng, X., Zhang, J.: Mmq: Multimodal mixture-of-quantization tokenization for semantic id generation and user behavioral adaptation. In: Proceedings of the Nineteenth ACM International Conference on Web Search and Data Mining. pp. 788–797 (2026) 16 Den et al. 39. Yang, A., Li, A., Yang, B., Zhang, B., Hui, B., Zheng, B., Yu, B., Gao, C., Huang, C., Lv, C., et al.: Qwen3 technical report. arXiv preprint arXiv:2505.09388 (2025) 40. Yang, Y., Ji, Z., Li, Z., Li, Y., Mo, Z., Ding, Y., Chen, K., Zhang, Z., Li, J., LIN, L., et al.: Sparse meets dense: Unified generative recommendations with cascaded sparse-dense representations. Advances in Neural Information Processing Systems 
+
+38 , 93746–93770 (2026) 41. Zhai, J., Liao, L., Liu, X., Wang, Y., Li, R., Cao, X., Gao, L., Gong, Z., Gu, F., He, J., et al.: Actions speak louder than words: Trillion-parameter sequential trans-ducers for generative recommendations. In: International Conference on Machine Learning. pp. 58484–58509. PMLR (2024) 42. Zhang, S., Liu, M., Long, C.: Generative conversational recommender system. arXiv preprint arXiv:2605.21987 (2026) 43. Zhao, Y., Wu, J., Wang, X., Tang, W., Wang, D., de Rijke, M.: Let me do it for you: Towards llm empowered recommendation via tool learning. In: Proceedings of the 47th International ACM SIGIR Conference on Research and Development in Information Retrieval (2024). https://doi.org/10.1145/3626772.3657828 
+
+44. Zheng, B., Liu, E., Chen, Z., Ma, Z., Wang, Y., Zhao, W.X., Wen, J.R.: Pre-training generative recommender with multi-identifier item tokenization. arXiv preprint arXiv:2504.04400 (2025) 45. Zheng, L., Chiang, W.L., Sheng, Y., Zhuang, S., Wu, Z., Zhuang, Y., Lin, Z., Li, Z., Li, D., Xing, E., et al.: Judging llm-as-a-judge with mt-bench and chatbot arena. Advances in neural information processing systems 36 , 46595–46623 (2023) 46. Zhu, J., Jin, M., Liu, Q., Qiu, Z., Dong, Z., Li, X.: Cost: Contrastive quantization based semantic tokenization for generative recommendation. In: Proceedings of the 18th ACM Conference on Recommender Systems. pp. 969–974 (2024) 47. Zhu, J., Ju, M., Liu, Y., Koutra, D., Shah, N., Zhao, T.: Beyond unimodal bound-aries: Generative recommendation with multimodal semantics. arXiv preprint arXiv:2503.23333 (2025)

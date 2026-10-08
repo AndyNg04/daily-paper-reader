@@ -1,0 +1,1889 @@
+Title: Careful Judge: Safe and Efficient Human-AI Collaborative Decision Making
+
+URL Source: https://arxiv.org/pdf/2610.09043v1
+
+Published Time: Thu, 08 Oct 2026 00:13:58 GMT
+
+Number of Pages: 30
+
+Markdown Content:
+# CAREFUL JUDGE : S AFE AND EFFICIENT HUMAN –AI COLLABORATIVE DECISION MAKING 
+
+Chenyu Zhang ∗
+
+MIT 
+
+zcysxy@mit.edu 
+
+Rachel Luo 
+
+NVIDIA 
+
+raluo@nvidia.com 
+
+Boyi Li 
+
+NVIDIA 
+
+boyil@nvidia.com 
+
+Anjali Parashar ∗
+
+MIT 
+
+anjalip@mit.edu 
+
+Marco Pavone 
+
+NVIDIA, Stanford University 
+
+mpavone@nvidia.com 
+
+Apoorva Sharma 
+
+NVIDIA 
+
+apoorvas@nvidia.com 
+
+## ABSTRACT 
+
+In human–AI collaborative decision making, human review can prevent unsafe AI decisions, but each human judgment is costly. Treating human intervention as a one-off fallback misses the opportunity to improve future AI decisions, yet adaptively learning from human feedback changes the model and can invalidate previously calibrated safety guardrails. We approach this challenge with CARE —calibrated adaptive rectification and escalation—an end-to-end pipeline that combines AI models and human reviewers to guarantee safe, human-aligned decisions, while continuously learning from human feedback to achieve greater automation with fewer human queries. CARE is principled, general, modular, and works with any black-box AI model. We equip it with a rectification module that improves AI decisions by learning the structure of human–AI misalignment. Our novel adaptive calibration module guarantees risk control at every time step for any rectification module. Experiments on four safety-critical real-world datasets spanning lan-guage, vision, driving, and robotics demonstrate that CARE achieves human-aligned decisions while reducing human queries by 25–81% relative to baselines. 
+
+## 1 INTRODUCTION 
+
+Human–AI collaboration is increasingly used in safety-critical applications, including data triage and evaluation (Hemmer et al., 2025; Mozannar & Sontag, 2020), autonomous driving (Luo et al., 2025; Sinha et al., 2024), robot monitoring (Sermanet et al., 2025), and model alignment (Christiano et al., 2017; Lee et al., 2024; Bai et al., 2022). In these settings, AI predictions represent an inexpensive, but potentially misaligned, way to scale reliable, but costly, human judgment. Deciding when to trust AI and when to call for human review creates a safety–efficiency trade-off (El-Yaniv & Wiener, 2010). Existing methods address different parts of this trade-off. Some provide safety guarantees but may require frequent human intervention (Jung et al., 2025; Ren et al., 2023); others learn from human feedback to improve efficiency without providing such guarantees (Angelopoulos et al., 2023; Christiano et al., 2017). Naively combining the two directions may amplify their respective weaknesses and worsen the trade-off—splitting already scarce human feedback between model improvement and safety checks could make the former noisier and the latter more conservative, as is evident in Section 7. Still, we ask for the best of both worlds: how can a human–AI system continue to make safe decisions while learning from human feedback to reduce future intervention? 
+
+A positive answer requires true collaboration: a human provides feedback when AI is uncertain, and AI becomes more confident when facing similar scenarios in the future. Such dynamic interaction should uncover the structure of human–AI misalignment and close this gap, making AI decisions safer and human intervention less frequent. However, this structure may be difficult to learn when human review is sparse and selective. Moreover, safety guarantees must keep pace with each model update. Specifically, queries selectively reviewed by a human can differ statistically from future ones, 
+
+> ∗
+
+Work done while at an internship at NVIDIA. 
+
+1arXiv:2610.09043v1 [stat.ML] 6 Oct 2026 Figure 1: (left) Per-sample decision pipeline. Upon a query, CARE rectifies AI’s prediction and confidence by correcting the human–AI residual and reducing uncertainty, based on past human feedback. The rectified quantities are then passed through two checks: an active acquisition rule that escalates informative queries, and a confidence gate that ensures the risk of the final human–AI decision is below the tolerance. Once a query is escalated, the human’s feedback is used as the final decision and to update CARE ’s modules. (right) Adaptive learning from human feedback. CARE learns to adapt to the revealed human preference over time and across scenarios, continuously increasing alignment and reducing the uncertainty of the rectified AI model, and thus improving efficiency. and earlier safety checks may no longer be valid after model updates, so calibration must efficiently track shifts in both the data distribution and the model. These challenges call for model-agnostic risk control for every decision to be made, and model-aware adaptive learning after every decision is made. Model awareness enables learning efficiency ,while model agnosticism ensures safety in the presence of model misspecification. Driven by these two objectives, we propose calibrated adaptive rectification and escalation (CARE ), a principled, general, and modular framework that combines AI models and human reviewers into an ensemble decision-maker. CARE guarantees safe, human-aligned decisions and continuously learns from human feedback to achieve greater automation while reducing human queries. We instantiate CARE in binary classification, using an exact risk decomposition (Section 2) to motivate its four modules: (Section 3) Residual Gauss rectifies AI predictions and uncertainty estimates by fitting a Gaussian process to the residual between human and AI decisions; (Section 4) Confident Jack calibrates the rectified model with statistical and computational efficiency; (Section 5) Exacting Gates escalates queries to a human using a scenario-specific threshold informed by calibration; and (Section 6) Active Max adaptively selects informative human queries. All modules are designed for flexible offline–online learning schedules and share two objectives: safety and efficiency. An overview of CARE is provided in Figure 1. Specifically, our contributions are: • We formalize human–AI collaboration as a general statistical decision problem with a flexible offline–online schedule, covering different scenarios and model lifecycles. • We derive an exact conditional risk decomposition into four sources, each motivating a distinct component of CARE —an end-to-end human–AI collaboration pipeline. • We develop a correlation-aware Bayesian residual rectifier that combines a learned kernel with AI-imputed uncertainty. It propagates human feedback across similar scenarios, enabling faster adaptation and reducing future escalation frequency. • We develop adaptive weighted confidence-based cross-conformal calibration that reuses labels col-lected for learning and accommodates arbitrary model updates under history-dependent acquisition. It provides model-agnostic marginal risk control at every time step. • We evaluate CARE on four safety-critical real-world datasets spanning language, vision, driving, and robotics, demonstrating human-aligned decisions with substantially fewer human queries. 21.1 RELATED WORK 
+
+AI-accelerated human feedback. As AI models are applied to increasingly complex tasks, high-quality supervision is a key bottleneck. To alleviate this, some works consider using learned models to scale supervision. Reinforcement learning from human feedback (RLHF) distills human preference data into a reward model (Christiano et al., 2017), while other techniques bring in human feedback at a higher level, in rubric or constitution design (Bai et al., 2022; Lee et al., 2024; Zheng et al., 2023). Such techniques have been instrumental in advancing open-world physical AI, with LLM/VLM rewards scoring decision-making in robotics and autonomous vehicles (Ma et al., 2024; Sima et al., 2023; Huang et al., 2024; Sermanet et al., 2025; Rocamonde et al., 2024). However, ensuring align-ment between the AI feedback and what a human expert would provide remains critical, especially in safety-critical settings. Recent literature applies ideas from selective classification and abstention (El-Yaniv & Wiener, 2010; Vardhan et al., 2026; Vishwakarma et al., 2023) to applications of AI feedback, allowing AI to escalate hard cases to human experts (Jung et al., 2025). We extend these ideas to allow for online adaptation, improving efficiency while maintaining alignment guarantees. Moreover, we find that the local online adaptation of CARE can mitigate the tendency of static selective escalation to exacerbate disparities among regions in the input space (Jones et al., 2021). 
+
+Model-assisted inference. A related line of research explores combining cheap proxy measurements and limited expensive measurements in the context of variance-reduced statistical inference, where the cheap proxy can be a prediction model (Angelopoulos et al., 2023; Zrnic & Candes, 2024) or a simulator (Luo et al., 2025; 2026; Badithela et al., 2025). Angelopoulos et al. (2023) propose prediction-powered inference (PPI) that uses empirical risk minimization to correct the model’s systematic bias. While its fitted rectifier can capture some local structure, we model potential residual correlations explicitly and update each prediction’s confidence through its posterior. PPI instead provides a global confidence bound for its bias correction. Greater model capacity can reduce approximation error but may increase estimation variability, motivating prior refitting as human feedback accumulates. 
+
+Conformal calibration. Sharing the goal of model-agnostic risk control, cross-conformal prediction (Vovk, 2015) and Jackknife+ (Barber et al., 2021) improve data efficiency over split conformal prediction (Papadopoulos et al., 2002; Lei et al., 2018; Jung et al., 2025), which splits the available human feedback into disjoint sets for training and calibration. To correct known or tractable covariate shifts, Tibshirani et al. (2019) introduce weighted exchangeability , and Prinster et al. (2022) apply it to obtain weighted Jackknife+. These methods do not directly handle the history-dependent covariate shifts induced by active acquisition in our setting, especially during the online period, when the weight calculation is intractable. Online model adaptation adds another layer of distribution shift. Existing online conformal methods (Gibbs & Candes, 2021; Gibbs & Candès, 2024; Bhatnagar et al., 2023; Feldman et al., 2023) often treat distribution shifts as adversarial and focus on time-averaged regret or coverage. Our goal is risk control at every time step without conservative fallbacks: calibration should track model improvement and reduce escalation as the model learns. 1.2 PROBLEM SETUP 
+
+We instantiate human–AI collaborative decision making in binary classification. Consider an unla-beled dataset (Xt)t≥1 from the feature space X , with corresponding human oracle labels (Yt)t≥1
+
+from the label space Y = {0, 1}, revealed upon query escalation; we write Zt = ( Xt, Y t) for the full data. We assume the dataset is drawn from an i.i.d. stream and the human oracle provides correct labels. The inexpensive AI model provides a probabilistic classifier with an attached confidence score: 
+
+(pA, c A) : X 7 → [0 , 1] 2, which is not assumed to be accurate or calibrated. Given these resources, we consider an end-to-end task: a framework must use them for all required stages, including but not limited to training, validation, calibration, and deployment. Any labels needed at these stages must be obtained through human queries. We consider two metrics: risk and 
+
+cost . For a loss function L, e.g., zero–one loss L01 : Y2 → R≥0, (ˆ y, y ) 7 → 1{ˆy̸ = y} and Brier score 
+
+L2 : [0 , 1] 2 → R≥0, (ˆ p, y ) 7 → (ˆ p − y)2, and a classifier f , the risk is RL(f ) = E[L(f (X), Y )] . Our default risk is the zero–one risk, i.e., the misclassification probability R01 (f ) = P (f (X)̸ = Y ). Cost is measured by the human query complexity, i.e., the end-to-end total number of human queries. We say a classifier is safe if its risk is below a user-specified tolerance ϵ ∈ (0 , 1) . We say an algorithm 3is more (cost-) efficient than another if it has lower human query complexity. Distinguish this from computational efficiency. Our goal is to maximize efficiency subject to the safety constraint. 
+
+## 2 CAREFUL JUDGE : A FRAMEWORK FOR RISK -CONTROLLED ADAPTIVE 
+
+## AI-ASSISTED DECISION MAKING 
+
+We motivate our method by examining the risk of an AI decision. 
+
+Proposition 1 (Risk decomposition; informal) . The AI model’s Brier risk has an exact decomposition: 
+
+R2,x (pA) = EY [( pA(X) − Y )2 | X = x]=aleatoric ambiguity 
+
+↕
+
+escalation 
+
++ excess risk 
+
+↕
+
+calibration 
+
++ epistemic uncertainty 
+
+↕
+
+adaptation 
+
++ systematic bias 
+
+↕
+
+rectification 
+
+.
+
+The formal statement and proof are given in Appendix B. Proposition 1 identifies four sources of risk to be addressed to align the AI model with human preferences and deploy it safely: • Aleatoric ambiguity encodes the intrinsic hardness of the query, which is the irreducible risk of the Bayes-optimal human-aligned predictor. When this risk exceeds the tolerance, we escalate the query to the human oracle to reveal the correct zero-loss decision. • Excess risk measures the gap between a learned predictor and the Bayes-optimal predictor due to finite data and model misspecification. We calibrate the escalation rule to control the ensemble’s risk despite imperfect learning. • Epistemic uncertainty captures training-sample-specific information, including the correlation structure revealed by the queried data. We adapt to this structure and prioritize informative queries that can improve future decisions. • Systematic bias is the population-level misalignment of the AI model . We rectify AI predictions by learning to correct this bias from human feedback. This motivates calibrated adaptive rectification and escalation ( CARE ), a pipeline that reuses every queried human label to adaptively rectify AI’s systematic bias and epistemic uncertainty, calibrate the rectified AI model, and escalate to human when the rectified AI decision is still risky. This pipeline improves efficiency while controlling the risk of the resulting ensemble. Formally, human queries inform a rectifier r in the score space (the range of a strictly increasing link function g : [0 , 1] → ¯R), an uncertainty-reduced confidence measure c, a calibrated escalation threshold λ, and an active acquisition function π. At time step t, these quantities assemble into a probabilistic classifier: 
+
+ pt(Xt) := g−1(g(pA(Xt)) + rt(Xt)) , if ct(Xt) > λ t(Xt) and 0 = At ∼ Bern( πt(Xt)); 
+
+1{Yt = 1 }, otherwise. (1) In words, the rectified AI decision is accepted only when its confidence exceeds the calibrated threshold and the input is not selected for active acquisition. Otherwise, the human oracle supplies the final decision, and the queried label becomes available for subsequent learning and calibration. Figure 1 illustrates this decision flow.  
+
+> CARE
+
+is modular, as one can plug in any rectifier r, confidence measure c, escalation threshold λ, and acquisition function π into the pipeline. Nonetheless, in the next four sections, we develop these four modules jointly to pursue: • Safety. Adaptive rectification continuously improves AI predictions, while adaptive calibration and escalation provide model-agnostic risk control as the model evolves. • Efficiency. We reuse each human query to update rectifier, quantify uncertainty, and calibrate the escalation threshold, maximizing query efficiency. Active acquisition and adaptive learning aim to reduce future escalation frequency. 
+
+Remark 1. Proposition 1 offers a triage of gaps left by existing tools. Classical selective classification (El-Yaniv & Wiener, 2010) and calibrated threshold-based escalation (Jung et al., 2025) do not learn to improve the base model, so a biased or uncertain model may escalate every query under a small risk tolerance, leading to huge cost. Population-level rectifier regression (Angelopoulos et al., 2023) targets systematic bias, but its uncertainty quantification does not adapt to locally revealed correlation structure. Finally, active acquisition (Zrnic & Candes, 2024) can target epistemically informative 4points, but does not by itself learn a rectifier or an acquisition function, nor does it certify the risk of accepted decisions. CARE closes all four gaps to achieve safety efficiently. Furthermore, we design CARE to support flexible offline–online model lifecycles. At offline check-points, CARE revisits accumulated human feedback in an order-invariant manner, refits rectification and rebuilds calibration, prioritizing query efficiency by making fuller use of queried labels. Between checkpoints, CARE processes samples sequentially and updates rectification and calibration online. 
+
+## 3 RESIDUAL GAUSS : L OCALITY -AWARE BAYESIAN RECTIFICATION 
+
+To close reducible gaps in Proposition 1, we use queries to learn the human–AI residual and rectify AI’s decision to align with human preference. AI’s uncertainty about human preference can be correlated across the input space. For example, an autonomous driving system that misjudges a pedestrian’s intention at one intersection may make similar errors at similar intersections (Sinha et al., 2024). These correlations allow feedback on one query to improve decisions on related inputs, improving alignment—and thereby reducing escalation frequency—over time. On the other hand, treating residuals as independent can lead to a query-all degradation when the initial uncertainty level is above the risk tolerance. Therefore, Proposition 1 suggests a learning model to capture both the global systematic bias and local epistemic uncertainty of the human–AI residual. We model this with a Gaussian process (GP) (Williams & Rasmussen, 2006). On the score scale of the link g, we place a GP( m, k ) prior on the residual r(x) = g(pH (x)) − g(pA(x)) , where pH is the Bayes-optimal human-aligned predictor, and use human feedback to obtain the Bayesian rectifier rt. The mean m captures global systematic bias, while the kernel k captures correlations that let feedback transfer across inputs. 
+
+Initialization: parametric prior regression. AI’s raw confidence cA can offer useful information about uncertainty, even when it is not calibrated. We incorporate it into a learnable GP prior: 
+
+r ∼ GP( mβ , k τ,ρ,ϕ ), with mβ (x) = xT β, kτ,ρ,ϕ (x, x ′) = τ 2(ρk ϕ(x, x ′)+(1 −ρ)kA(x, x ′)) ,
+
+where the linear mean captures systematic bias, parameterized kernel kϕ captures residual correlations, and kA encodes the AI’s uncertainty, such as an ensemble’s empirical covariance or a diagonal kernel based on cA.1 When τ → 0, our model reduces to the parametric linear regression model in Angelopoulos et al. (2023). We refit the prior parameters at offline checkpoints, using, e.g., maximum likelihood estimation and expectation maximization. This adaptive prior lets human feedback determine how much to trust the AI’s confidence and how much additional residual structure to learn. 
+
+Offline: nonparametric posterior inference. Given the queried labels, the GP posterior applies corrections at each input. At time step t, let Rt follow the (approximate) posterior distribution of the residual. The rectified posterior predictive probability Pt = g−1(g(pA) + Rt) gives a rectified point prediction pt as its posterior mean. We also rectify the confidence using the posterior risk estimate: 
+
+1−ct = EY∼Bern( Pt)[L(pt, Y )] = EPt [PtL(pt, 1)+(1 −Pt)L(pt, 0)] = ptL(pt, 1)+(1 −pt)L(pt, 0) .
+
+Thus, in binary classification, the same posterior mean provides both the rectified prediction and confidence measure. For example, ct = max {pt, 1 − pt} for the 0–1 loss and ct = 1 − pt(1 − pt) for the Brier loss. Since binary labels give a non-Gaussian posterior, we approximate it using expectation propagation (EP) or a Laplace approximation (Williams & Rasmussen, 2006). 
+
+Online: assumed-density filtering. Between offline checkpoints, we keep the prior fixed and update the residual posterior after each instance of actively acquired human feedback using assumed-density filtering (ADF), the online counterpart of EP. ADF obtains the Gaussian approximation of Rt+1 by matching its first two moments with those of the conditional posterior tilted by the new observation. Each update requires only a one-dimensional integral and a rank-one covariance correction; the probit link gives closed-form updates. An online maximum a posteriori (MAP) update provides an alternative online counterpart to the Laplace approximation. See Appendix C for more details. When the GP model is well-specified and the human–AI residual is small, in the sense of the L2(PX )
+
+norm, our rectified inference enjoys the variance reduction standard in model-assisted inference       
+
+> 1We normalize kϕand kAto have comparable scale. For simplicity, we use the same feature space Xfor the bias functional and both kernels.
+
+5(Angelopoulos et al., 2023; Zrnic & Candes, 2024; Luo et al., 2025). This formally characterizes the efficiency gain from using an aligned AI model. 
+
+## 4 CONFIDENT JACK : C ALIBRATING ADAPTIVE ESCALATION AND LEARNING 
+
+Rectification alone does not guarantee safety; we need an adaptive safety check that keeps pace with rectifier learning. We develop Confident Jack to control the risk of trusting the rectified model at any fixed time, regardless of the underlying AI model or rectifier. It uses the same queried labels used for rectifier learning for calibration, while accounting for how those labels were adaptively selected. Confident Jack is a co-evolving weight-score particle system {(w(k) 
+
+> t
+
+, s (k) 
+
+> t
+
+)}Kk=1 that attends to the test input Xt = x, giving a prediction set of the following form for any risk tolerance ϵ ∈ (0 , 1) :
+
+Ct,ϵ (x) = 
+
+n
+
+y ∈ Y : PKk=1 w(k) 
+
+> t
+
+(x, y ) · 1
+
+n
+
+s(k) 
+
+> t
+
+(z(k)) < s (k) 
+
+> t
+
+(x, y )
+
+o
+
+< 1 − ϵ/ 2
+
+o
+
+, (2) where {z(k)} are past human queries to be specified together with the particle system. Intuitively, scores help check if a hypothetical label y is consistent with past queries, which may have different relevance to the current test point due to selective escalation and adaptive model updates, and thus are weighted accordingly. The prediction set retains labels that pass this weighted consistency check. This prediction set is translated into a confidence threshold for escalation in Section 5. 
+
+Initialization: confidence-based nonconformity score. To incorporate the model Mt’s own uncer-tainty estimation, we define the score using its rectified confidence: 
+
+s(x, y ; Mt) := ct(x)1{ft(x)̸ = y}, (3) where ft(x) = 1{pt(x) ≥ 1/2} is the rectified model prediction. The score is formally derived as the generalized inverse of the decision set of (1) in Appendix D. Intuitively, when y is the true label, a confident mistake receives a higher nonconformity score than an uncertain one. With 
+
+ct(x) = max {pt(x), 1 − pt(x)} in binary classification, this recovers the prediction-based score in Romano et al. (2020). Our construction is tailored to our escalation rule and accommodates model-provided confidence measures. 
+
+Offline: weighted cross-conformal calibration. A score is associated with a model. Prioritiz-ing query efficiency, Confident Jack constructs these scores by fitting leave-one-fold-out models 
+
+{M(k) 
+
+> t
+
+}Kk=1 . Each queried label can then support learning in some folds and calibration in another, avoiding a permanently separate calibration set. Let s(k) 
+
+> t
+
+:= s(·; M(k) 
+
+> t
+
+) and let z(k) be a designated point in the kth left-out dataset. With leave-one-out folds, this recovers leave-one-out cross-conformal prediction (Romano et al., 2020) and Jackknife+ (Barber et al., 2021) for binary classification. The weights restore the symmetry lost through adaptation (history-dependent selective escalation and model improvement). For a candidate (x, y ), a weight answers how likely each held-out query would be to occupy the test slot when we do not know the order of the offline dataset plus the test point. We find this probability by replaying the logged acquisition policy under possible permutations of the held-out groups and the test point. Let G be the allowed permutations and Λσt (x, y ) the likelihood of the observed acquisition decisions under permutation σ ∈ G; the required restrictions on G and the replay are detailed in Appendix D. Then, the exact conditional probability that the designated point 
+
+z(k) occupies the test slot is 
+
+w(k) 
+
+> t
+
+(x, y ) ∝ P 
+
+> {σ∈G:σ(k)= K+1 }
+
+Λσt (x, y ) k = 1 , . . . , K, (4) where σ(k) = K + 1 places the kth held-out group in the test slot K + 1 . With a fixed, time-homogeneous query propensity πt(x) ≡ π(x), these become the usual normalized inverse-propensity weights w(k) 
+
+> t
+
+(x) ∝ 1/π (x(k)) (Tibshirani et al., 2019; Prinster et al., 2022). 
+
+Online: co-evolving calibration particles. We shift the focus to computational efficiency in the online period. Replaying every possible history in (4) would be costly online. We thus restrict the replay to the offline period while fixing the observed order of the subsequent online stream. Since the online period is order-invariant with respect to the offline dataset, we can factor the weight as: 
+
+w(k) 
+
+> t
+
+(x, y ) ∝w(k) 
+
+> t0
+
+(x, y ) · Λ(k)
+
+> t0:t
+
+, (5) 6where t0 is the last offline checkpoint and Λ(k) 
+
+> t0:t
+
+is the likelihood of the observed online acquisition decisions for the kth held-out model; the derivation is deferred to Appendix D. This factorization places the main computational burden at the offline checkpoint to obtain {w(k) 
+
+> t0
+
+}. During the online period, the particle system {M(k) 
+
+> t
+
+} co-evolves with the main model Mt using the same online stream, giving adaptive scores as in (3) and efficiently maintaining the weights by appending the online likelihood as in (5). A trade-off is that new online feedback improves the models immediately but joins the pool of held-out calibration points only at the next offline checkpoint. Calibration therefore continues to use the offline feedback while its scores and weights adapt to the current model. The co-evolution avoids treating model adaptation as adversarial drift. For example, as the model particles improve, nonconformity scores on past feedback become lower, making it easier for (2) to reject inconsistent test labels, yielding less conservative prediction sets and thus fewer escalations. 
+
+Theorem 1 (Adaptive risk control) . Let Ct,ϵ be the prediction set defined in (2) with the co-evolving particle system {(w(k) 
+
+> t
+
+, s (k) 
+
+> t
+
+)}Kk=1 . Then, for any time t (either an offline checkpoint or an online step) and any user-specified risk tolerance ϵ ∈ (0 , 1) , we have 
+
+P (Yt /∈ C t,ϵ (Xt)) ≤ ϵ. 
+
+## 5 EXACTING GATES : S AFETY ESCALATION THRESHOLD ON CONFIDENCE 
+
+To get fast and simple escalation decisions, we translate the prediction set (2) into confidence gates that adapt in both time and space, as used in (1). We have two observations: (i) stabilized learning closes the gap between the main model and the leave-one-out particles, and (ii) the exclusion of the opposite label 1 − ft(x) from (2) indicates that it’s safe to accept the model’s chosen label ft(x),although it does not guarantee the inclusion of ft(x) (proved in Appendix E). Therefore, to test if the model is confident enough to reject its opposite label, the threshold is set to 
+
+λt(x) := Quantile 1−ϵ/ 2
+
+> Wt(x)
+
+P  
+
+> k∈W t(x)
+> w(k)
+> t(x)
+> Wt(x)
+
+δ{s(k) 
+
+> t
+
+(z(k))}
+
+
+
++ γct (x), (6) where weights w(k) 
+
+> t
+
+(x) := w(k) 
+
+> t
+
+(x, 1 − ft(x)) concern the opposite label, δ{x} is the Dirac measure at x, Wt(x) = P 
+
+> k∈W t(x)
+
+w(k) 
+
+> t
+
+(x) is the mass of the agreeing set Wt(x) := {k ∈ [K] : f (k) 
+
+> t
+
+(x) = 
+
+ft(x)}, and γct (x) = max k∈W t(x) max {0, c t(x) − c(k) 
+
+> t
+
+(x)} inflates the quantile to account for instability. We use the convention that max over empty Wt(x) is zero and Quantile c = ∞ for c > 1.Threshold (6) requires confidence to exceed a disagreement-inflated (1 −ϵ/ 2) -quantile of the agreeing particles’ nonconformity scores. Intuitively, if most particles agree with the current prediction and are mostly correct, then ct(x) passes the threshold more easily; if few particles agree with the current prediction and those that agree are overconfident, then ct(x) must be very high to pass the threshold. Not only is λt adaptive in time, but it also varies across the input space. For example, it’s lower where the particle predictions are more stable (smaller γct and larger Wt). 
+
+Corollary 1 (Ensemble risk control) . Let ˆYt be the decision output by CARE (1) with the safety escalation threshold in (6). Then, for any time t (either an offline checkpoint or an online step) and any user-specified risk tolerance ϵ ∈ (0 , 1) , we have R01 ( ˆYt) = P ( ˆYt̸ = Yt) ≤ ϵ.
+
+The proof is deferred to Appendix E, where we also relax the weight and score calculations to allow for approximation errors and accommodate computational constraints, offline or online. 
+
+## 6 ACTIVE MAX : A CTIVE ACQUISITION FOR LONG -TERM EFFICIENCY 
+
+An active acquisition module π in (1) independent of safety escalation is motivated by two needs. First, calibration requires replaying the acquisition policy on counterfactual histories to compute the weights in (4). If this acquisition policy coincides with the safety escalation policy, which is only known after calibration, then it creates a nested dependency and potentially exponential computational complexity. Second, active acquisition can potentially improve long-term data efficiency by prioritizing the human queries that can reduce future escalation frequency, which cannot be achieved by the safety escalation 7rule alone. This shares the same spirit as active statistical inference (Zrnic & Candes, 2024), but with a different objective: instead of maximizing inference precision, we aim to maximize efficiency. This double escalation mechanism separates the input and output of the calibration particle system and lets human review protect current decisions and guide learning for future ones. Specifically, between offline checkpoints, actively escalated queries ( 1 = At ∼ Bern( πt(Xt)) ) update the rectifier and calibration particles; queries escalated only by the safety threshold ( 1 = 1ct(Xt) ≤ λt(Xt))resolve the current decision, while their use for learning waits until the next checkpoint. We refer the reader to Appendix F for our active acquisition design. 
+
+## 7 EXPERIMENTS 
+
+We evaluate our method across four real-world safety-critical tasks, domains, and data modalities: collision detection in autonomous driving on the trajectory dataset nuPlan (Caesar et al., 2021), hate speech detection in LLM alignment on the text dataset HateBench (Shen et al., 2025), semantic safety in robotic tool use on the image dataset ASIMOV (Gemini Robotics Team, 2026), and hazard detection in the workplace on the video dataset iSafetyBench (Abdullah et al., 2025). Representative queries are shown in Figure 2. In all tasks, “AI” is an inexpensive model and “human” is a high-fidelity oracle. Results are reported over ten random seeds; detailed setups and full results are in Appendix A. Trajectory • Intersection Question: Safe? Label: No. 
+
+> Ego Recorded path
+
+(a) nuPlan Text • Group hostility  
+
+> Immigrants are taking jobs away from the native born. They rely on social welfare programs and are not as hard working as the native born. They are a drain on the tax payer.
+> Question: Hate speech? Label: Yes.
+
+(b) HateBench Image • Sharp object  
+
+> Instruction: Lift the object in the center of the table Constraint: Sharp surfaces can tear the gripper.
+> Question: Act? Label: No.
+
+(c) ASIMOV Video • Furnace fl are-up  
+
+> Frame at 4.10 s
+> Question: Hazard? Label: Yes.
+
+(d) iSafetyBench 
+
+Figure 2: Sample queries and benchmark labels. nuPlan shows recorded motion; its label refers to the benchmark simulation result. iSafetyBench shows one video frame. We compare with three baselines: prediction-powered inference (PPI) (Angelopoulos et al., 2023), which learns a linear rectifier without calibration; selective escalation (SE) (Jung et al., 2025), which calibrates AI confidence using conformal prediction without rectification; and PPI+SE, which combines the two and uses separate data for rectification and calibration. We also include three ablations: GPC+SE replaces the PPI rectifier in PPI+SE with a GP classification rectifier; static 
+
+CARE shares offline labels between rectification and calibration without online adaptation; and CARE 
+
+with PPI replaces our GP rectifier with the PPI rectifier. The full CARE uses GP rectification with an offline–online learning and calibration schedule. Here we present some representative results demonstrating four properties that are observed consis-tently across all experiments. 
+
+Cost efficiency under risk control. CARE achieves the lowest query complexity while keeping empirical risk below each tested tolerance. On iSafetyBench (Figure 3a), at the 5% risk tolerance, 
+
+CARE escalates 21.7% of queries to humans, compared with 57.1% for SE, giving a 62% reduction. 
+
+Fast learning. CARE quickly learns useful residual structure with fewer human queries. On ASIMOV (Figures 3b and 3c), CARE variants achieve significantly higher efficiency through early-stage learning. Residual Gauss enables faster adaptation than PPI, and Confident Jack overcomes the data inefficiency exhibited by PPI+SE. 
+
+Local adaptation. While calibration controls marginal risk (Theorem 1), our GP model is designed to adapt locally, powering CARE to achieve more balanced performance across the input space. We examine this behavior across six physically defined regions in nuPlan (Figure 4). At the final snapshot, 
+
+CARE achieves the largest model-risk reduction in every region, especially R1 and R2, where the 8AI SE PPI PPI+SE GPC+SE static CARE CARE (w/ PPI) CARE 0% 20% 40% 60% 80% 
+
+Cost 
+
+> 0% 2% 4% 6% 8% 10% 12% 14%
+> Risk
+
+(a) Risk–cost. 0 500 1,000  
+
+> Samples processed
+> 40% 60% 80% 100%
+> Human query rate
+
+(b) Human query rate. 0 500 1,000  
+
+> Samples processed
+> 10% 20% 30% 40% 50%
+> Recti fi ed model risk
+
+(c) Rectified-model risk. −10 0 10 20 30 40 50  
+
+> Δ human query (direct - inferred) (%)
+> Methods
+
+(d) Confidence sensitivity. 
+
+Figure 3: (a) iSafetyBench with AI-provided confidence and 10% preparation data for static methods. The x-axis is the total human query rate, and the y-axis is the empirical mean risk. Lines connect nominal risk targets of 2.5%, 5%, 7.5%, and 10%. Crosses mark risk exceeding the corresponding target. A Pareto frontier would lower-bound all methods from the lower left. (b)–(c) ASIMOV with inferred confidence, 5% risk target, and 20% preparation data for static methods. The x-axis covers all samples regardless of escalation, and the y-axis uses a rolling window of 100 samples. 
+
+(d) iSafetyBench query-rate differences at the 2.5% risk target and 10% static preparation. Positive deviations indicate efficiency degradation. R1 R2 R3 R4 R5 R6          
+
+> 55% 70% 80% 90% 95% R1 R2 R3 R4 R5 R6
+> R1 R2 R3 R4 R5 R6
+> R1 R2 R3 R4 R5 R6
+> 2% 4% 5% 6% 10% R1 R2 R3 R4 R5 R6
+> R1 R2 R3 R4 R5 R6
+> Initial
+> Recti fi ed-model accuracy
+> After 2,000 decisions After 10,000 decisions
+> Ensemble risk
+> AI SE PPI PPI+SE GPC+SE static CARE CARE
+
+(a) Regional adaptation. R1 R2 R3 R4 R5 R6 SE PPI PPI+SE GPC+SE static CARE CARE                                                         
+
+> 0.0 0.0 0.0 0.0 0.0 0.0 -3.8 -3.0 0.0 +1.3 0.0 0.0 0.0 -1.7 +0.3 +1.7 0.0 +0.1 -7.0 -6.7 +0.8 +2.9 -0.2 +0.6 -12.8 -13.3 -0.3 -0.1 -0.1 +0.1 -24.2 -21.8 -1.8 -3.4 -0.6 0.0 −20 −10 010 20 Risk change (%) R1 R2 R3 R4 R5 R6 AI SE PPI PPI+SE GPC+SE static CARE CARE
+> +32.7+31.9 +1.9 +6.5 +1.8 +1.1 -5.0 -5.0 -2.2 -3.4 +1.8 +1.1 +29.0+28.8 +1.9 +7.8 +1.8 +1.1 -4.1 -3.6 -0.2 -1.4 +0.7 +0.5 -0.5 -1.5 -2.0 -1.3 -1.9 -0.8 -2.7 -3.7 -2.2 -2.9 -1.7 -0.8 -2.0 -1.7 -1.5 -1.7 -1.1 -0.5
+> -33 -10 -1 0+1 +10 +33 Risk − target (%)
+
+(b) Final regional differences. 
+
+Figure 4: Regional model improvement and ensemble risk at the 5% target, with 20% preparation data for static methods. Radars show successive snapshots; heatmaps summarize the final snapshot on the same held-out panel of 2,000 scenarios. The risk target is highlighted as a dashed ring in the lower row, and the red band and outlines indicate exceedance. Region definition: open-loop time to collision below 1 s for R1–R2, finite and at least 1 s for R3–R4, and infinite for R5–R6; average displacement error below 5 m for R1, R3, R5, and at least 5 m for R2, R4, R6. original AI struggles. Its mean ensemble risk stays below the target in all six regions and is closest to the target among methods below it in R5 and R6. 
+
+Robustness and generality. CARE performs consistently across different domains, AI models, and confidence measures. On HateBench (Table 5), CARE reduces human queries and rectified-model error across all eight black-box AI models, whose raw error rates range from 14.5% to 44.7%. Query savings are 49–66% w.r.t. SE and 26–48% w.r.t. PPI+SE, with relative error reductions of 15.5–70.5%. On iSafetyBench (Figure 3d), CARE maintains similar query efficiency under direct (AI-provided) confidence, which is overconfident, and confidence inferred from the AI’s predictive probability. For 9SE and PPI variants, however, the query rate increases by 28.0 pp and 11.8+ pp when switching from inferred to direct confidence. CARE gains this robustness by also rectifying the confidence measure. 
+
+## 8 CONCLUSION 
+
+We introduced CARE , an end-to-end framework for safe and efficient human–AI collaborative decision making. By combining model-aware residual learning with model-agnostic adaptive calibration,  
+
+> CARE
+
+uses human feedback to improve future predictions while maintaining control of the final system’s risk. Experiments on real-world safety-critical tasks demonstrate substantial query savings across domains, AI models, and confidence measures. Together, these results provide a theoretical and empirical foundation for safeguarding continuously improving AI models towards greater autonomy. 
+
+## REFERENCES 
+
+Raiyaan Abdullah, Yogesh Singh Rawat, and Shruti Vyas. iSafetyBench: A video-language bench-mark for safety in industrial environment. In 2025 IEEE/CVF International Conference on Computer Vision Workshops (ICCVW) , pp. 1444–1453. IEEE, 2025. Anastasios N Angelopoulos, Stephen Bates, Clara Fannjiang, Michael I Jordan, and Tijana Zrnic. Prediction-powered inference. Science , 382(6671):669–674, 2023. Apurva Badithela, David Snyder, Lihan Zha, Joseph Mikhail, Matthew O’Kelly, Anushri Dixit, and Anirudha Majumdar. Reliable and scalable robot policy evaluation with imperfect simulators. In 
+
+Conference on Robot Learning (CoRL) , 2025. Yuntao Bai, Saurav Kadavath, Sandipan Kundu, Amanda Askell, Jackson Kernion, Andy Jones, Anna Chen, Anna Goldie, Azalia Mirhoseini, Cameron McKinnon, et al. Constitutional AI: Harmlessness from AI feedback. arXiv preprint arXiv:2212.08073 , 2022. Rina Foygel Barber, Emmanuel J. Candès, Aaditya Ramdas, and Ryan J. Tibshirani. Predictive inference with the jackknife+. The Annals of Statistics , 49(1), 2021. ISSN 0090-5364. doi: 10.1214/20-AOS1965. Aadyot Bhatnagar, Huan Wang, Caiming Xiong, and Yu Bai. Improved online conformal prediction via strongly adaptive online learning. In International Conference on Machine Learning , pp. 2337–2363. PMLR, 2023. Holger Caesar, Juraj Kabzan, Kok Seang Tan, Whye Kit Fong, Eric Wolff, Alex Lang, Luke Fletcher, Oscar Beijbom, and Sammy Omari. nuPlan: A closed-loop ML-based planning benchmark for autonomous vehicles. arXiv preprint arXiv:2106.11810 , 2021. Paul F Christiano, Jan Leike, Tom Brown, Miljan Martic, Shane Legg, and Dario Amodei. Deep reinforcement learning from human preferences. In Advances in Neural Information Processing Systems (NeurIPS) , volume 30, 2017. Ran El-Yaniv and Yair Wiener. On the Foundations of Noise-free Selective Classification. Journal of Machine Learning Research , 11:1605–1641, 2010. Shai Feldman, Liran Ringel, Stephen Bates, and Yaniv Romano. Achieving risk control in online learning settings. Transactions on Machine Learning Research , 2023. ISSN 2835-8856. Gemini Robotics Team. Gemini Robotics 2: Safety Evaluations. Technical report, Google DeepMind, 2026. Isaac Gibbs and Emmanuel Candes. Adaptive conformal inference under distribution shift. Advances in Neural Information Processing Systems , 34:1660–1672, 2021. Isaac Gibbs and Emmanuel J Candès. Conformal inference for online prediction with arbitrary distribution shifts. Journal of Machine Learning Research , 25(162):1–36, 2024. Patrick Hemmer, Max Schemmer, Niklas Kühl, Michael Vö ssing, and Gerhard Satzger. Complemen-tarity in human-ai collaboration: Concept, sources, and evidence. European Journal of Information Systems , 34(6):979–1002, 2025. 10 Zilin Huang, Zihao Sheng, Yansong Qu, Junwei You, and Sikai Chen. VLM-RL: A unified vision language models and reinforcement learning framework for safe autonomous driving. arXiv preprint arXiv:2412.15544 , 2024. Erik Jones, Shiori Sagawa, Pang Wei Koh, Ananya Kumar, and Percy Liang. Selective classification can magnify disparities across groups. In International Conference on Learning Representations ,2021. Jaehun Jung, Faeze Brahman, and Yejin Choi. Trust or escalate: Llm judges with provable guarantees for human agreement. In International Conference on Learning Representations , volume 2025, pp. 3101–3125, 2025. Harrison Lee, Samrat Phatale, Hassan Mansoor, Thomas Lu, Thomas Mesnard, Colton Bishop, Victor Carvalho, Felix Jiang, Doina Precup, Antoine Fleury, et al. RLAIF: Scaling reinforcement learning from human feedback with AI feedback. In International Conference on Learning Representations (ICLR) , 2024. Jing Lei, Max G’Sell, Alessandro Rinaldo, Ryan J Tibshirani, and Larry Wasserman. Distribution-free predictive inference for regression. Journal of the American Statistical Association , 113(523): 1094–1111, 2018. Rachel Luo, Heng Yang, Michael Watson, Apoorva Sharma, Sushant Veer, Edward Schmerling, and Marco Pavone. Sim2val: Leveraging correlation across test platforms for variance-reduced metric estimation. arXiv preprint arXiv:2506.20553 , 2025. Rachel Luo, Michael Watson, Apoorva Sharma, Heng Yang, Han Qi, Edward Schmerling, Sushant Veer, Boris Ivanovic, and Marco Pavone. X4Val: Learning Neural Surrogates for Variance-Reduced Policy Evaluation, 2026. Yecheng Jason Ma, William Liang, Guanzhi Wang, De-An Huang, Osbert Bastani, Dinesh Jayaraman, Yuke Zhu, Linxi Fan, and Anima Anandkumar. Eureka: Human-level reward design via coding large language models. In International Conference on Learning Representations (ICLR) , 2024. Thomas P Minka. Expectation propagation for approximate bayesian inference. arXiv preprint arXiv:1301.2294 , 2013. Hussein Mozannar and David Sontag. Consistent estimators for learning to defer to an expert. In 
+
+International conference on machine learning , pp. 7076–7087. PMLR, 2020. Harris Papadopoulos, Kostas Proedrou, Volodya Vovk, and Alex Gammerman. Inductive confidence machines for regression. In European conference on machine learning , pp. 345–356. Springer, 2002. Drew Prinster, Anqi Liu, and Suchi Saria. JAWS: Auditing predictive uncertainty under covariate shift. Advances in Neural Information Processing Systems , 35:35907–35920, 2022. Allen Z Ren, Anushri Dixit, Alexandra Bodrova, Sumeet Singh, Stephen Tu, Noah Brown, Peng Xu, Leila Takayama, Fei Xia, Jake Varley, et al. Robots that ask for help: Uncertainty alignment for large language model planners. arXiv preprint arXiv:2307.01928 , 2023. Juan Rocamonde, Victoriano Montesinos, Elvis Nava, Ethan Perez, and David Lindner. Vision-language models are zero-shot reward models for reinforcement learning. In International Confer-ence on Learning Representations (ICLR) , 2024. Yaniv Romano, Matteo Sesia, and Emmanuel Candes. Classification with valid and adaptive coverage. 
+
+Advances in neural information processing systems , 33:3581–3591, 2020. Pierre Sermanet, Anirudha Majumdar, Alex Irpan, Dmitry Kalashnikov, and Vikas Sindhwani. Generating robot constitutions & benchmarks for semantic safety. arXiv preprint arXiv:2503.08663 ,2025. Xinyue Shen, Yixin Wu, Yiting Qu, Michael Backes, Savvas Zannettou, and Yang Zhang. HateBench: Benchmarking hate speech detectors on LLM -generated content and hate campaigns. In 34th USENIX Security Symposium (USENIX Security 25) , pp. 221–240, 2025. 11 Chonghao Sima, Katrin Renz, Kashyap Chitta, Li Chen, Hanxue Zhang, Chengen Xie, Ping Luo, Andreas Geiger, and Hongyang Li. Drivelm: Driving with graph visual question answering. arXiv preprint arXiv:2312.14150 , 2023. Aman Sinha, Payam Nikdel, Supratik Paul, and Shimon Whiteson. Rate-informed discovery via bayesian adaptive multifidelity sampling. arXiv preprint arXiv:2411.17826 , 2024. Ryan J Tibshirani, Rina Foygel Barber, Emmanuel Candes, and Aaditya Ramdas. Conformal prediction under covariate shift. Advances in neural information processing systems , 32, 2019. Harsh Vardhan, Sunav Choudhary, Natwar Modani, and Arya Mazumdar. Improving selective classification with pairwise queries for binary classification. Machine Learning , 115(7):149, 2026. Harit Vishwakarma, Heguang Lin, Frederic Sala, and Ramya Korlakai Vinayak. Promises and pitfalls of threshold-based auto-labeling. Advances in Neural Information Processing Systems , 36: 51955–51990, 2023. Vladimir Vovk. Cross-conformal predictors. Annals of Mathematics and Artificial Intelligence , 74 (1):9–28, 2015. Christopher KI Williams and Carl Edward Rasmussen. Gaussian Processes for Machine Learning ,volume 2. MIT press Cambridge, MA, 2006. Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin, Zhuohan Li, Dacheng Li, Eric P Xing, et al. Judging LLM-as-a-judge with MT-bench and chatbot arena. In Advances in Neural Information Processing Systems (NeurIPS) , volume 36, 2023. Tijana Zrnic and Emmanuel Candes. Active statistical inference. In Proceedings of the 41st International Conference on Machine Learning , volume 235 of Proceedings of Machine Learning Research , pp. 62993–63010. PMLR, 2024. 12 A EXTENDED EXPERIMENTAL SETUPS AND RESULTS 
+
+Decisions, queries, and metrics. Each dataset comes with a binary decision task, with a fixed inexpensive predictor as “AI”, and a benchmark reference label as the correct “human” response. Ensemble risk divides final errors by all processed examples, including queried examples which contribute no error. Query rate divides all oracle calls by the same denominator and includes initial offline static preparation dataset (training and/or calibration) and online adaptive escalations. Reusing a purchased label for fitting or calibration does not incur a second query. Rectified-model risk instead evaluates the predictor before oracle intervention, including examples that are ultimately queried. 
+
+Paired evaluation. Each study uses ten randomized trials, pairing the data stream within trial across methods, risk targets, and preparation budgets. Means and standard errors across the ten trials are reported. nuPlan and HateBench have reserved evaluation panels for assessing the rectified model. This evaluation/test dataset does not enter the data stream, is not used for training or calibration, and thus is not counted in the query complexity. Feature design may use covariate information, but no label information is revealed in this preparation stage. 
+
+Methods. 
+
+• AI uses the original prediction without queries. • PPI fits a linear rectifier on the static preparation data and then predicts without safety escalation. • SE calibrates the original AI confidence. • PPI+SE splits the static preparation data approximately equally between fitting the linear rectifier and calibrating escalation. • GPC+SE replaces the linear rectifier in PPI+SE with a GP classifier, but otherwise uses the same static preparation and calibration. • Static CARE uses GP rectification and cross-fitted calibration on the shared static preparation data, then freezes the fitted policy. • (Adaptive) CARE does not have static preparation data. It starts with a conservative confidence threshold and learns from labels obtained through escalation. • CARE with PPI replaces the GP rectifier in CARE with a linear one, but otherwise uses the same adaptive calibration and escalation. 
+
+Prepare–offline–online schedule. Static methods reserves a preparation fraction of the entire data stream. This fraction is thus a hyperparameter for static methods, but not for (adaptive) CARE . Offline checkpoints are a hyperparameter for adaptive methods, and follow batches of 32, 64, 128, 256, 512, 1,024, and 2,048 newly queried labels, with the final interval repeated. 
+
+Gap between theory and practice. Active escalation coincides with safety escalation in our experiments. Computational approximations include sampled counterfactual replays using truncated horizons and logged acquisition decisions, and shorter EP iterations for the particle system. Reported empirical risk only approximates the marginal risk guaranteed by Theorem 1 and Corollary 1. Table 1 summarizes the principal settings. Table 1: Shared protocol and dataset-specific settings. The default operating point uses 20% prepara-tion and a 5% risk target.                                
+
+> nuPlan HateBench iSafetyBench ASIMOV Stream dataset size 10,000 7,054 1,100 1,437 Reserved test panel 2,000 784 ——Rolling-window size 1,000 500 100 100 GP feature dimension 256 64 256 256 Particle system size 24 520 20 Preparation fractions (%) [10, 20, 30, 40] [10, 20, 30, 40] [10, 20, 30, 40] [10, 20, 30, 40] Risk targets (%) [1, 3, 5, 7.5, 10] [1, 3, 5, 7.5, 10] [2.5, 5, 7.5, 10] [5, 10, 15, 20]
+
+A.1 NU PLAN 
+
+Task and evaluation. We use nuPlan driving scenarios (Caesar et al., 2021) with its inexpensive “AI” predictor as the open-loop simulator and its “human” oracle as the closed-loop oracle. The binary task 13 is to collision prediction, with the label being 1 if the closed-loop simulation has a time-to-collision (TTC) of less than one second. The “AI” predictor’s probability of safety is a probit transform of the open-loop TTC margin, with scale 0.5 seconds and probabilities clipped to [10 −6, 1 − 10 −6].The population contains 49,763 scenarios from six intersection-related scenario types and 63 driving logs. A fixed, label-blind split reserves 9,953 scenarios, stratified by the six physical regions in Table 3; 39,810 remain eligible for streaming. Each of ten paired trials randomly orders this pool and processes its first 10,000 scenarios. Regional evaluation uses the same region-stratified panel of 2,000 reserved scenarios for every trial and method, with population region weights used for pooled snapshot metrics. Driving logs occur in both partitions, so this evaluates within-population adaptation. 
+
+Feature space. The rectifier receives ten engineered open-loop scalars and eight joint principal components of 384 ego-, agent-, and road-embedding coordinates. The scalar and embedding blocks contribute 80% and 20% of normalized feature energy, respectively. Representations are fitted without labels on each trial’s first 2,000 covariates, frozen, and shared across methods. 
+
+Risk–cost tradeoffs. Figure 5 and Table 2 show the tradeoff across all five risk targets and four preparation budgets. At the primary operating point, CARE achieves 4.36% ensemble risk with 26.6% queries, compared with 50.3% for SE, 45.3% for PPI+SE, and 45.8% for static CARE . These correspond to query reductions of 47%, 41%, and 42%, respectively. Mean CARE risk is below every tested target, while query cost falls from 74.6% at the 1% target to 12.4% at the 10% target. Larger static preparation budgets generally reduce ensemble risk but increase total query cost: buying more labels does not ensure that subsequent query savings repay their cost. Adaptive CARE avoids choosing a fixed preparation size and has lower mean query cost than these three comparators throughout the reported grid. 0% 25% 50% 75% 100%           
+
+> Cost
+> 0% 4% 8% 12%
+> Risk
+> (a) Risk-target sweep. 0% 15% 30% 45% 60%
+> Cost
+> 3% 6% 9% 12%
+> Risk (b) Preparation-budget sweep. AI SE PPI PPI+SE static CARE CARE
+
+Figure 5: nuPlan risk–cost tradeoffs. (a) Targets of 1%, 3%, 5%, 7.5%, and 10%, with 20% static preparation. (b) 10%, 20%, 30%, and 40% preparation at the 5% target, shown with decreasing marker opacity. 
+
+Adaptive learning. Figure 6 presents adaptive learning through model improvement, escalation cost, and final-ensemble error. In the first 1,000 arrivals, CARE queries 43.8% and has 13.1% model risk; in the final 1,000 arrivals these become 25.6% and 8.6%. Static CARE ends at 32.0% queries and 11.1% model risk. Continued residual learning therefore improves decisions before intervention and reduces the amount of intervention needed. The final-window ensemble risk is 3.7% for CARE . Short-window risk may fluctuate around the nominal target; these trajectories describe successive deployed policies rather than a guarantee for every realized window. 
+
+Local adaptation. The frozen-model analysis in Figure 4 isolates spatial variation from changes in the arriving stream. Table 3 supplies the region definitions, evaluation support, and final CARE values. The strongest correction occurs in R1 and R2, where open-loop TTC is below one second: model risk falls from 37.7% to 13.6% and from 36.9% to 15.1%, respectively. These regions also receive the most oracle queries, reflecting their greater remaining difficulty. On the full weighted panel, CARE 
+
+reduces model risk from 12.7% initially to 10.2% after 2,000 decisions and 7.9% after 10,000; static 14 Table 2: nuPlan risk–cost tradeoffs. Ensemble risk / oracle query rate (%) over the complete target and static-preparation grid. 
+
+Target Prep. SE PPI+SE static CARE CARE 
+
+1% 10% 0.00 / 100.0 0.57 / 87.0 0.43 / 84.3 0.70 / 74.6 1% 20% 0.00 / 100.0 0.56 / 87.1 0.26 / 86.5 0.70 / 74.6 1% 30% 0.00 / 100.0 0.55 / 87.2 0.16 / 89.3 0.70 / 74.6 1% 40% 0.00 / 100.0 0.47 / 89.6 0.10 / 91.5 0.70 / 74.6 3% 10% 2.04 / 66.0 2.46 / 56.9 1.85 / 55.4 3.00 / 37.7 3% 20% 1.76 / 70.5 2.05 / 63.3 1.27 / 62.4 3.00 / 37.7 3% 30% 1.28 / 78.2 1.76 / 68.4 0.97 / 67.2 3.00 / 37.7 3% 40% 1.15 / 81.0 1.55 / 72.1 0.72 / 72.8 3.00 / 37.7 5% 10% 3.60 / 44.2 4.04 / 41.4 3.23 / 38.8 4.36 / 26.6 5% 20% 3.20 / 50.3 3.63 / 45.3 2.48 / 45.8 4.36 / 26.6 5% 30% 2.79 / 56.5 3.12 / 52.6 1.95 / 52.5 4.36 / 26.6 5% 40% 2.40 / 62.7 2.75 / 58.9 1.53 / 59.6 4.36 / 26.6 7.5% 10% 5.73 / 35.4 6.05 / 28.9 4.98 / 27.5 6.06 / 18.1 7.5% 20% 5.34 / 41.6 5.65 / 34.2 4.11 / 34.4 6.06 / 18.1 7.5% 30% 4.38 / 49.9 4.88 / 42.1 3.32 / 42.8 6.06 / 18.1 7.5% 40% 4.15 / 55.4 4.28 / 49.8 2.73 / 51.1 6.06 / 18.1 10% 10% 8.88 / 22.9 8.04 / 21.5 6.73 / 20.7 7.51 / 12.4 10% 20% 7.80 / 31.7 7.55 / 27.8 5.45 / 29.1 7.51 / 12.4 10% 30% 6.77 / 40.3 6.49 / 37.0 4.65 / 37.7 7.51 / 12.4 10% 40% 5.84 / 48.8 5.81 / 45.3 3.82 / 47.1 7.51 / 12.4 0 5,000 10,000          
+
+> Samples processed
+> 20% 40% 60% 80% 100%
+> Oracle query rate 05,000 10,000
+> Samples processed
+> 0% 5% 10% 15%
+> Recti fi ed-model risk 05,000 10,000
+> Samples processed
+> 0% 1.5% 3% 4.5% 6%
+> Ensemble risk AI SE PPI PPI+SE static CARE CARE
+
+Figure 6: nuPlan learning trajectories at the 5% target and 20% static preparation. Lines average trailing windows of up to 1,000 arrivals over ten trials. Gray shading marks the 2,000-arrival static preparation period. AI and PPI are shown as uncalibrated references in the model-risk panel. The dotted horizontal line is the nominal ensemble-risk target. 
+
+CARE remains at 10.4% after preparation. Final mean regional ensemble risks for CARE range from 3.0% to 4.5%, all below the 5% target. As in the main text, GPC+SE also remains below the target in every region, whereas SE and PPI+SE exceed it in R5 and R6. This is an empirical regional balance result; the calibration target concerns marginal risk, and the smaller regions have correspondingly larger sampling uncertainty. A.2 HATE BENCH 
+
+Task and evaluation. We use HateBench responses (Shen et al., 2025) with eight cached detectors as the “AI” predictors and released human hate/non-hate annotations as the oracle labels. The population contains 7,838 responses; a fixed, label-blind split reserves 784 responses by normalized-text group, leaving 7,054 for each trial. The reserved panel and stream orders are shared across detectors. Prompt families may occur in both partitions, so this evaluates within-population adaptation. Perspective and both Detoxify variants use the identity-attack score at threshold 0.5; the other detectors retain 15 Region Panel AI risk Final CARE (%) size (%) Model risk Ensemble risk Queries R1 TTC < 1, ADE < 5 53 37.7 13 .6 ± 1.5 3.0 ± 1.1 49 .6 ± 5.0
+
+R2 TTC < 1, ADE ≥ 5 293 36.9 15 .1 ± 0.5 3.3 ± 0.4 56 .5 ± 3.7
+
+R3 Finite TTC ≥ 1, ADE < 5 320 6.9 5.1 ± 0.2 3.5 ± 0.2 13 .8 ± 1.9
+
+R4 Finite TTC ≥ 1, ADE ≥ 5 374 11.5 8.1 ± 0.5 3.3 ± 0.3 30 .6 ± 2.8
+
+R5 Infinite TTC, ADE < 5 468 6.8 6.3 ± 0.2 3.9 ± 0.3 11 .9 ± 1.4
+
+R6 Infinite TTC, ADE ≥ 5 492 6.1 6.1 ± 0.1 4.5 ± 0.3 10 .1 ± 1.6
+
+Table 3: nuPlan regional definitions and final frozen-model results at the 5% target. TTC (time to collision) is in seconds and ADE (average displacement error) is in meters. their native binary decisions with scores oriented toward the hate class. The confidence supplied to escalation is the absolute margin from 0.5, scaled to [0 , 1] .
+
+Feature space. The rectifier receives response-text TF–IDF features with unigrams and bigrams, reduced to 32 singular-vector coordinates, together with log response length and the selected detector’s available category scores. Coordinates are standardized, clipped at six, and divided by the square root of the feature dimension. Representations are fitted without labels on each trial’s first 20% of covariates, frozen, and shared across methods. The same fixed GP prior is used across all eight detectors. 
+
+Risk–cost tradeoffs. Figure 7 show the tradeoff across all five risk targets for all models, and selectively, Table 4 reports the tradeoff across four preparation budgets for Perspective. With Perspective, at the 5% target and 10% static preparation, CARE achieves 3.71% ensemble risk with 21.5% queries, compared with 54.0% for SE, 31.8% for PPI+SE, and 28.3% for static CARE . Query cost falls from 42.2% at the 1% target to 13.7% at the 10% target. Larger static preparation budgets generally reduce ensemble risk but increase total query cost. Adaptive CARE has lower mean query cost than these three comparators throughout the reported grid. Similar trends hold with other models. 0% 20% 40% 60% 80% 
+
+> Cost
+> 0% 5% 10% 15% 20%
+> Risk
+
+(a) Perspective. 0% 20% 40% 60%  
+
+> Cost
+> 0% 4% 8% 12% 16%
+> Risk
+
+(b) Moderation. 0% 20% 40% 60% 80%  
+
+> Cost
+> 0% 8% 16% 24% 32%
+> Risk
+
+(c) Detoxify Original. 0% 20% 40% 60% 80%  
+
+> Cost
+> 0% 8% 16% 24% 32%
+> Risk
+
+(d) Detoxify Unbiased. 0% 20% 40% 60% 80% 
+
+> Cost
+> 0% 4% 8% 12% 16%
+> Risk
+
+(e) LFTW. 0% 20% 40% 60%  
+
+> Cost
+> 0% 4% 8% 12%
+> Risk
+
+(f) TweetHate. 0% 20% 40% 60% 80%  
+
+> Cost
+> 0% 10% 20% 30% 40%
+> Risk
+
+(g) HSBERT. 0% 20% 40% 60% 80%  
+
+> Cost
+> 0% 10% 20% 30% 40%
+> Risk
+
+(h) BERTHateXplain. AI SE PPI PPI+SE static CARE CARE 
+
+Figure 7: HateBench risk–cost tradeoffs with different models. Targets of 1%, 3%, 5%, 7.5%, and 10%, with 10% static preparation. 
+
+Adaptive learning. Figure 8 presents adaptive learning with Perspective through model improvement, escalation cost, and final-ensemble error. In the first 500 arrivals, CARE queries 41.4% and has 14.3% model risk; in the final 500 arrivals these become 16.8% and 9.4%. Continued residual learning 16 Table 4: HateBench risk–cost tradeoffs with Perspective. Ensemble risk / oracle query rate (%) over the complete target and static-preparation grid. 
+
+Target Prep. SE PPI+SE static CARE CARE 
+
+1% 10% 0.86 / 78.6 0.67 / 56.7 0.77 / 51.4 1.02 / 42.2 1% 20% 0.81 / 80.3 0.54 / 57.5 0.69 / 53.8 1.02 / 42.2 1% 30% 0.70 / 82.8 0.57 / 59.8 0.60 / 58.6 1.02 / 42.2 1% 40% 0.59 / 85.3 0.53 / 64.1 0.53 / 64.0 1.02 / 42.2 3% 10% 2.58 / 64.6 1.97 / 41.5 2.26 / 36.1 2.64 / 27.1 3% 20% 2.31 / 68.2 2.01 / 41.8 2.02 / 40.7 2.64 / 27.1 3% 30% 1.98 / 72.5 1.66 / 48.5 1.73 / 47.3 2.64 / 27.1 3% 40% 1.73 / 76.0 1.58 / 54.8 1.62 / 54.0 2.64 / 27.1 5% 10% 4.01 / 54.0 3.59 / 31.8 3.75 / 28.3 3.71 / 21.5 5% 20% 3.70 / 58.3 3.56 / 34.2 3.50 / 33.8 3.71 / 21.5 5% 30% 3.20 / 63.6 3.20 / 41.2 3.04 / 41.4 3.71 / 21.5 5% 40% 2.87 / 68.1 2.64 / 49.7 2.78 / 48.9 3.71 / 21.5 7.5% 10% 6.11 / 43.6 5.63 / 24.1 5.86 / 21.3 4.91 / 16.9 7.5% 20% 5.50 / 49.2 5.45 / 28.1 5.36 / 27.8 4.91 / 16.9 7.5% 30% 4.79 / 55.6 4.94 / 35.7 4.67 / 36.1 4.91 / 16.9 7.5% 40% 4.22 / 61.4 4.24 / 44.8 4.29 / 44.4 4.91 / 16.9 10% 10% 8.48 / 35.5 7.95 / 17.6 7.68 / 16.5 6.03 / 13.7 10% 20% 7.68 / 42.3 7.36 / 23.2 6.84 / 24.0 6.03 / 13.7 10% 30% 6.75 / 49.4 6.77 / 31.4 5.94 / 32.9 6.03 / 13.7 10% 40% 5.82 / 56.5 5.73 / 41.3 5.19 / 42.2 6.03 / 13.7 
+
+therefore improves decisions before intervention and reduces the amount of intervention needed. The final-window ensemble risk is 3.7% for CARE .0 2,000 4,000 6,000       
+
+> Samples processed
+> 20% 40% 60% 80% 100%
+> Human query rate 02,000 4,000 6,000
+> Samples processed
+> 12% 16% 20%
+> Recti fi ed-model risk 02,000 4,000 6,000
+> Samples processed
+> 0% 1.5% 3% 4.5%
+> Ensemble risk
+
+AI SE PPI PPI+SE static CARE CARE 
+
+Figure 8: HateBench learning trajectories with Perspective at the 5% target and 10% static preparation. Lines average complete trailing windows of 500 arrivals over ten trials. Gray shading marks the 705-arrival static preparation period. AI and PPI are shown as uncalibrated references in the model-risk panel. The dotted horizontal line is the nominal ensemble-risk target. 
+
+Robustness across AI models. Table 5 summarize query cost and held-out model improvement across all eight detectors. At the 5% target and 10% static preparation, CARE uses 15.6–30.2% queries with mean ensemble risks of 3.71–5.31%. These correspond to query reductions of 49–66% relative to SE and 26–48% relative to PPI+SE. On the reserved panel, raw model risk ranges from 14.2% to 47.3%, while final CARE model risk ranges from 10.8% to 14.6%. The relative reductions of 15.5–70.5% show that residual learning improves substantially different initial predictors. 17 Table 5: HateBench comparison across AI models at the 5% target and 10% static preparation. All values are percentages. Raw AI error is measured on the stream; model-error reduction is measured on the reserved panel. 
+
+AI model Raw AI error Human query rate Relative improvement SE PPI+SE CARE Query saving vs SE ↑
+
+Query saving vs PPI+SE ↑
+
+Model-error reduction ↑
+
+Perspective 20.9 54 .0 ± 0.9 31 .8 ± 1.5 21 .5 ± 0.7 60.2 32.5 40.5 Moderation 15.3 35 .7 ± 1.0 30 .2 ± 1.7 15 .6 ± 1.2 56.3 48.2 15.5 Detoxify Original 34.1 64 .0 ± 0.5 39 .3 ± 1.5 27 .7 ± 1.0 56.7 29.6 58.6 Detoxify Unbiased 34.5 70 .6 ± 0.6 35 .1 ± 1.3 24 .3 ± 0.7 65.5 30.6 65.8 LFTW 18.6 52 .0 ± 1.6 36 .9 ± 1.2 24 .2 ± 1.0 53.4 34.3 27.2 TweetHate 14.5 41 .9 ± 1.1 35 .3 ± 1.4 21 .4 ± 1.6 49.0 39.3 23.4 HSBERT 39.4 60 .6 ± 0.5 40 .3 ± 0.9 29 .3 ± 0.9 51.6 27.2 65.7 BERTHateXplain 44.7 68 .8 ± 1.0 40 .7 ± 1.2 30 .2 ± 0.7 56.2 25.9 70.5 
+
+A.3 ISAFETY BENCH 
+
+Task and evaluation. We use iSafetyBench videos (Abdullah et al., 2025) for binary workplace hazard detection, with the frozen Qwen3-VL-2B-Instruct model as the “AI” predictor and released category annotations as the oracle labels. The population contains 1,100 clips: 420 hazardous and 680 routine. The AI receives 4–32 frames sampled across each clip, without audio. Its hazard probability 
+
+pA is obtained from the two answer logits, and a separate Yes/No follow-up supplies direct confidence 
+
+cdirect = P (Yes ). We compare this with inferred confidence cinferred = 2 |pA − 1/2|, holding the video inputs and initial AI decisions fixed. Each trial processes all 1,100 clips from 151 source-video families, grouped within calibration folds. 
+
+Feature space. The rectifier receives the 2,048-dimensional final-layer prompt state, reduced to 32 principal components. Representations are fitted without labels on each trial’s first 20% of covariates, frozen, and shared across methods and confidence measures. 
+
+Risk–cost tradeoffs. Figure 9 show the tradeoff across all four risk targets and four preparation budgets under both confidence measures. At the 5% target and 10% static preparation, direct-confidence CARE achieves 3.79% ensemble risk with 21.7% queries, compared with 57.1% for SE and 26.7% for static CARE . With inferred confidence, it achieves 2.86% risk with 24.8% queries, compared with 35.1% and 27.4% for these baselines. Mean CARE risk is below every tested target under both confidence measures. Larger static preparation budgets generally reduce ensemble risk but increase total query cost: static CARE ’s query rate rises from 26.7% to 50.2% across the direct-confidence budget sweep at the 5% target. 0% 25% 50% 75% 100% 
+
+> Cost
+> 0% 5% 10% 15%
+> Risk
+
+(a) Direct: risk sweep. 10% 20% 30% 40%  
+
+> Static preparation
+> 0% 20% 40% 60% 80% 100%
+> Cost
+
+(b) Direct: prep. sweep. 0% 25% 50% 75% 100%  
+
+> Cost
+> 0% 5% 10% 15%
+> Risk
+
+(c) Inferred: risk sweep. 10% 20% 30% 40%  
+
+> Static preparation
+> 0% 20% 40% 60% 80% 100%
+> Cost
+
+(d) Inferred: prep. sweep. AI SE PPI PPI+SE static CARE CARE 
+
+Figure 9: iSafetyBench risk–cost tradeoffs. (a, c) Targets of 2.5%, 5%, 7.5%, and 10%, with 10% static preparation. (b, d) 10%, 20%, 30%, and 40% preparation at the 5% target. 
+
+Adaptive learning. Figure 10 presents adaptive learning through model improvement, escalation cost, and final-ensemble error. With direct confidence, CARE queries 25.3% and has 9.3% model risk 18 in the window ending at 300 clips; in the final 100 clips these become 6.9% and 4.8%. Static CARE 
+
+ends at 16.0% queries and 9.4% model risk. Continued residual learning therefore improves decisions before intervention and reduces the amount of intervention needed. The inferred-confidence results show a similar reduction in model risk, reaching 4.5% in the final window. 0 500 1,000   
+
+> Samples processed
+> 0% 20% 40% 60% 80% 100%
+> Human query rate 0500 1,000
+> Samples processed
+> 0% 5% 10% 15% 20% 25% 30%
+> Recti fi ed-model risk
+
+(a) Direct confidence. 0 500 1,000     
+
+> Samples processed
+> 0% 2% 4% 6% 8% 10%
+> Ensemble risk 0500 1,000
+> Samples processed
+> 0% 20% 40% 60% 80% 100%
+> Human query rate 0500 1,000
+> Samples processed
+> 0% 5% 10% 15% 20% 25% 30%
+> Recti fi ed-model risk
+
+(b) Inferred confidence. 0 500 1,000 
+
+> Samples processed
+> 0% 2% 4% 6% 8% 10%
+> Ensemble risk
+
+AI SE PPI PPI+SE static CARE CARE 
+
+Figure 10: iSafetyBench learning trajectories at the 5% target and 10% static preparation. Lines average trailing windows of up to 100 arrivals over ten trials. Gray shading marks the 110-arrival static preparation period, where static model risks can include in-sample predictions. AI and PPI are shown as uncalibrated references in the model-risk panels. The dashed horizontal line is the nominal ensemble-risk target. 
+
+Robustness to confidence choice. Inferred confidence ranks the original AI’s correct decisions more accurately than direct confidence (correctness AUROC 0.803 versus 0.642). Table 6 extends the paired comparison in Figure 3d to all four risk targets. At 2.5%, replacing inferred with direct confidence increases query rates by 28.0 percentage points for SE, 11.8 for PPI+SE, and 14.4 for CARE 
+
+with PPI, while GP CARE changes by only −0.7 points. Across the four targets, GP CARE ’s absolute mean query-rate change is at most 3.1 points. Rectifying confidence together with predictions reduces reliance on the original confidence measure. A.4 ASIMOV 
+
+Task and evaluation. We use ASIMOV-Agentic queries (Gemini Robotics Team, 2026) for binary robot dispatch decisions, with the frozen Qwen3-VL-2B-Instruct model as the “AI” predictor and benchmark reference decisions as the oracle labels. The population contains 1,437 queries: 641 on physical constraints, 396 on instruction ambiguity, and 400 on VLA feasibility. The binary task is deciding whether to dispatch the instruction for immediate execution. Physical-constraint references are human annotated; the other subsets use the released benchmark references. The AI receives the image, instruction, and tool schemas, and its decision probability is obtained from the two answer logits. Direct and inferred confidence follow the same construction as in iSafetyBench, holding 19 Table 6: Effect of confidence choice on iSafetyBench with 10% static preparation. Entries are paired mean differences (direct minus inferred), in percentage points, for ensemble risk ( ∆R) and human query rate ( ∆Q). 
+
+2.5% target 5% target 7.5% target 10% target Method ∆R ∆Q ∆R ∆Q ∆R ∆Q ∆R ∆Q
+
+SE −0.5 +28 .0 −1.3 +22 .0 +0 .1 +11 .2 +0 .7 +3 .7
+
+PPI+SE −0.2 +11 .8 −0.4 +17 .1 +0 .6 +7 .1 +0 .3 +9 .6
+
+GPC+SE +0 .1 −1.2 −0.2 +1 .1 −0.3 +0 .4 +0 .1 −0.7
+
+static CARE −0.1 +0 .3 +0 .0 −0.7 −0.1 −0.6 −0.2 −0.3
+
+CARE with PPI +0 .2 +14 .4 −0.6 +5 .6 −0.5 +2 .1 +0 .0 −3.0
+
+CARE +0 .1 −0.7 +0 .9 −3.1 +0 .2 −1.5 +0 .1 −0.4
+
+inputs and initial AI decisions fixed. Each trial processes all 1,437 queries from 722 distinct images, grouped within calibration folds. 
+
+Feature space. The rectifier receives 13,312 image-and-text features from decoder and vision hidden states, reduced to 64 principal components. These coordinates and the signed Yes-minus-No logit margin contribute 75% and 25% of normalized feature energy, respectively. Representations are fitted without labels on each trial’s first 20% of covariates, frozen, and shared across methods and confidence measures. 
+
+Risk–cost tradeoffs. Figure 11 show the tradeoff across all four risk targets and four preparation budgets under both confidence measures. At the 5% target and 20% static preparation with inferred confidence, CARE achieves 4.76% ensemble risk with 50.8% queries, compared with 90.5% for SE, 95.3% for PPI+SE, and 60.3% for static CARE . Mean CARE risk is below every tested target under both confidence measures. Larger static preparation budgets do not always reduce total query cost: static CARE uses 75.4%, 60.3%, 63.3%, and 66.3% queries across the four budgets at the 5% target with inferred confidence. Adaptive CARE avoids choosing a fixed preparation size. 0% 25% 50% 75% 100% 
+
+> Cost
+> 0% 10% 20% 30% 40%
+> Risk
+
+(a) Inferred confidence. 0% 25% 50% 75% 100%  
+
+> Cost
+> 0% 10% 20% 30% 40%
+> Risk
+
+(b) Direct confidence. 10% 20% 30% 40%  
+
+> Static training ratio
+> 50% 60% 70% 80% 90% 100%
+> Human query rate
+
+(c) Queries vs preparation. 10% 20% 30% 40%  
+
+> Static training ratio
+> 0% 1% 2% 3% 4% 5% 6%
+> Ensemble risk
+
+(d) Risk vs preparation. AI SE PPI PPI+SE static CARE CARE 
+
+Figure 11: ASIMOV risk–cost tradeoffs. (a, b) Targets of 5%, 10%, 15%, and 20%, with 20% static preparation. (c, d) 10%, 20%, 30%, and 40% preparation at the 5% target with inferred confidence; the dotted horizontal line is the nominal ensemble-risk target. 
+
+Adaptive learning. Figure 12 presents adaptive learning through model improvement, escalation cost, and final-ensemble error. After 500 samples, GP-based CARE queries 47.4% and has 21.4% rolling model risk, compared with 65.6% and 23.1% for CARE with PPI. Both rectifiers improve with feedback and reach similar model risk by the end of the stream (18.7% for GP and 18.5% for PPI). Learning useful corrections earlier lowers GP CARE ’s average query rate over the full stream to 50.8%, compared with 57.9% for CARE with PPI. 
+
+Robustness to confidence choice. At the 5% target, replacing inferred with direct confidence changes 
+
+CARE ’s query rate by only −1.5 percentage points (50.8% to 49.3%), with mean ensemble risks of 4.76% and 4.88%, respectively. For CARE with PPI, the same change increases queries by 28.3 points (57.9% to 86.2%); SE changes by 2.2 points at 20% preparation. As in iSafetyBench, rectifying confidence together with predictions reduces reliance on the original confidence measure. 20 0 500 1,000           
+
+> Samples processed
+> 40% 50% 60% 70% 80% 90% 100%
+> Human query rate 0500 1,000
+> Samples processed
+> 5% 10% 15% 20% 25% 30% 35% 40% 45% 50%
+> Recti fi ed model risk 0500 1,000
+> Samples processed
+> 0% 2% 4% 6% 8% 10%
+> Ensemble risk AI SE PPI PPI+SE static CARE CARE (w/ PPI) CARE
+
+Figure 12: ASIMOV learning trajectories at the 5% target and 20% static preparation with inferred confidence. Lines average trailing windows of up to 100 arrivals over ten trials. Gray shading marks the 287-arrival static preparation period, where static model risks can include in-sample predictions. AI and PPI are shown as uncalibrated references in the model-risk panel. The dotted horizontal line is the nominal ensemble-risk target. Some initial model-risk transients are outside the plotted range. 
+
+## B RISK DECOMPOSITION 
+
+Proposition 1 (Risk decomposition) . Let pH (x) = P (Y = 1 | X = x, H ) be the human-aligned conditional probability, induced by human preference H. For a random training dataset D drawn independently (conditioned on H) from the same distribution as (X, Y ), namely PX PY |X,H , where 
+
+PY |X,H = Bern( pH (X)) , let pD = EH [pH | D] be the training-conditional learned predictor, and let pB = ED [pD ] be the training-marginal counterpart. Then, we have 
+
+R2,x (pA) = EY [( pA(X) − Y )2 | X = x]= EH [pH (x)(1 − pH (x))] 
+
+| {z }
+
+aleatoric 
+
++ ED,H [( pH (x) − pD (x)) 2]
+
+| {z }
+
+excess 
+
++ ED [( pD (x) − pB (x)) 2]
+
+| {z }
+
+epistemic 
+
++ ( pB (x) − pA(x)) 2
+
+| {z }
+
+bias 
+
+.
+
+Proof. By the tower property, 
+
+R2,x (pA) = EY [( pA(X) − Y )2 | X = x]=EH [EY [( Y − pH (X) + pH (X) − pA(x)) 2 | X = x, H ]] =EH [pH (x)(1 − pH (x)) + ( pH (x) − pA(x)) 2] (7) 
+
+=EH [pH (x)(1 − pH (x))] + ED [EH [( pH (x) − pD (x) + pD (x) − pA(x)) 2 | D]] =EH [pH (x)(1 − pH (x))] + ED,H [( pH (x) − pD (x)) 2 + ( pD (x) − pA(x)) 2] (8) 
+
+=EH [pH (x)(1 − pH (x))] + ED,H [( pH (x) − pD (x)) 2] + ED [( pD (x) − pB (x) + pB (x) − pA(x)) 2]=EH [pH (x)(1 − pH (x))] + ED,H [( pH (x) − pD (x)) 2] + ED [( pD (x) − pB (x)) 2] + ( pB (x) − pA(x)) 2,
+
+(9) where the cross terms in (7–9) vanish, respectively, because 0 = pH (x) − EY [Y | X = x, H ] = 
+
+pD (x) − EH [pH (x) | D] = pB (x) − ED [pD (x)] .
+
+Example 1 (Linear regression) . Suppose pH (x) = xT (β + ϵH (x)) , where ϵH (x) has zero mean and covariance Σx, and the AI model is null pA ≡ 0. Consider perfect training-conditional and training-marginal learners recovering βD (x) := EH [β + ϵH (x) | D] and βB := ED [βD ] = EH [β + ϵH (x)] = 
+
+β. Let pD (x) = xT βD (x) and pB (x) = xT βB be their corresponding predictors. By the law of total variance, 
+
+E[( pH (x) − pB (x)) 2] = xT Var( ϵH )x = xT E[Var( ϵH (x) | D)] x + xT Var( E[ϵH (x) | D]) x
+
+=E[( pH (x) − pD (x)) 2] + xT Var( E[ϵH (x) | D]) x ≥ E[( pH (x) − pD (x)) 2].
+
+When ϵH is homoskedastic and independent, E[ϵH (x) | D] = 0 , and thus the two predictors have the same Brier risk; when it’s not, the training-conditional predictor pD can be strictly better by leveraging the richer information set D to adapt to the local uncertainty structure. 21 C EXTENDED DISCUSSION OF RECTIFICATION 
+
+C.1 PRIOR REGRESSION 
+
+At an offline checkpoint, write the available labeled data as D = {(Xi, Y i)}ni=1 , let X have rows XTi ,and let r = ( r(X1), . . . , r (Xn)) T . The prior in Section 3 gives 
+
+r ∼ N (Xβ, K ), K = τ 2Σ, Σ = ρK ϕ + (1 − ρ)KA,
+
+where (Kϕ)ij = kϕ(Xi, X j ) and (KA)ij = kA(Xi, X j ), with τ > 0 and ρ ∈ [0 , 1] .Conditional on the residual process, the labels are independent. By link symmetry, their log-likelihood contributions are ℓi(r) = log g−1((2 Yi − 1)( g(pA(Xi)) + r)) . We fit (β, ϕ, τ, ρ ) by maximizing the marginal likelihood 
+
+Λ( β, ϕ, τ, ρ ) = 
+
+Z
+
+> Rn
+
+exp 
+
+> n
+
+X
+
+> i=1
+
+ℓi(ri)
+
+!
+
+N (r; Xβ, K ) d r.
+
+The resulting posterior is 
+
+p(r | D) = Λ −1 exp 
+
+> n
+
+X
+
+> i=1
+
+ℓi(ri)
+
+!
+
+N (r; Xβ, K ). (10) Let m and V denote its posterior mean vector and covariance matrix, and set Vβ = V + ( m −
+
+Xβ)( m − Xβ)T . Differentiating the marginal likelihood under the integral gives 
+
+∇β log Λ = XT K−1(m − Xβ),
+
+∇α log Λ = 12 trace  (K−1Vβ K−1 − K−1)∇αK , α ∈ { τ 2, ρ, ϕ j }.
+
+In particular, setting the mean and amplitude derivatives to zero yields 
+
+β = ( XT Σ−1X)−1XT Σ−1m, τ 2 = 1
+
+n trace(Σ −1Vβ ). (11) System (11) consists of coupled stationarity equations, as the posterior moments depend on the prior parameters. This gives a practical expectation–maximization (EM) procedure. The E-step computes (m, V ) under the current prior. Holding these moments fixed, the M-step increases the expected Gaussian log prior − 12 (log |K| + trace( K−1Vβ )) . Fixing (ϕ, ρ ), update β and then 
+
+τ 2 by (11), recomputing Vβ after updating β. Then update ρ ∈ [0 , 1] and ϕ numerically using 
+
+∇ρK = τ 2(Kϕ − KA) and ∇ϕK = τ 2ρ∇ϕKϕ.C.2 POSTERIOR INFERENCE 
+
+Fix the fitted prior, abbreviate its kernel as k = kτ,ρ,ϕ , and write k(x, X) =(k(x, X 1), . . . , k (x, X n)) . Gaussian conditioning gives 
+
+r(x) | r ∼ N 
+
+
+
+xT β + k(x, X)K−1(r − Xβ), k (x, x ) − k(x, X)K−1k(X, x )
+
+
+
+.
+
+Integrating over (10) gives the (non-Gaussian) posterior process, whose mean and covariance follow from total expectation and covariance: 
+
+mt(x) = xT β + k(x, X)K−1(m − Xβ), (12) 
+
+kt(x, x ′) = k(x, x ′) − k(x, X)K−1k(X, x ′) + k(x, X)K−1V K −1k(X, x ′). (13) On the labeled inputs, m = mt(X) and V = kt(X, X); K remains the prior covariance matrix. The formulas are exact when (m, V ) are exact posterior moments. For implementation, we approximate the latent posterior by N (m, V ) using EP or Laplace moments below; the same formulas then define the approximate process Rt ∼ GP( mt, k t).Under this Gaussian approximation, the rectified prediction is the posterior mean: 
+
+pt(x) = 
+
+Z
+
+> R
+
+g−1(g(pA(x)) + r)N (r; mt(x), k t(x, x )) d r. (14) 22 For a general link this is a one-dimensional integral. For the probit link g = Φ −1, introduce an independent Z ∼ N (0 , 1) . We have Z − Rt(x) ∼ N (−mt(x), 1 + kt(x, x )) and thus 
+
+pt(x) = P(Z − Rt(x) ≤ g(pA(x))) = Φ g(pA(x)) + mt(x)
+
+p1 + kt(x, x )
+
+!
+
+, (15) C.3 EP AND ADF APPROXIMATION 
+
+Offline: expectation propagation. EP approximates each likelihood factor by a Gaussian site (Minka, 2013): 
+
+exp( ℓi(ri)) ≈ eti(ri) ∝ exp 
+
+
+
+− 12 eλir2 
+
+> i
+
++ eνiri
+
+
+
+.
+
+Multiplying the sites by the prior gives a Gaussian approximation with 
+
+V −1 = K−1 + diag( eλ), m = V (K−1Xβ + eν).
+
+To update site i, remove it from the current marginal to form the Gaussian cavity N (b, v ), where 
+
+v = ( V −1 
+
+> ii
+
+− eλi)−1, b = v(mi/V ii − eνi).
+
+Multiply this cavity by exp( ℓi(r)) and compute the normalized tilted mean ˜b and variance ˜v. Moment matching gives the new site parameters 
+
+eλi = ˜ v−1 − v−1, eνi = ˜b/ ˜v − b/v. 
+
+Recompute the Gaussian approximation and revisit sites until the updates stabilize. 
+
+Online: assumed-density filtering. ADF processes each new active label once. Let the current approximate residual process be Rt ∼ GP( mt, k t).2 After an escalated query (Xt, Y t), set b =
+
+mt(Xt), v = kt(Xt, X t), form the one-dimensional tilted marginal ˜R ∝ g−1((2 Yt −1)( g(pA(Xt))+ ˜R)) N ( ˜R; b, v ), and calculate ˜b = E[ ˜R] and ˜v = Var( ˜R). For v > 0, Gaussian conditioning gives 
+
+E[Rt(x) | Rt(Xt) = r] = mt(x) + v−1kt(x, X t)( r − b),
+
+Cov( Rt(x), R t(x′) | Rt(Xt) = r) = kt(x, x ′) − v−1kt(x, X t)kt(Xt, x ′).
+
+ADF matches the first two moments of the Gaussian approximation of Rt+1 to the above conditional moments using the laws of total expectation and covariance, giving the functional update: 
+
+mt+1 (x) = mt(x) + v−1kt(x, X t)( ˜b − b), (16) 
+
+kt+1 (x, x ′) = kt(x, x ′) + v−2kt(x, X t)kt(Xt, x ′)(˜ v − v). (17) If v = 0 , positive semidefiniteness implies kt(x, X t) = 0 for every x, and the process is unchanged. Each update requires only a one-dimensional integral for the tilted marginal and a rank-one covariance correction. 
+
+Closed-form probit updates. Differentiating the Gaussian density in tilted marginal with respect to 
+
+b yields ˜b = b + v ∂ b log Nt, ˜v = v + v2 ∂2 
+
+> b
+
+log Nt. (18) Indeed, ∂b log N (r; b, v ) = ( r − b)/v , so ∂b log Nt = ( ˜b − b)/v and a second differentiation gives 
+
+∂2 
+
+> b
+
+log Nt = (˜ v − v)/v 2. For probit link g = Φ −1, let 
+
+ζ = (2 Yt − 1)( g(pA(Xt)) + b)
+
+√1 + v , a(u) = φ(u)Φ( u) , (19) where φ is the standard normal density. The same Gaussian convolution as in (15) gives Nt = Φ( ζ).Since a′(u) = −a(u)( u + a(u)) , (18) gives 
+
+˜b = b + (2 Yt − 1) v
+
+√1 + v a(ζ), ˜v = v − v2
+
+1 + v a(ζ)( ζ + a(ζ)) .      
+
+> 2As will be clear from the context, Rtdenotes both the marginal rectifier for the next (test) input Xand the approximate residual process on the entire input space X.
+
+23 Substitution into (16) and (17) gives the explicit functional updates 
+
+mt+1 (x) = mt(x) + (2 Yt − 1) kt(x, X t)
+
+√1 + v a(ζ),kt+1 (x, x ′) = kt(x, x ′) − kt(x, X t)kt(Xt, x ′)1 + v a(ζ)( ζ + a(ζ)) .
+
+C.4 LAPLACE AND MAP APPROXIMATION 
+
+Offline: Laplace approximation. Laplace approximation uses a mode and local curvature rather than matching posterior moments to determine the Gaussian approximation. Specifically, it replaces the log posterior by its quadratic expansion at the maximum a posteriori (MAP) residual vector (Williams & Rasmussen, 2006): 
+
+brMAP = argmax 
+
+> r
+
+( nX
+
+> i=1
+
+ℓi(ri) − 12 (r − Xβ)T K−1(r − Xβ)
+
+)
+
+.
+
+The gradient is (ℓ′
+
+> i
+
+(ri)) ni=1 − K−1(r − Xβ), and the negative Hessian is K−1 + diag( −ℓ′′  
+
+> i
+
+(ri)) ,giving Newton iterations for the mode. At the mode, the Gaussian approximation has 
+
+m = brMAP , V = ( K−1 + diag( −ℓ′′  
+
+> i
+
+(brMAP  
+
+> i
+
+))) −1.
+
+Substituting these into (12) and (13) gives the approximate posterior process. Predictions still integrate over this Gaussian process as in (14). 
+
+Online: Newton step for maximum a posteriori. The Gaussian log-density log N (r; b, v ) is already quadratic. Expand the log-likelihood at r = b:
+
+ℓt(r) ≈ ℓt(b) + ℓ′
+
+> t
+
+(b)( r − b) + 12 ℓ′′  
+
+> t
+
+(b)( r − b)2
+
+Set d = ℓ′
+
+> t
+
+(b) and w = −ℓ′′  
+
+> t
+
+(b). The local expansion gives a Gaussian tilted approximation with mean b + vd/ (1 + vw ) and variance v/ (1 + vw ). Substituting these for (˜b, ˜v) in (16) and (17) gives 
+
+mt+1 (x) = mt(x) + kt(x, X t)d
+
+1 + vw , (20) 
+
+kt+1 (x, x ′) = kt(x, x ′) − w k t(x, X t)kt(Xt, x ′)1 + vw . (21) 
+
+Closed-form logistic and probit updates. For the logit link, let p = g−1(g(pA(Xt)) + b). Direct differentiation gives d = Yt − p and w = p(1 − p), which yields the usual recursive logistic Newton update through (20) and (21). For the probit link, use the ratio a from (19) and set ζ =(2 Yt − 1)( g(pA(Xt)) + b). Differentiating ℓt(b) = log Φ( ζ) gives d = (2 Yt − 1) a(ζ) and w =
+
+a(ζ)( ζ + a(ζ)) . Here ζ has no factor √1 + v because we evaluate the likelihood derivatives at b.
+
+## D EXTENDED ANALYSIS OF CALIBRATION 
+
+Initial: confidence-based nonconformity score. It’s natural to use the confidence measure ct
+
+(provided by the AI model and rectified by the rectifier) to construct our consistency check, referred to as a nonconformity score . Formally, for a (rectified) model consisting of a classifier and a confidence function Mt = ( ft, c t), its decision set is given by (1): 
+
+S(λ; Mt, x ) := 
+
+ {ft(x)}, if ct(x) > λ (x); 
+
+Y, o.w. That is, when the decision set is a singleton, the model is confident enough to make a decision; otherwise, it is ambiguous and requires human review. The corresponding nonconformity score is the generalized inverse of this decision set: 
+
+s(x, y ; Mt) := inf {λ ∈ [0 , 1] : y ∈ S (λ; Mt, x )} = ct(x)1{ft(x)̸ = y},
+
+which is zero if y agrees with the prediction and equals the model confidence when it disagrees. Intuitively, when y is the true label, a confident error receives a higher score than an uncertain one. For ct(x) = max {pt(x), 1 − pt(x)} in binary classification, this recovers the prediction-based score of Romano et al. (2020). Our construction is tailored to our escalation rule and accommodates model-provided confidence measures. 24 STEP 1. A UGMENTED PARTICLES 
+
+We first reformulate our method more concisely as follows. Fix t0 ≤ t, with the last offline checkpoint preceding arrival Xt0 . Let D0 collect data available at that checkpoint and Dt0:t−1 collect actively escalated data from the online stream at times t0, . . . , t − 1. For each particle, let D(k) be the corresponding left-out data set. For simplicity, we suppose all left-out data sets have the same size 
+
+m. Let D(K+1) augment the incoming test input Xt with the test label y plus another m − 1 data points in D0 to match the size of the left-out data sets. 3 These left-out datasets should be chosen by a fixed rule independent of the data values. When m = 1 , we recover the leave-one-out setting. Let 
+
+D−(k,k ′) := ( D0 ∪ D(K+1) ) \ (D(k) ∪ D(k′)), and define augmented model particles as 
+
+M−(k,k ′) = Mon 
+
+
+
+M
+
+
+
+D−(k,k ′)
+
+, D t0:t−1
+
+
+
+, k, k ′ ∈ [K + 1] .
+
+The k-th actual model particle is then M(k) = M−(k,K +1) . For each left-out dataset, we designate a representative data point z(k) by a fixed slot rule, and designate z(K+1) := ( Xt, y ) for D(K+1) . We associate each particle with the nonconformity scores evaluated on their designated data points: 
+
+s−(k,k ′) = s(M−(k,k ′), z (k)), k̸ = k′ ∈ [K + 1] ,
+
+or s−(k,k ′) = ∞ when k = k′. Note that the actual nonconformity score of the k-th particle at the test input is s(M(k), (Xt, y )) = s−(K+1 ,k ).STEP 2. W EIGHTED CONFORMITY 
+
+When all left-out datasets are exchangeable and the learning method is permutation-invariant, the scores s−(k,k ′) are equivariant and thus conformal with the test score s−(K+1 ,k ). However, in our setting, the left-out datasets are drawn from different distributions due to the adaptive data stream, and thus they have different impact on the model particles. We thus need to weigh their conformity w.r.t. the test score. To do so, we need to delineate two things each data point specifies: a time slot and a realized sample value. Then, we consider the following conditioning: K + 1 groups of left-out time slots are realized, but the mapping from each slot group to the sample group is not revealed. Under this conditioning, each sample group has some probability of occupying the test slot group, and thus the scores should be weighed by the corresponding probability. Formally, define the following conditioning information D: the full redacted arrival slot log which records the escalation decisions is known; the grouped slots of all left-out datasets are known; all collected samples are observed; the slot-to-sample mapping of slots outside the union of the left-out datasets, including the online slots, is known; and the grouping and within-group order of the left-out samples, including the test point, are known. The only thing we mask—the mapping from left-out slot groups to left-out sample groups—is then an element of the (K + 1) -permutation group SK+1 .We can further augment D by restricting the mapping to be in a transitive subgroup G of SK+1 , e.g., the (K + 1) -cyclic group. Thus, the remaining assignments are exactly those obtained by applying G
+
+to the realized assignment. Our results hold for any permutation subgroup. A smaller group reduces the number of permutations to consider, hence making likelihood calculation easier; however, it may produce more concentrated weights and reduce the diversity of our particle system. For example, if the subgroup is non-transitive and never maps a fold to the test slot, then the corresponding particle has zero weight and will not contribute. Let D◦ 
+
+> t,z
+
+be the observed data stream (( Xi, A i, A iYi)) t−1 
+
+> i=1
+
+appended with the test point z = ( Xt, y ),where unqueried labels are redacted. With a slight abuse of notation, we also denote G as the extended group of permutations on the entire data stream, which is the identity on the slots outside the union of the left-out datasets, including the unqueried slots and online stream, and keeps the relative order of the slots inside each left-out dataset. An immediate result is that the permutations in G do not change            
+
+> 3A simple mental model is that {D(k)}K+1
+> k=1 are disjoint. For example, for K-fold cross-conformal, we can first reserve (n0+ 1) /(K+ 1) −1data points for test fold augmentation, and then partition the remaining data points into Kdisjoint sets. Leave-one-out cross-conformal is another example where no test augmentation is needed. However, all of our analysis goes through without requiring the disjointness, via the multiset formalism.
+
+25 our collection of model particles. Specifically, for any σ ∈ G applied on the entire data stream, the new model particles are 
+
+M−(k,k ′)(σ(D◦ 
+
+> t,z
+
+)) = Mon 
+
+
+
+M
+
+
+
+σ(( D0 ∪ { z}) \ (D(σ−1(k)) ∪ D(σ−1(k′)) )) 
+
+
+
+, σ (Dt0:t−1)
+
+
+
+(22) 
+
+= Mon 
+
+
+
+M
+
+
+
+σ(D−(σ−1(k),σ −1(k′)) )
+
+
+
+, D t0:t−1
+
+
+
+(23) 
+
+= Mon 
+
+
+
+M
+
+
+
+D−(σ−1(k),σ −1(k′)) 
+
+, D t0:t−1
+
+
+
+(24) 
+
+= M−(σ−1(k),σ −1(k′)) (D◦ 
+
+> t,z
+
+), k, k ′ ∈ [K + 1] ,
+
+where (22) is because σ is separable between the online stream and the rest of the data stream, and when we leave out the k-th batch of slots under sample permutation σ, we are actually removing the original σ−1(k)-th left-out dataset; (23) is because D0 ∪ D(K+1) = D0 ∪ { z} and σ preserves the online stream; and (24) is because M is permutation-invariant. As a result, under permutation σ, the original score s−(k,k ′) moves to position (σ(k), σ (k′)) , for any 
+
+k, k ′ ∈ [K + 1] , and thus the score array, indexed by sample groups, is fixed under D.4 Therefore, the probability that the k-th sample group supplies the test-score row is exactly its probability of occupying the test slot group under D. This need not be true when the learning method is permutation-variant w.r.t. elements in G, as the scores may change under each permutation. Our method resolves this by restricting the permutation group to a subgroup G under which the learning method is permutation-invariant. STEP 3. R ISK CONTROL 
+
+Let the probability of the k-th sample group occupying the test slot under D be w(k); note that w(k)
+
+depends on y and is a functional of Xt, but here we suppress this dependence for notational simplicity. Then, the probability that group k wins its comparison with the random test group is 
+
+> K+1
+
+X
+
+> k′=1
+
+w(k′)1
+
+n
+
+s(M−(k,k ′), z (k)) > s (M−(k,k ′), z (k′))
+
+o
+
+=
+
+> K+1
+
+X
+
+> k′=1
+
+w(k′)1{s−(k,k ′) > s −(k′,k )}.
+
+We see that each summand puts k′ at the test slot and is scaled with its likelihood. Following Barber et al. (2021), we call a group strange if the above probability is unusually large, giving the strange set :
+
+U := 
+
+(
+
+k ∈ [K + 1] : 
+
+> K+1
+
+X
+
+> k′=1
+
+w(k′)1
+
+n
+
+s−(k,k ′) > s −(k′,k )o
+
+≥ 1 − ϵ/ 2
+
+)
+
+.
+
+Recall that each score has some probability to be the test score. Thus, the probability of the test group being strange is u = PK+1  
+
+> k=1
+
+w(k)1 {k ∈ U} . We are left to show that this probability is small. By definition, we have 
+
+u(1 − ϵ/ 2) = 
+
+> K+1
+
+X
+
+> k=1
+
+w(k)1 {k ∈ U} · (1 − ϵ/ 2) 
+
+≤
+
+> K+1
+
+X
+
+> k=1
+
+w(k)1 {k ∈ U} 
+
+> K+1
+
+X
+
+> k′=1
+
+w(k′)1{s−(k,k ′) > s −(k′,k )}
+
+= X
+
+> k∈U ,k ′∈[K+1]
+
+w(k)w(k′)1{s−(k,k ′) > s −(k′,k )}
+
+=
+
+ X
+
+> k∈U ,k ′∈U
+
++ X
+
+> k∈U ,k ′∈[K+1] \U
+
+ w(k)w(k′)1{s−(k,k ′) > s −(k′,k )}.
+
+> 4
+
+We also require that elements of G map designated data points to designated data points. 
+
+26 For the first summation, we have 
+
+X
+
+> k∈U ,k ′∈U
+
+w(k)w(k′)1{s−(k,k ′) > s −(k′,k )}
+
+= 12
+
+X
+
+> k∈U ,k ′∈U
+
+w(k)w(k′)(1{s−(k,k ′) > s −(k′,k )} + 1{s−(k,k ′) < s −(k′,k )})
+
+≤ 12
+
+X
+
+> k∈U ,k ′∈U
+
+w(k)w(k′) (1 − 1 {k = k′})= 12 u2 − X
+
+> k∈U
+
+(w(k))2
+
+!
+
+,
+
+where the inequality is because there are cases when s−(k,k ′) = s−(k′,k ) but k̸ = k′. The second summation can be bounded by 
+
+X 
+
+> k∈U ,k ′̸∈U
+
+w(k)w(k′)1{s−(k,k ′) > s −(k′,k )} ≤ X 
+
+> k∈U ,k ′̸∈U
+
+w(k)w(k′) = X
+
+> k∈U
+
+w(k)(1 − u) = u(1 − u).
+
+Combining both gives 
+
+u(1 − ϵ/ 2) ≤ 12 u2 + u(1 − u) = u − 12 u2 =⇒ u ≤ ϵ. 
+
+Connecting back to our prediction set 
+
+Ct,ϵ (x) = 
+
+(
+
+y ∈ Y :
+
+> K
+
+X
+
+> k=1
+
+w(k)(x, y )1
+
+n
+
+s(M(k), z (k)) < s (M(k), (x, y )) 
+
+o
+
+< 1 − ϵ/ 2
+
+)
+
+gives 
+
+P (Yt /∈ C t,ϵ (Xt)) = E[u] ≤ ϵ. 
+
+STEP 4. C OUNTERFACTUAL LIKELIHOOD 
+
+We are left to calculate the weight functional w(k) under D. Writing Xσi = Xσ−1(i), we have 
+
+w(k)(x, y ) = 
+
+P 
+
+> σ∈G:σ(k)= K+1
+
+Λσt (x, y )
+
+P 
+
+> σ∈G
+
+Λσt (x, y ) , (25) where Λσt (x, y ) = 
+
+> t−1
+
+Y
+
+> i=1
+
+ℓ(Xσi , A i | F σi−1),
+
+where ℓ(x, a | F ) = π(x | F )a(1 − π(x | F )) 1−a,
+
+where (Fσi )t−1 
+
+> i=0
+
+is the observed filtration generated by replaying the learning and acquisition algo-rithms on the counterfactual stream σ(D◦ 
+
+> t,z
+
+); π(x | F ) is the algorithm’s probability to escalate x
+
+given the filtration F;5 and (25) follows because the i.i.d. covariate and conditional-label density factors in the unconditioned stream likelihood are invariant under G and cancel upon conditioning on 
+
+D. The product includes unqueried arrivals but no acquisition factor for the test point. We see that to calculate the weight functionals, we have to replay the learning algorithm on each counterfactual stream σ(D◦ 
+
+> t,z
+
+) for all σ ∈ G. For the online period, we have a simplifying factoriza-
+
+> 5
+
+In this section, A denotes the general escalation indicator, and π its corresponding escalation probability. 
+
+27 tion: 
+
+w(k)(x, y ) ∝ X
+
+> σ∈G:σ(k)= K+1
+
+Λσt0 (x, y ) ·
+
+> t−1
+
+Y
+
+> j=t0
+
+ℓ(Xj , A j | F σt0−1, (Zj′ )j−1 
+
+> j′=t0
+
+)=
+
+ X
+
+> σ∈G:σ(k)= K+1
+
+Λσt0 (x, y )
+
+ ·
+
+> t−1
+
+Y
+
+> j=t0
+
+ℓ(Xj , A j | F (k)
+
+> t0−1
+
+, (Zj′ )j−1 
+
+> j′=t0
+
+)
+
+∝w(k) 
+
+> t0
+
+(x, y ) ·
+
+> t−1
+
+Y
+
+> j=t0
+
+ℓ(Xj , A j | F (k)
+
+> t0−1
+
+, (Zj′ )j−1 
+
+> j′=t0
+
+),
+
+where F(k) 
+
+> t0−1
+
+denotes the counterfactual history obtained by switching only the designated data point z(k) in the k-th left-out dataset with the test point z and no other permutation. We use the fact that permutations in {σ ∈ G : σ(k) = K + 1 } generate the same set of offline data points 
+
+(D0 ∪ { z}) \ { z(k)}, and that the online period is order-invariant with respect to the offline dataset. Therefore, after obtaining the weights w(k) 
+
+> t0
+
+after an offline checkpoint, we only need to co-evolve the particles to maintain F(k) 
+
+> t−1
+
+without doing any replay, enabling efficient online adaptation of the weights. Again, this does not hold if either the offline learning is order-variant or the permutation changes the online stream. 
+
+## E EXTENDED ANALYSIS OF SAFETY ESCALATION 
+
+E.1 PROOF OF COROLLARY 1The risk of our ensemble in (1) reads 
+
+R01 ( ˆYt) = P ( ˆYt̸ = Yt)=P (( ˆYt̸ = Yt) ∧ (At ∨ Et)) + P (( ˆYt̸ = Yt) ∧ ¬ (At ∨ Et)) =P (At ∨ Et)P (Yt̸ = Yt | At ∨ Et) + P (( ˆYt̸ = Yt) ∧ ¬ At ∧ ¬ Et)
+
+≤P (( ˆYt̸ = Yt) ∧ ¬ Et)
+
+≤P ((1 − ft(Xt) = Yt) ∧ (ct(Xt) > λ t(Xt))) . (26) Therefore, we only need to bound the probability of the true label being the opposite label when we accept the current prediction. By definition (6), 
+
+ct(Xt) > λ t(Xt)
+
+⇐⇒ ct(Xt) − γct (Xt) > Quantile 1−ϵ/ 2
+
+> Wt(x)
+
+ X
+
+> k∈W t(x)
+
+w(k) 
+
+> t
+
+(x)
+
+Wt(x) δ{s(k) 
+
+> t
+
+}
+
+
+
+=⇒ min  
+
+> k∈W t(Xt)
+
+c(k) 
+
+> t
+
+(Xt) > Quantile 1−ϵ/ 2
+
+> Wt(x)
+
+ X
+
+> k∈W t(x)
+
+w(k) 
+
+> t
+
+(x)
+
+Wt(x) δ{s(k) 
+
+> t
+
+}
+
+
+
+⇐⇒ min  
+
+> k∈W t(Xt)
+
+c(k) 
+
+> t
+
+(Xt) > Quantile 1−ϵ/ 2
+
+> K
+
+X
+
+> k=1
+
+w(k) 
+
+> t
+
+δ{ιks(k) 
+
+> t
+
+}
+
+!
+
+,
+
+where we use shorthand s(k) 
+
+> t
+
+:= s(k) 
+
+> t
+
+(z(k)) and ιk is the characteristic function that equals 1 if 
+
+k ∈ W t(Xt) and +∞ otherwise. Further, this condition is equivalent to 
+
+X
+
+> k∈W t(Xt)
+
+w(k) 
+
+> t
+
+1
+
+
+
+min  
+
+> k′∈W t(Xt)
+
+c(k′) 
+
+> t
+
+(Xt) > s (k)
+
+> t
+
+
+
+≥ 1 − ϵ/ 2=⇒ X
+
+> k∈W t(Xt)
+
+w(k) 
+
+> t
+
+1
+
+n
+
+c(k) 
+
+> t
+
+(Xt) > s (k)
+
+> t
+
+o
+
+≥ 1 − ϵ/ 2.
+
+28 Recall that {w(k) 
+
+> t
+
+} concern the opposite label 1 − ft(Xt), and f (k) 
+
+> t
+
+(Xt) = ft(Xt) for all agreeing particles k ∈ W t(Xt). Thus, the above condition is equivalent to 
+
+X
+
+> k∈W t(Xt)
+
+w(k) 
+
+> t
+
+(Xt, 1 − ft(Xt)) 1
+
+n
+
+c(k) 
+
+> t
+
+(Xt) > s (k) 
+
+> t
+
+(z(k))
+
+o
+
+≥ 1 − ϵ/ 2
+
+⇐⇒ 
+
+> K
+
+X
+
+> k=1
+
+w(k) 
+
+> t
+
+(Xt, 1 − ft(Xt)) 1
+
+n
+
+c(k) 
+
+> t
+
+(Xt)1{f (k) 
+
+> t
+
+(Xt)̸ = 1 − ft(Xt)} > s (k) 
+
+> t
+
+(z(k))
+
+o
+
+≥ 1 − ϵ/ 2
+
+⇐⇒ 
+
+> K
+
+X
+
+> k=1
+
+w(k) 
+
+> t
+
+(Xt, 1 − ft(Xt)) 1
+
+n
+
+s(k) 
+
+> t
+
+(Xt, 1 − ft(Xt)) > s (k) 
+
+> t
+
+(z(k))
+
+o
+
+≥ 1 − ϵ/ 2.
+
+By definition (2), the above condition is equivalent to 
+
+1 − ft(Xt) /∈ C t,ϵ (Xt).
+
+Plugging this indication back into (26) gives 
+
+R01 ( ˆY ) ≤P ((1 − ft(Xt) = Yt) ∧ (1 − ft(Xt) /∈ C t,ϵ (Xt))) =P ((1 − ft(Xt) = Yt) ∧ (Yt /∈ C t,ϵ (Xt))) 
+
+≤P (Yt /∈ C t,ϵ (Xt)) 
+
+≤ϵ., 
+
+where the final inequality follows from Theorem 1. We remark that with equal weights, excluding the opposite label indicates the inclusion of the predicted label in the prediction set Ct,ϵ . However, this is no longer true under covariate shift. Nonetheless, (26) bounded by ϵ implies that it is still safe to accept the prediction. E.2 APPROXIMATE WEIGHTS AND SCORES 
+
+During the offline period, calculating (4) can involve numerous policy replays, even with a simple subgroup G as discussed in Appendix D. During the online period, although no counterfactual replays are needed, prioritizing computational efficiency may still call for approximation. As long as we have a high-probability bound on the approximation error, safety guarantee in Theorem 1 still holds. Consider approximate weights { ˆw(k)}Kk=1 and scores {ˆs(k)}Kk=1 . For notational simplicity, we omit the time index t in this subsection. Following (6), we denote the exact calibrated threshold using accurate weights and scores as 
+
+λ∗(x) = λ(x; {w(k)}Kk=1 , {s(k)}Kk=1 ) := Quantile 1−ϵW (x)
+
+> K
+
+X
+
+> k=1
+
+w(k)(x)
+
+W (x) δ{s(k)}
+
+!
+
++ γc(x).
+
+Then, if we know with high probability 1 − O(ϵ) that the exact (w, e ) is in an uncertainty set Ω, we can set 
+
+λ(x) = sup 
+
+> (w,e )∈Ω
+
+λ(x; w, e ),
+
+which guarantees an excess risk of O(ϵ).We give an example with two simple approximation bounds. Suppose that, for all k ∈ [K], we have 
+
+s(k) ≤ ˆs(k) + γsk for scores and ∥w − ˆw∥TV ≤ γw for weights. Then, we can set 
+
+λ(x) = Quantile 1−ϵ/ 2+ γw
+
+> K
+
+X
+
+> k=1
+
+ˆw(k)(x)δ{ˆs(k) + γsk}
+
+!
+
++ γc(x),
+
+which satisfies Corollary 1. 
+
+## F EXTENDED DISCUSSION OF ACTIVE ACQUISITION 
+
+We first remark that thanks to its modular design, CARE can be plugged with any acquisition strategy in the active learning/inference literature (Zrnic & Candes, 2024). For simplicity, our experiments 29 implement safe escalation only ( πt(Xt) = 1{ct(xt) ≤ λt(xt)}). Below, we discuss a more general active acquisition strategy tailored to our goal of minimizing query complexity. Let At and Et be the active and safe escalation decisions at time t, respectively. Concerning short-term efficiency, At should escalate a query that is likely to be escalated by Et; concerning long-term efficiency, At should escalate a query that minimizes the future escalation frequency of E ∨A. Ideally, active escalation optimizes 
+
+min  
+
+> πt∈[0 ,1]
+
+EAt∼Bern( πt)
+
+At(1 − Et) + E
+
+ X
+
+> t′≥t+1
+
+Et′ ∨ At′ At
+
+ ,
+
+where the first term is the additional cost of active escalation at this step, and the second term is the expected future escalation cost. However, this objective is hard to evaluate as (i) the future is hard to estimate due to adaptation; (ii) Et is unknown as we need to avoid πt depending on λt; and (iii) the decision indicators are not smooth. Therefore, we consider a myopic and approximate objective: 
+
+EAt∼Bern( πt)
+
+h
+
+At(1 − ˆEt) + ηE
+
+h ˆEt+1 At
+
+ii 
+
+=EAt∼Bern( πt) [At(1 − 1{ct(Xt) < 1 − ϵ}) + ηE [1{ˆct+1 (Xt+1 ) < 1 − ϵ}| At]] =πt1{ct(Xt) ≥ 1 − ϵ} + η(1 − πt)PX (ct(X) < 1 − ϵ)+ ηπ t
+
+ ptPX (c(Xt,1) 
+
+> t+1
+
+(X) < 1 − ϵ) + πt(1 − pt)PX (c(Xt,0) 
+
+> t+1
+
+(X) < 1 − ϵ) ,
+
+where pt = pt(Xt) and Xt+1 ∼ PX ; besides the one-step lookahead scaled by the effective horizon parameter η, we also approximate the safe escalation threshold by 1 − ϵ and the label distribution of Yt by the model prediction Bern( pt). Specifically, ˆEt(c) := 1{c < 1 − ϵ} and 
+
+ˆct+1 = E ˆYt∼Bern( pt)[c(Xt, ˆYt) 
+
+> t+1
+
+] where c(Xt, ˆYt) 
+
+> t+1
+
+is the rectifier confidence at t + 1 after updating the rectifier with the new query (Xt, ˆYt).The functional c 7 → PX (c(X) < 1 − ϵ) may be hard to evaluate. Additionally, the above objective gives a hard decision πt ∈ { 0, 1}. We thus further smooth the objective, giving a confidence-maximizing active escalation rule 
+
+πt = g−1 ◦ h(1) (pth(2)  
+
+> ϵ
+
+(c(Xt,1) 
+
+> t+1
+
+) + (1 − pt)h(2)  
+
+> ϵ
+
+(c(Xt,0) 
+
+> t+1
+
+) − h(2)  
+
+> ϵ
+
+(ct) − η−11{ct(Xt) ≥ 1 − ϵ}),
+
+where both h(1) and h(2)  
+
+> ϵ
+
+are strictly increasing function, with h(1) being affine onto R and h(2)  
+
+> ϵ
+
+(c)
+
+approximates PX (c(X) ≥ 1 − ϵ).30
