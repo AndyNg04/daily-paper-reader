@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-08</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-09</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 40 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 35 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>20</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-08 20:40:42 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-09 19:42:47 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-08 论文日报已完成：40 篇推荐，精读与速读各 20 篇，聚焦 AI 协作、交互训练与应用。</p>
-<p>最值得关注的是安全高效的人机协同决策，以及用用户模拟器训练交互式智能体：《Careful Judge》和《MIMESIS》均获 10.0/10。</p>
-<p>建议先读这两篇的摘要，再按兴趣速读模型间同伴影响或面向 2 型糖尿病管理的 AI 消息优化研究。</p>
+<p>2026-10-09 论文日报已完成：共梳理 35 篇论文，分为 15 篇精读与 20 篇速读。</p>
+<p>今天最值得关注的两个方向是低数据条件下用 LLM 辅助正则化预测迁移流量，以及全双工语音模型的分层策略分解，两篇推荐均获 9.0/10。</p>
+<p>建议先读这两篇的摘要，按兴趣选择预测应用或语音交互方向，再浏览获评 8.0/10 的长程工具型 AI 智能体运行时授权论文，了解智能体安全议题。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">20 篇</strong>
+    <strong class="dpr-home-dashboard-count">15 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Careful Judge: Safe and Efficient Human-AI Collaborative Decision Making">Careful Judge: Safe and Efficient Human-AI Collaborative Decision Making</span></li><li><span class="dpr-home-dashboard-paper-title" title="MIMESIS: Learning User Simulators as Training Environments for Interactive Agents">MIMESIS: Learning User Simulators as Training Environments for Interactive Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="Dataset Signatures in Human-LLM Interactions and User Modeling">Dataset Signatures in Human-LLM Interactions and User Modeling</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Can LLM-assisted regularization increase forecast accuracy for migration flows in low data regimes?">Can LLM-assisted regularization increase forecast accuracy for migration flows in low data regimes?</span></li><li><span class="dpr-home-dashboard-paper-title" title="HiPLEX: Hierarchical Policy Factorization for Full Duplex Speech Language Models">HiPLEX: Hierarchical Policy Factorization for Full Duplex Speech Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="Novice Reliance Calibration in AI-Assisted Decision Making: The Role of Explanations and Self-Assessment">Novice Reliance Calibration in AI-Assisted Decision Making: The Role of Explanations and Self-Assessment</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>9</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>4</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>2</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -96,9 +96,9 @@
     <strong class="dpr-home-dashboard-count">20 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="OverForge: Reasoning Through Strategies and Tactics Helps Cooperative Lifelong Adaptation">OverForge: Reasoning Through Strategies and Tactics Helps Cooperative Lifelong Adaptation</span></li><li><span class="dpr-home-dashboard-paper-title" title="Peer Influence across Heterogeneous AI Models">Peer Influence across Heterogeneous AI Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="Optimizing AI-Driven Messaging for Type 2 Diabetes Management: Insights from Patient Preference Elicitation">Optimizing AI-Driven Messaging for Type 2 Diabetes Management: Insights from Patient Preference Elicitation</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Runtime Authorization of Self-Generated Subgoals in Long-Horizon Tool-Using AI Agents">Runtime Authorization of Self-Generated Subgoals in Long-Horizon Tool-Using AI Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="Now You Feel It, Now You See Me: Digital-Twin-based Teleoperation Interface for Dexterous Manipulation">Now You Feel It, Now You See Me: Digital-Twin-based Teleoperation Interface for Dexterous Manipulation</span></li><li><span class="dpr-home-dashboard-paper-title" title="Look Before You Leap: Thermodynamic Arbitration of Parametric and Non-Parametric Knowledge in LLM Agents via Self-Regulating Memory Architectures">Look Before You Leap: Thermodynamic Arbitration of Parametric and Non-Parametric Knowledge in LLM Agents via Self-Regulating Memory Architectures</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>10</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>4</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>5</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>4</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>3</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span></div>
 </section>
 </div>
 

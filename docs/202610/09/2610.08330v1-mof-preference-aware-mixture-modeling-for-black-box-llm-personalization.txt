@@ -1,0 +1,2375 @@
+MoF: Preference-Aware Mixture Modeling for Black-Box LLM
+Personalization
+Hun Park
+Department of Artificial Intelligence
+Korea University
+Seoul, Republic of Korea
+hunbag98@korea.ac.kr
+Abstract
+Proprietary Large Language Models (LLMs)
+have demonstrated remarkable capabilities
+across a wide range of tasks, yet aligning
+their outputs with diverse user preferences re-
+mains challenging. Existing personalization
+approaches for black-box LLMs often rely on
+user-specific scoring heads, causing the num-
+ber of personalized parameters to grow linearly
+with the number of users and requiring ad-
+ditional adaptation for unseen users. To ad-
+dress these limitations, we propose Mixture-
+of-Facets (MoF)1, a scalable personalization
+framework for black-box LLMs that models
+user preferences as compositions of shared la-
+tent preference facets rather than dedicated
+user-specific parameters. MoF performs per-
+sonalization through history-conditioned rout-
+ing over shared facet heads, enabling personal-
+ization for users unseen during training without
+additional parameter updates. Across diverse
+personalization tasks, MoF delivers stronger
+personalization performance while maintaining
+a more scalable and parameter-efficient design
+than prior approaches. Additional analysis in-
+dicates strong generalization to unseen users.
+1
+Introduction
+Large Language Models (LLMs) have demon-
+strated strong performance across a wide range
+of tasks, from general natural language process-
+ing to complex reasoning (OpenAI, 2022; Ope-
+nAI et al., 2024; Comanici et al., 2025).
+As
+LLM-based personal assistants become increas-
+ingly widespread (Mok et al., 2025; Li et al., 2025;
+Anthropic, 2026), there has been growing interest
+in LLM personalization, i.e., tailoring model re-
+sponses to individual user preferences (Zhang et al.,
+2025b; Salemi et al., 2024). Such personalization is
+motivated by the observation that users may prefer
+different responses to the same query depending
+1Code is publicly available at https://github.com/
+hoonpak/Mixture-of-Facets.
+on their preferences (Kirk et al., 2024a,b; Chen
+et al., 2024). In this work, we view user preference
+as a relative tendency to favor one response over
+another for a given query and aim to steer LLM
+outputs toward responses that better align with such
+preferences.
+Despite their strong capabilities, most LLMs
+are trained using a one-size-fits-all paradigm
+through next-token prediction (Brown et al., 2020;
+Chung et al., 2024) and are subsequently aligned
+with general human preferences during post-
+training (Ouyang et al., 2022). As a result, LLMs
+tend to generate outputs that reflect dominant or
+average preferences, which creates a fundamental
+challenge in aligning LLM outputs with diverse hu-
+man preferences (Jang et al., 2023; Sorensen et al.,
+2024; Feng et al., 2024; Zhou et al., 2024).
+To address this challenge, prior work has ex-
+plored parameter-efficient fine-tuning (PEFT) ap-
+proaches, such as training user-specific LoRA (Hu
+et al., 2022) modules (Tan et al., 2024b; QI et al.,
+2024) or incorporating user embeddings into model
+inputs (Liu et al., 2025; Qiu et al., 2025). While
+effective, these methods require direct access to
+model parameters and are therefore not applica-
+ble to black-box LLMs, which are increasingly de-
+ployed through APIs (Sun et al., 2024). To enable
+personalization for black-box settings, recent work
+has explored retrieval- and prompting-based ap-
+proaches (Salemi et al., 2024; Richardson et al.,
+2023; Shi et al., 2025), which avoid model adap-
+tation but remain vulnerable to irrelevant informa-
+tion. To provide more robust personalization, HY-
+DRA (Zhuang et al., 2024) introduces a reranker
+& adapter framework that personalizes black-box
+LLM outputs by selecting useful historical items
+and ranking candidate responses according to user
+preferences. However, HYDRA relies on user-
+specific scoring heads, causing the number of per-
+sonalized parameters to grow linearly with the num-
+ber of users and requiring additional adaptation for
+arXiv:2610.08330v1  [cs.AI]  6 Oct 2026
+
+
+unseen users. These limitations become increas-
+ingly problematic in practical deployments with
+large user populations.
+To overcome these limitations, we propose
+Mixture-of-Facets (MoF), a preference-aware
+mixture architecture inspired by the Mixture-of-
+Experts (MoE) framework (Jacobs et al., 1991;
+Shazeer et al., 2017; Fedus et al., 2022). Rather
+than modeling user preferences through user-
+specific parameters, MoF assumes that user pref-
+erences can be represented as compositions of
+shared latent preference facets. Based on this idea,
+MoF shifts from user-specific scoring heads to
+shared facet heads, with personalization performed
+through history-conditioned routing. To encourage
+the router to focus on preference-related signals,
+MoF leverages a sparse autoencoder (SAE) (Huben
+et al., 2024; Qiu et al., 2025) over user histories.
+This design allows scalable personalization with a
+fixed number of shared parameters and generalizes
+to users unseen during training without additional
+parameter updates. To further promote facet spe-
+cialization, we introduce a cluster-based sampling
+(CBS) strategy that exposes facet heads to diverse
+preference signals during training.
+Experimental results across multiple personaliza-
+tion tasks demonstrate that MoF achieves the best
+overall performance in terms of average rank, while
+improving scalability and parameter efficiency. Ad-
+ditional analysis shows that MoF maintains com-
+petitive performance even without additional adap-
+tation, indicating strong generalization to unseen
+users. Our key contributions are summarized as
+follows:
+• We propose MoF, a scalable black-box LLM
+personalization framework that models user
+preferences as compositions of shared latent
+preference facets.
+• We introduce a history-conditioned routing
+mechanism that enables personalization for
+unseen users without requiring user-specific
+adaptation.
+• We analyze the generalization and scalabil-
+ity of MoF, showing competitive performance
+on unseen users and constant personalization-
+parameter storage overhead as the number of
+users increases.
+2
+Related Work
+White-Box LLM Personalization.
+LLM person-
+alization is defined as the process of adapting a
+model’s responses to individual users based on their
+profiles, characteristics, preferences, and interac-
+tion history (Zhang et al., 2025b). To achieve this,
+PEFT-based personalization methods commonly
+utilize techniques such as LoRA (Hu et al., 2022).
+OPPU (Tan et al., 2024b) assigns each user a per-
+sonalized LoRA module to capture user-specific
+preferences. PROPER (Zhang et al., 2025a) further
+improves personalization by combining parame-
+ter composition with MoE-style routing. How-
+ever, maintaining separate adapters for individ-
+ual users can introduce substantial parameter and
+storage overhead. To improve parameter sharing,
+PER-PCS (Tan et al., 2024a) decomposes personal-
+ized PEFT modules into reusable parameter pieces
+and constructs user-specific adapters by composing
+components from a shared parameter pool.
+Although PROPER and PER-PCS employ com-
+positional parameterization, their components dif-
+fer from the preference facets considered in MoF.
+PROPER models group-level user adaptations,
+while PER-PCS composes reusable PEFT param-
+eter pieces to construct personalized adapters. In
+contrast, MoF represents individual preferences as
+weighted compositions of jointly learned shared la-
+tent preference facets, with routing weights derived
+from user history. More importantly, both PROPER
+and PER-PCS require access to backbone param-
+eters and are thus limited to white-box settings,
+whereas MoF operates without such access and is
+applicable to black-box LLMs.
+Black-Box LLM Personalization.
+To address
+this challenge, prior work has explored prompting-
+based personalization methods. LaMP (Salemi
+et al., 2024) introduces retrieval augmentation
+for personalization by retrieving personal items
+from user profiles.
+CFRAG (Shi et al., 2025)
+extends this direction by incorporating collabora-
+tive filtering and retrieving histories from similar
+users. PAG (Richardson et al., 2023) combines re-
+trieval with task-aware user summaries generated
+by LLMs to improve personalization. Fermi (Kim
+and Yang, 2025) learns personalized prompts for
+each user by iteratively refining prompts using user
+profiles. Although these methods improve personal-
+ization without modifying model parameters, their
+effectiveness can be affected by irrelevant or noisy
+contextual signals.
+
+
+Figure 1: Overview of the training and inference pipeline. (a) Train stage: the shared base model and scoring
+heads are jointly trained using data collected from multiple users. (b) Fit stage: the base model is frozen while only
+the scoring heads are updated for unseen users. (c) Inference stage: the reranker selects useful history items, the
+black-box LLM generates candidate responses, and the adapter scores the candidates to produce the final response.
+To further advance black-box LLM personaliza-
+tion, HYDRA (Zhuang et al., 2024) reranks user
+histories and selects preference-aligned responses
+via a personalized adapter. However, HYDRA
+relies on user-specific scoring heads (Fig. 2 (a)),
+causing personalized parameters to grow linearly
+with the number of users and requiring an addi-
+tional adaptation stage for unseen users (Fig. 1
+(b)). In contrast, MoF enables scalable person-
+alization through shared facet heads and history-
+conditioned routing, supporting personalization for
+unseen users without additional adaptation while
+requiring no dedicated user-specific parameters.
+3
+Methodology
+3.1
+Preliminary
+Given a user set U = {u1, . . . , uN}, the goal of
+LLM personalization is to generate a response
+ˆyu aligned with user preferences for a query qu.
+For each user u, the behavior history is defined
+as Hu = {h1
+u, . . . , hT
+u }, where each history item
+ht
+u = (qt
+u, yt
+u) consists of a past query qt
+u and the
+corresponding user-preferred response yt
+u. Since
+different users may prefer different responses to
+the same query, personalized response generation
+requires leveraging user-specific preference infor-
+mation extracted from historical interactions.
+Following prior work (Zhuang et al., 2024), we
+adopt a reranker & adapter personalization frame-
+work for black-box LLMs. Given a target query qu,
+relevant history items H′
+u = {h′
+u,1, . . . , h′
+u,M} are
+retrieved from Hu and then reranked by a reranker
+sR
+ϕ to construct a personalized context set H∗
+u. Con-
+ditioned on H∗
+u, the black-box LLM generates a
+set of candidate responses Ou = {o1
+u, . . . , oB
+u }.
+An adapter sA
+θ scores the Ou according to their
+alignment with user preferences, and the highest-
+scoring response is selected as the final output ˆyu.
+An overview of the framework is illustrated in Fig-
+ure 1 (c). Detailed formulations of the reranker and
+adapter objectives are provided in Appendix A.
+3.2
+Mixture-of-Facets (MoF)
+Building on the reranker & adapter framework
+introduced above, we apply Mixture-of-Facets
+(MoF) to both the reranker and adapter (Fig. 2).
+MoF consists of two key components: (1) the
+Facet Heads, which estimate facet-specific scores
+(§3.2.1), and (2) the Preference-Aware Router,
+which computes routing weights based on user
+preferences (§3.2.3). To encourage facet specializa-
+tion during training, we further introduce a cluster-
+based sampling (CBS) strategy (§3.3).
+3.2.1
+Facet Heads
+Each facet head is implemented as a two-layer per-
+ceptron. We intentionally use lightweight two-layer
+MLPs to isolate the effect of shared-facet composi-
+tion while preserving parameter and computational
+efficiency. Given an input pair xR = (qu, h′
+u,m)
+for the reranker or xA = (qu, ob
+u) for the adapter,
+each facet head produces a preference logit. As il-
+lustrated in Figure 2 (b), the input x is first encoded
+by a BERT (Devlin et al., 2019)-based encoder δ,
+which is jointly trained with the facet heads. We
+denote the final hidden representation of the [CLS]
+token as zx = δ(x)[CLS]. Each facet head ψf takes
+zx as input and computes the corresponding prefer-
+ence logit:
+ψf(zx) = W(2)
+f
+tanh
+
+W(1)
+f zx + b(1)
+f
+
++ b(2)
+f .
+(1)
+
+
+Here, W(1)
+f
+∈Rd×d and W(2)
+f
+∈Ro×d denote the
+learnable weight matrices, where d is the hidden
+representation dimension and o denotes the dimen-
+sion of the output logits.
+The model contains a total of F facet heads,
+each encouraged to specialize in different latent
+preference patterns during training. The outputs of
+all facet heads are aggregated into the following
+facet logit matrix:
+Ψ(x) = [ψ1(zx), . . . , ψF (zx)] ∈RF×o.
+(2)
+Each row of Ψ(x) represents the output logits gen-
+erated by a corresponding facet head.
+3.2.2
+Sparse User Representation
+Independently of computing Ψ(x), the router con-
+structs a user-specific preference representation
+from Hu in order to estimate routing weights for
+aggregating Ψ(x). We intentionally exclude query
+representations from the router input so that rout-
+ing decisions focus on persistent user preference
+characteristics rather than query-specific semantics.
+Each history item is encoded using the shared en-
+coder δ, which is kept frozen during router training.
+For each history item ht
+u, we obtain the correspond-
+ing history embedding as et
+u = δ(ht
+u)[CLS]. The
+resulting historical embedding set for user u is de-
+fined as Eu = {e1
+u, . . . , eT
+u }. To capture patterns
+within the user history, we apply a Transformer en-
+coder over Eu and compute the user representation
+via mean pooling:
+e′
+u = Mean (Encoder(Eu)) .
+(3)
+The dense user representation e′
+u contains gen-
+eral semantic and syntactic information that is not
+directly relevant to user preferences.
+To facili-
+tate the router’s focus on preference-related sig-
+nals, we further transform the dense representation
+into a sparse latent representation using a Sparse
+Autoencoder (SAE) (Huben et al., 2024).
+The
+SAE projects the dense user representation into
+a higher-dimensional sparse latent space, encour-
+aging preference-related activation patterns to be
+selectively represented across different latent di-
+mensions. The sparse latent representation is com-
+puted as
+eenc
+u
+= ReLU
+ Wence′
+u + benc
+
+,
+(4)
+where eenc
+u
+∈Rτd and Wenc ∈Rτd×d. Here, τ
+denotes the latent expansion factor that controls the
+dimensionality of the sparse representation. This
+Figure 2: Comparison between (a) user-specific head
+personalization and (b) the proposed MoF framework.
+Unlike previous work, MoF combines shared facet
+heads through preference-aware routing.
+latent space provides additional capacity for sparse
+activations, facilitating the selective representation
+of preference-related signals. The resulting sparse
+representation eenc
+u
+is used as the router input rep-
+resentation.
+The SAE decoder reconstructs the original dense
+representation from the sparse latent representa-
+tion:
+edec
+u
+= Wdeceenc
+u
++ bdec,
+(5)
+where edec
+u
+∈Rd and Wdec ∈Rd×τd. The SAE is
+optimized using the following objective:
+LSAE =
+edec
+u
+−e′
+u
+
+2
+2 + λ1 ∥eenc
+u ∥1 .
+(6)
+The reconstruction objective preserves preference-
+relevant information encoded in the user-history
+representation, while the L1 regularization pro-
+motes sparsity in the latent representation.
+3.2.3
+User Preference-Aware Router
+Using the sparse user representation eenc
+u , the
+router determines which facet heads are more rel-
+evant for a particular user. The router is imple-
+mented as a linear projection layer that produces
+routing logits over the F facet heads:
+gu = Wreenc
+u
++ br,
+(7)
+
+
+where Wr ∈RF×τd denotes the routing projection
+matrix and gu ∈RF represents the routing logits
+over all facet heads. To encourage sparse activation
+of facet heads, we apply top-k routing over gu:
+(˜gu, Ku) = top-k(gu, K),
+(8)
+where ˜gu ∈RK denotes the selected top-k routing
+logits and Ku represents the corresponding facet
+indices. The routing weights are then computed
+using a softmax over the selected routing logits:
+αu,k =
+exp(˜gu,k)
+PK
+j=1 exp(˜gu,j)
+.
+(9)
+The final MoF prediction is obtained as a weighted
+sum of the selected facet outputs using the routing
+weights:
+MoF(x, Hu) =
+K
+X
+k=1
+αu,k ψKu,k(x).
+(10)
+This sparse routing mechanism enables the model
+to represent user-specific preference patterns as
+compositions of shared facet heads, allowing per-
+sonalization without dedicated user-specific heads.
+3.2.4
+Objective
+The model is trained using a binary classification
+objective over the MoF prediction and the corre-
+sponding supervision label ru
+i . The labeling strat-
+egy is described in Appendix A. For a user u and
+training instance (xu
+i , ru
+i ), the prediction probabil-
+ity is computed as
+pu
+i = σ(MoF(xu
+i , Hu)).
+(11)
+The MoF objective is defined as
+LMoF = −ru
+i log pu
+i −(1−ru
+i ) log(1−pu
+i ). (12)
+The final training objective jointly optimizes the
+MoF objective and the sparse autoencoder objec-
+tive:
+L = LMoF + λLSAE.
+(13)
+Here, λ controls the contribution of the SAE regu-
+larization objective during training.
+3.3
+Cluster-Based Sampling (CBS)
+In HYDRA, training instances are constructed by
+retrieving history items based on relevance to the
+target query. However, retrieval relevance often em-
+phasizes lexical or semantic similarity, which may
+fail to reflect the diverse aspects of user preferences.
+As a result, the sampled training instances may be
+concentrated on a limited subset of preference pat-
+terns. To encourage facet specialization in MoF,
+we introduce a cluster-based sampling (CBS) strat-
+egy over Hu. Specifically, we first partition history
+items into multiple clusters using k-means cluster-
+ing over the history embedding set Eu. CBS is ap-
+plied when constructing training instances for both
+the reranker and adapter. Rather than sampling his-
+tory items from a single global retrieval pool, CBS
+samples them separately from each cluster. This
+strategy increases the diversity of preference sig-
+nals observed during training and encourages the
+facet heads to capture diverse preference patterns
+rather than focusing on semantically similar history
+items.
+4
+Experiment
+4.1
+Experimental Setup
+Datasets.
+We evaluate MoF on two person-
+alization classification tasks and two personal-
+ization generation tasks from the LaMP bench-
+mark (Salemi et al., 2024).
+Specifically, we
+use Movie Tagging Classification (LaMP-2)
+and Product Rating Classification (LaMP-3)
+for classification, and News Headline Genera-
+tion (LaMP-4) and Scholarly Title Generation
+(LaMP-5) for generation. Further details on the
+datasets are provided in Appendix C.
+Baselines.
+We compare MoF against both
+prompt-based and reranker & adapter-based per-
+sonalization methods. Zero-Shot uses only the
+input query without any personalization cues. ICL
+augments the input with randomly selected k items
+from the user history. RAG (Salemi et al., 2024) re-
+trieves relevant history items using BM25 (Robert-
+son and Zaragoza, 2009) and augments them into
+the input. PAG (Richardson et al., 2023) further
+enhances personalization by incorporating LLM-
+generated user profile summaries together with re-
+trieved history items. CFRAG (Shi et al., 2025) in-
+corporates collaborative information by retrieving
+similar users and relevant items from their histo-
+ries, followed by personalized reranking for LLM
+generation. HYDRA (Zhuang et al., 2024) is a
+reranker & adapter-based personalization frame-
+work. We additionally report HYDRA-Reranker,
+which uses only the reranker for personalization,
+and HYDRA-Adapter, which applies only the
+adapter over candidate responses generated from
+the zero-shot setting.
+
+
+Table 1: Main results on the LaMP benchmark. Results are averaged over three runs with different sampled user
+sets. k denotes the number of retrieved user-history items. For HYDRA and MoF, we use k = 4. ↑and ↓indicate
+that higher and lower values are better, respectively. Bold and underline indicate the best and second-best scores,
+respectively. Avg. Rank denotes the average rank of each method across all metrics.
+Dataset (→)
+LaMP-2
+LaMP-3
+LaMP-4
+LaMP-5
+Avg.
+Rank↓
+Method (↓)
+Acc ↑
+F1 ↑
+MAE ↓
+RMSE ↓
+R-1 ↑
+R-L ↑
+BLEU ↑
+R-1 ↑
+R-L ↑
+BLEU ↑
+Zero-Shot
+0.420
+0.257
+0.500
+0.777
+0.147
+0.129
+0.891
+0.446
+0.375
+5.822
+13.5
+ICL (k=1)
+0.393
+0.252
+0.727
+1.163
+0.158
+0.140
+0.977
+0.444
+0.373
+6.098
+13.6
+ICL (k=2)
+0.467
+0.387
+0.520
+0.879
+0.167
+0.143
+0.837
+0.448
+0.381
+6.032
+11.3
+ICL (k=4)
+0.513
+0.403
+0.433
+0.762
+0.161
+0.140
+1.240
+0.447
+0.384
+5.511
+10.0
+RAG (k=1)
+0.433
+0.276
+0.613
+0.978
+0.165
+0.145
+0.889
+0.452
+0.385
+5.961
+12.0
+RAG (k=2)
+0.493
+0.346
+0.500
+0.812
+0.167
+0.150
+1.273
+0.459
+0.387
+5.388
+9.5
+RAG (k=4)
+0.547
+0.409
+0.440
+0.765
+0.176
+0.148
+1.456
+0.457
+0.395
+5.888
+6.9
+PAG (k=0)
+0.507
+0.366
+0.333
+0.663
+0.162
+0.140
+0.873
+0.436
+0.361
+5.659
+10.5
+PAG (k=1)
+0.473
+0.337
+0.400
+0.739
+0.181
+0.157
+1.040
+0.454
+0.371
+6.063
+8.0
+CFRAG (k=4)
+0.593
+0.447
+0.440
+0.780
+0.176
+0.151
+0.966
+0.456
+0.392
+5.748
+7.4
+HYDRA-Reranker
+0.567
+0.383
+0.480
+0.830
+0.168
+0.152
+1.517
+0.465
+0.390
+6.281
+6.8
+HYDRA-Adapter
+0.447
+0.271
+0.380
+0.735
+0.159
+0.140
+0.852
+0.467
+0.394
+6.059
+9.3
+HYDRA
+0.593
+0.417
+0.393
+0.761
+0.183
+0.163
+1.849
+0.459
+0.396
+6.652
+3.5
+MoF-Reranker (ours)
+0.600
+0.451
+0.407
+0.724
+0.177
+0.154
+1.502
+0.456
+0.390
+7.421
+4.2
+MoF-Adapter (ours)
+0.467
+0.308
+0.327
+0.682
+0.161
+0.142
+1.275
+0.477
+0.400
+6.515
+6.5
+MoF (ours)
+0.627
+0.438
+0.300
+0.605
+0.199
+0.176
+1.662
+0.481
+0.413
+6.967
+1.4
+Evaluation Metrics.
+Following LaMP (Salemi
+et al., 2024), we use Accuracy (Acc) and F1 score
+(F1) for LaMP-2, MAE and RMSE for LaMP-3,
+and ROUGE-1 (R-1), ROUGE-L (R-L), and BLEU
+for LaMP-4 and LaMP-5. Higher scores indicate
+better performance for all metrics except MAE and
+RMSE.
+Implementation
+Details.
+Following
+prior
+work (Zhuang et al., 2024), we conduct training
+and evaluation using subsets of the original
+datasets, where we sample 100 users for train-
+ing and 50 users for testing.
+For robustness,
+results are averaged over 3 runs with dif-
+ferent randomly sampled user sets.
+We use
+bge-base-en-v1.5 (Xiao et al., 2024) (110M
+parameters) as the base model for both the reranker
+and adapter modules. As the black-box LLM, we
+employ gpt-3.5-turbo-1106 (OpenAI, 2022).
+Additional implementation details are provided in
+Appendix F.
+4.2
+Main Results
+Table 1 presents the main experimental results on
+the LaMP benchmark. We observe that prompt-
+based personalization methods do not consistently
+improve over the zero-shot setting and in some
+cases even degrade performance. One possible
+explanation is that prompt-based methods are sen-
+sitive to history selection and context coverage be-
+cause randomly selected or limited histories may
+fail to represent the user’s preferences while in-
+troducing distracting context. The extent of this
+effect also varies across tasks and retrieval sizes. In
+contrast, reranker & adapter-based approaches gen-
+erally provide more consistent gains across tasks,
+suggesting that aligning the output distribution of a
+black-box LLM with user preferences can be more
+effective than relying solely on prompt-level per-
+sonalization.
+Compared with HYDRA, which relies on user-
+specific scoring heads, MoF achieves better overall
+performance despite eliminating user-specific pa-
+rameters. For example, MoF improves accuracy
+from 0.593 to 0.627 on LaMP-2 and reduces MAE
+from 0.393 to 0.300 on LaMP-3.
+MoF achieves the strongest average performance
+across the tasks with an average rank of 1.4, demon-
+strating stronger overall performance than existing
+prompt-based and reranker & adapter-based base-
+lines. Specifically, MoF achieves the best perfor-
+mance on most evaluation metrics across LaMP-2,
+LaMP-3, LaMP-4, and LaMP-5, with competitive
+results on the remaining metrics. These results
+demonstrate the effectiveness of preference-aware
+
+
+Table 2: Evaluation of unseen user generalization: per-
+formance with and without the fit stage. – indicates that
+the method cannot be applied without a fit stage.
+Dataset (→)
+LaMP-2
+LaMP-3
+LaMP-4
+Method (↓)
+Fit
+Acc ↑
+MAE ↓
+R-1 ↑
+R-L ↑
+HYDRA
+✗
+–
+–
+–
+–
+HYDRA
+✓
+0.593
+0.393
+0.183
+0.163
+MoF
+✗
+0.620
+0.333
+0.200
+0.179
+MoF
+✓
+0.627
+0.300
+0.199
+0.176
+HYDRA-Reranker
+✗
+–
+–
+–
+–
+HYDRA-Reranker
+✓
+0.567
+0.480
+0.168
+0.152
+MoF-Reranker
+✗
+0.547
+0.440
+0.178
+0.158
+MoF-Reranker
+✓
+0.600
+0.407
+0.177
+0.154
+HYDRA-Adapter
+✗
+–
+–
+–
+–
+HYDRA-Adapter
+✓
+0.447
+0.380
+0.159
+0.140
+MoF-Adapter
+✗
+0.440
+0.347
+0.153
+0.137
+MoF-Adapter
+✓
+0.467
+0.327
+0.161
+0.142
+mixture modeling for black-box LLM personaliza-
+tion.
+We further observe that both MoF-Reranker and
+MoF-Adapter individually achieve competitive per-
+formance. This suggests that preference-aware re-
+trieval and personalized candidate selection provide
+complementary benefits. Additional experimental
+results on other black-box LLMs are provided in
+Appendix G, suggesting that the proposed frame-
+work generalizes across different proprietary black-
+box LLMs.
+4.3
+Generalization to Unseen Users
+Unlike HYDRA, which requires an additional fit
+stage for unseen users because of its user-specific
+heads, MoF can perform personalization without
+additional training for new users. Table 2 presents
+the generalization performance on unseen users
+with and without the fit stage. MoF maintains
+competitive performance even without the fit stage,
+with only minor degradation across datasets. No-
+tably, MoF without the fit stage outperforms HY-
+DRA with the fit stage on all metrics reported in
+Table 2, demonstrating strong generalization to un-
+seen users. While MoF-Adapter does not outper-
+form its fitted counterpart in every case, it remains
+competitive without additional training. These find-
+ings suggest that MoF can effectively generalize to
+unseen users without requiring user-specific adap-
+tation.
+4.4
+Scalability Analysis
+Figure 3 (a) and (b) show the effect of the num-
+ber of training users. Across both datasets, MoF
+achieves competitive performance with substan-
+Figure 3: Scalability analysis with increasing user popu-
+lations. (a), (b) show personalization performance as the
+number of training users increases, while (c) compares
+storage growth across methods.
+Table 3: Large-scale evaluation on 1,000 unseen users
+without user-specific fitting.
+Dataset (→)
+LaMP-2
+LaMP-3
+LaMP-4
+Method (↓)
+Acc ↑
+MAE ↓
+R-1 ↑
+R-L ↑
+Zero-Shot
+0.391
+0.515
+0.143
+0.124
+RAG (k = 1)
+0.409
+0.676
+0.155
+0.135
+RAG (k = 2)
+0.480
+0.521
+0.160
+0.141
+RAG (k = 4)
+0.508
+0.449
+0.164
+0.146
+MoF (ours)
+0.577
+0.354
+0.175
+0.156
+tially fewer training users than HYDRA. For exam-
+ple, MoF trained with only 30 users in (a) and 50
+users in (b) already surpasses HYDRA trained with
+100 users, suggesting that MoF can achieve strong
+personalization performance with fewer training
+users. Furthermore, performance remains stable as
+the number of training users increases up to 300,
+suggesting that the learned shared facets remain
+effective as the training user population grows.
+Figure 3 (c) compares storage growth as the
+number of users increases. While HYDRA re-
+quires user-specific scoring heads, causing stor-
+age cost to grow linearly with the user population
+(approximately 2.26 MB per user in our implemen-
+tation), MoF maintains constant personalization-
+parameter storage cost through shared facet heads.
+Appendix B further presents a theoretical analysis
+showing that MoF exhibits constant personalization
+complexity with respect to the number of users.
+To assess scalability to a larger user population,
+we evaluate MoF, trained on 100 users, on 1,000
+unseen users without additional user-specific fit-
+
+
+Table 4: Controlled comparison of HYDRA and MoF
+with and without CBS.
+Dataset (→)
+LaMP-2
+LaMP-3
+LaMP-4
+Method (↓)
+CBS
+Acc ↑
+MAE ↓
+R-1 ↑
+R-L ↑
+HYDRA
+✗
+0.593
+0.393
+0.183
+0.163
+HYDRA
+✓
+0.560
+0.373
+0.170
+0.149
+MoF
+✗
+0.587
+0.380
+0.183
+0.168
+MoF
+✓
+0.627
+0.300
+0.199
+0.176
+Table 5: Effect of applying CBS to different compo-
+nents of MoF. R and A denote the reranker and adapter,
+respectively.
+CBS
+LaMP-2
+LaMP-3
+LaMP-4
+R
+A
+Acc ↑
+MAE ↓
+R-1 ↑
+R-L ↑
+✗
+✗
+0.587
+0.380
+0.183
+0.168
+MoF
+✓
+✗
+0.613
+0.327
+0.179
+0.155
+✓
+✓
+0.627
+0.300
+0.199
+0.176
+ting. As shown in Table 3, MoF consistently outper-
+forms the zero-shot and RAG baselines on LaMP-
+2, LaMP-3, and LaMP-4. These results provide
+further evidence of inference-time scalability and
+unseen-user generalization to a substantially larger
+user population.
+4.5
+Controlled Analysis of CBS
+To disentangle the effect of CBS from that of the
+MoF architecture, we conduct controlled compar-
+isons with and without CBS. As shown in Table 4,
+applying CBS to HYDRA degrades performance
+on most reported metrics, whereas combining CBS
+with MoF improves performance across the re-
+ported metrics. Notably, MoF without CBS re-
+mains competitive with HYDRA, suggesting that
+CBS alone does not account for the gains of MoF.
+Rather, CBS complements the shared-facet archi-
+tecture by exposing facet heads to diverse pref-
+erence signals, encouraging specialization across
+facets.
+We further examine where CBS contributes
+within MoF by selectively applying it to the
+reranker and adapter. As shown in Table 5, ap-
+plying CBS to the reranker improves performance
+on LaMP-2 and LaMP-3 but slightly decreases
+the ROUGE metrics on LaMP-4. Extending CBS
+to both the reranker and adapter further improves
+LaMP-3 and recovers and improves the ROUGE
+metrics on LaMP-4. These results suggest that
+extending CBS to both components can provide
+additional benefits within the MoF framework.
+Table 6: Ablation study of MoF.
+Dataset (→)
+LaMP-2
+LaMP-3
+LaMP-4
+Method (↓)
+Acc ↑
+MAE ↓
+R-1 ↑
+R-L ↑
+MoF
+0.627
+0.300
+0.199
+0.176
+w/o SAE
+0.607
+0.333
+0.188
+0.165
+w/o Router
+0.600
+0.360
+0.184
+0.161
+w/o Multi-Facet
+0.607
+0.353
+0.183
+0.160
+w/o CBS
+0.587
+0.380
+0.183
+0.168
+Figure 4: Impact of the number of facet heads under
+top-3 routing. (a) and (b) show results on LaMP-3 and
+LaMP-4, respectively. A moderate number of facet
+heads generally provides the strongest performance.
+4.6
+Ablation Studies
+Table 6 presents an ablation study evaluating the
+contribution of each component in MoF. Removing
+CBS results in the largest performance degrada-
+tion in most settings, indicating the importance of
+exposing the model to diverse training samples dur-
+ing preference learning. We also observe substan-
+tial performance drops when removing the router,
+demonstrating the benefit of adaptively combin-
+ing shared preference facets. Replacing multiple
+shared facet heads with a single head also degrades
+performance, suggesting that user preferences are
+better captured by combinations of multiple latent
+preference patterns. Finally, removing SAE results
+in smaller but consistent performance degradation
+across datasets, indicating that sparse representa-
+tions provide complementary benefits for personal-
+ization.
+4.7
+Impact of Number of Facet Heads
+Figure 4 presents the impact of varying the number
+of facet heads under top-3 routing. We observe that
+performance generally improves as the number of
+facet heads increases up to a moderate range, while
+further increasing the number of heads does not
+consistently provide additional gains. For LaMP-
+3 in Figure 4 (a), MoF generally achieves favor-
+
+
+Table 7: Qualitative analysis of user groups identified from routing patterns. Representative n-grams are obtained
+using BERTopic on user histories within each group.
+ID
+Representative n-grams
+Interpretation
+G1
+“17th century salem hester prynne”; “years old daughter maddy”;
+“abuse fanatically pious mother”; “wormhole surpass limitations hu-
+man space”
+Threat-, escape-, and conflict-centered narra-
+tives spanning historical, familial, supernatu-
+ral, and speculative settings
+G2
+“zion defends massive invasion machines”; “young wizards harry dis-
+covers trio”; “11th birthday learns powerful wizard”; “zombies per-
+fectly evolved survivors”
+Genre-driven action/fantasy narratives empha-
+sizing adventure, large-scale conflict, and sur-
+vival
+G3
+“actively opposed hitler nazis convictions”; “young prince life threat-
+ened evil”; “adventures lion witch wardrobe”; “young writer elizabeth
+wurtzel earns”; “suddenly single cal adrift”
+Character-centered dramatic narratives involv-
+ing moral conviction, family/romance, youth
+vulnerability, and emotional struggle
+Figure 5: Visualization of CBS for two example users.
+Colors indicate clusters of user-history embeddings.
+Red circles and white crosses denote training samples
+selected using CBS in MoF and BM25 retrieval in HY-
+DRA, respectively, and the green star denotes the query.
+able performance when using 6–8 facet heads and
+performs competitively against the corresponding
+HYDRA variants across most settings. Similarly,
+for LaMP-4 in Figure 4 (b), performance tends to
+improve up to around 6–7 facet heads before show-
+ing limited additional gains. These observations
+suggest that increasing the number of facet heads
+alone does not necessarily improve personalization
+performance. Additional results and analyses are
+presented in Appendix H.
+4.8
+Visualization
+Figure 5 visualizes the history items selected for
+two example users, illustrating how CBS in MoF
+retrieves samples from multiple preference clus-
+ters compared with the standard retrieval used in
+HYDRA. The visualization is obtained by project-
+ing k-means-clustered history embeddings (K=10)
+using UMAP (McInnes et al., 2018). Compared
+with HYDRA, which tends to retrieve histories
+concentrated within specific regions, MoF selects
+items across multiple clusters, exposing the model
+to more diverse preference signals. We further
+observe that user histories often span multiple re-
+gions in the latent space (Figure 5 (a)) rather than
+forming a single concentrated pattern. Such het-
+erogeneous preference distributions motivate CBS
+to provide richer signals for learning facet repre-
+sentations. This observation is consistent with the
+ablation results, where removing CBS causes the
+largest performance degradation.
+4.9
+Qualitative Analysis
+To investigate whether the learned router captures
+meaningful preference-related structures, we group
+users according to their routing-weight distribu-
+tions and perform BERTopic (Grootendorst, 2022)
+analysis on their historical interactions. As illus-
+trated in Figure 10, users exhibit distinct routing
+patterns rather than being assigned uniformly. We
+analyze the corresponding user groups in Table 7,
+where users with similar routing patterns also show
+coherent narrative tendencies. For example, G1 is
+associated with threat- and conflict-centered nar-
+ratives, whereas G2 focuses on action and fantasy
+themes, while G3 emphasizes character-driven and
+emotional narratives. These findings provide quali-
+tative evidence that routing weights reflect mean-
+ingful preference-related structures rather than ar-
+bitrary assignment patterns.
+5
+Conclusion
+In this paper, we introduced MoF, a personaliza-
+tion framework for black-box LLMs based on
+shared preference facets and preference-aware rout-
+ing. By replacing user-specific heads with a fixed
+number of shared facet heads, MoF achieves scal-
+able personalization while maintaining constant
+personalization-parameter storage overhead as the
+number of users increases. Experimental results
+further show that preference-aware routing sup-
+ports effective personalization and generalization
+to users unseen during training without additional
+parameter updates.
+
+
+Limitations
+While MoF achieves a substantially stronger aver-
+age rank across tasks, it does not outperform HY-
+DRA on every individual metric (e.g., BLEU on
+LaMP-4). Thus, our results support strong overall
+personalization performance under a more scalable
+parameterization, rather than uniform superiority
+over HYDRA on every metric.
+Although MoF generalizes to a substantially
+larger set of unseen users, our primary experiments
+train the model on a relatively limited number of
+users. Therefore, the current results demonstrate
+inference-time scalability to larger user populations
+but do not fully characterize training behavior un-
+der substantially larger and more heterogeneous
+user populations.
+MoF also employs a fixed number of shared
+facet heads for all users. While this design pro-
+vides parameter-efficient personalization, a fixed
+facet capacity may become restrictive as user pref-
+erences become increasingly diverse. Future work
+could explore adaptive facet allocation or routing
+mechanisms that dynamically adjust model capac-
+ity while preserving parameter efficiency.
+Finally, our evaluation is limited to the LaMP
+benchmark and does not include LongLaMP or
+a direct comparison with FERMI. LongLaMP in-
+volves long-form personalization with task-specific
+profile structures that may require adapting the cur-
+rent MoF formulation, while FERMI performs it-
+erative per-user prompt optimization under a dif-
+ferent personalization paradigm. Extending MoF
+to long-form settings and comparing it with such
+optimization-based approaches remain important
+directions for future work.
+Ethical Considerations
+MoF performs personalization based on user in-
+teraction histories, which may contain sensitive
+information reflecting individual preferences and
+behavioral patterns. Although MoF eliminates user-
+specific scoring heads and reduces the need for stor-
+ing personalized parameters, the preference infer-
+ence process may still capture sensitive behavioral
+patterns from historical interactions. In addition,
+personalization systems may unintentionally rein-
+force existing user tendencies or reduce exposure
+to diverse content. Practical deployments should
+therefore consider privacy-preserving mechanisms
+such as anonymization, secure handling of user his-
+tories, and user-controlled personalization settings.
+We use publicly available artifacts according to
+their respective licenses and terms of use. The
+LaMP benchmark code and data creation meth-
+ods are licensed under CC BY-NC-SA 4.0, and
+we follow the corresponding licenses and usage
+conditions of the datasets included in the bench-
+mark. We use bge-base-en-v1.5 (FlagEmbed-
+ding) under the MIT License. We additionally
+use OpenAI models (e.g., gpt-3.5-turbo-1106
+and gpt-4o-mini-2024-07-18) according to Ope-
+nAI’s API terms of use and service policies.
+All artifacts were used in a manner consistent
+with their intended use and access conditions. Pub-
+lic benchmarks, pretrained models, and APIs were
+used only for research and evaluation purposes and
+in accordance with their specified usage policies.
+References
+Anthropic. 2026. Claude code overview. Claude Code
+documentation.
+Tom Brown, Benjamin Mann, Nick Ryder, Melanie
+Subbiah, Jared D Kaplan, Prafulla Dhariwal, Arvind
+Neelakantan, Pranav Shyam, Girish Sastry, Amanda
+Askell, Sandhini Agarwal, Ariel Herbert-Voss,
+Gretchen Krueger, Tom Henighan, Rewon Child,
+Aditya Ramesh, Daniel Ziegler, Jeffrey Wu, Clemens
+Winter, and 12 others. 2020. Language models are
+few-shot learners. In Proceedings of the Advances in
+Neural Information Processing Systems (NeurIPS),
+pages 1877–1901.
+Jin Chen, Zheng Liu, Xu Huang, Chenwang Wu, Qi Liu,
+Gangwei Jiang, Yuanhao Pu, Yuxuan Lei, Xiaolong
+Chen, Xingmei Wang, Kai Zheng, Defu Lian, and
+Enhong Chen. 2024. When large language models
+meet personalization: Perspectives of challenges and
+opportunities. World wide web, 27:42.
+Hyung Won Chung, Le Hou, Shayne Longpre, Barret
+Zoph, Yi Tai, William Fedus, Yunxuan Li, Xuezhi
+Wang, Mostafa Dehghani, Siddhartha Brahma, Al-
+bert Webson, Shixiang Shane Gu, Zhuyun Dai, Mirac
+Suzgun, Xinyun Chen, Aakanksha Chowdhery, Alex
+Castro-Ros, Marie Pellat, Kevin Robinson, and 16
+others. 2024. Scaling instruction-finetuned language
+models.
+Journal of Machine Learning Research
+(JMLR), 25.
+Gheorghe Comanici, Eric Bieber, Mike Schaekermann,
+Ice Pasupat, Noveen Sachdeva, Inderjit Dhillon, Mar-
+cel Blistein, Ori Ram, Dan Zhang, Evan Rosen, Luke
+Marris, Sam Petulla, Colin Gaffney, Asaf Aharoni,
+Nathan Lintz, Tiago Cardal Pais, Henrik Jacobsson,
+Idan Szpektor, Nan-Jiang Jiang, and 3416 others.
+2025.
+Gemini 2.5: Pushing the frontier with ad-
+vanced reasoning, multimodality, long context, and
+next generation agentic capabilities. arXiv preprint
+arXiv:2507.06261.
+
+
+Jacob Devlin, Ming-Wei Chang, Kenton Lee, and
+Kristina Toutanova. 2019. BERT: Pre-training of
+deep bidirectional transformers for language under-
+standing.
+In Proceedings of the North American
+Chapter of the Association for Computational Lin-
+guistics: Human Language Technologies (NAACL),
+pages 4171–4186.
+William Fedus, Barret Zoph, and Noam Shazeer. 2022.
+Switch transformers: Scaling to trillion parameter
+models with simple and efficient sparsity. Journal of
+Machine Learning Research (JMLR), 23:1–39.
+Shangbin Feng, Taylor Sorensen, Yuhan Liu, Jillian
+Fisher, Chan Young Park, Yejin Choi, and Yulia
+Tsvetkov. 2024. Modular pluralism: Pluralistic align-
+ment via multi-LLM collaboration. In Proceedings
+of the Conference on Empirical Methods in Natural
+Language Processing (EMNLP), pages 4151–4171.
+Maarten Grootendorst. 2022. BERTopic: Neural topic
+modeling with a class-based tf-idf procedure. arXiv
+preprint arXiv:2203.05794.
+Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan
+Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and
+Weizhu Chen. 2022. LoRA: Low-rank adaptation
+of large language models. In Proceedings of the In-
+ternational Conference on Learning Representations
+(ICLR).
+Robert Huben, Hoagy Cunningham, Logan Riggs Smith,
+Aidan Ewart, and Lee Sharkey. 2024. Sparse autoen-
+coders find highly interpretable features in language
+models. In Proceedings of the International Confer-
+ence on Learning Representations (ICLR).
+Robert A Jacobs, Michael I Jordan, Steven J Nowlan,
+and Geoffrey E Hinton. 1991. Adaptive mixtures of
+local experts. Neural computation, 3:79–87.
+Joel Jang, Seungone Kim, Bill Yuchen Lin, Yizhong
+Wang, Jack Hessel, Luke Zettlemoyer, Hannaneh
+Hajishirzi, Yejin Choi, and Prithviraj Ammanabrolu.
+2023. Personalized soups: Personalized large lan-
+guage model alignment via post-hoc parameter merg-
+ing. arXiv preprint arXiv:2310.11564.
+Wang-Cheng Kang and Julian McAuley. 2018. Self-
+attentive sequential recommendation. In Proceedings
+of the IEEE international conference on data mining
+(ICDM), pages 197–206.
+Jaehyung Kim and Yiming Yang. 2025. Few-shot per-
+sonalization of LLMs with mis-aligned responses. In
+Proceedings of the Nations of the Americas Chap-
+ter of the Association for Computational Linguistics
+(NAACL), pages 11943–11974.
+Hannah Rose Kirk, Bertie Vidgen, Paul Röttger, and
+Scott A. Hale. 2024a. The benefits, risks and bounds
+of personalizing the alignment of large language
+models to individuals. Nature Machine Intelligence,
+6:383–392.
+Hannah Rose Kirk, Alexander Whitefield, Paul Röttger,
+Andrew Michael Bean, Katerina Margatina, Rafael
+Mosquera, Juan Manuel Ciro, Max Bartolo, Adina
+Williams, He He, Bertie Vidgen, and Scott A. Hale.
+2024b. The PRISM alignment dataset: What partici-
+patory, representative and individualised human feed-
+back reveals about the subjective and multicultural
+alignment of large language models. In Proceedings
+of the Advances in Neural Information Processing
+Systems (NeurIPS).
+Hao Li, Chenghao Yang, An Zhang, Yang Deng, Xiang
+Wang, and Tat-Seng Chua. 2025. Hello again! LLM-
+powered personalized agent for long-term dialogue.
+In Proceedings of the Nations of the Americas Chap-
+ter of the Association for Computational Linguistics
+(NAACL), pages 5259–5276.
+Jiongnan Liu, Yutao Zhu, Shuting Wang, Xiaochi Wei,
+Erxue Min, Yu Lu, Shuaiqiang Wang, Dawei Yin, and
+Zhicheng Dou. 2025. Llms + persona-plug = person-
+alized llms. In Proceedings of the Annual Meeting of
+the Association for Computational Linguistics (ACL),
+pages 9373–9385.
+Ilya Loshchilov and Frank Hutter. 2019. Decoupled
+weight decay regularization. In Proceedings of the
+International Conference on Learning Representa-
+tions (ICLR).
+Leland McInnes, John Healy, and James Melville. 2018.
+Umap: Uniform manifold approximation and pro-
+jection for dimension reduction.
+arXiv preprint
+arXiv:1802.03426.
+Jisoo Mok, Ik-hwan Kim, Sangkwon Park, and Sun-
+groh Yoon. 2025. Exploring the potential of LLMs
+as personalized assistants: Dataset, evaluation, and
+analysis. In Findings of the Association for Compu-
+tational Linguistics: ACL, pages 10212–10239.
+OpenAI. 2022. Introducing chatgpt. OpenAI Blog.
+OpenAI. 2024. Gpt-4o mini: Advancing cost-efficient
+intelligence. OpenAI Blog.
+OpenAI, Josh Achiam, Steven Adler, Sandhini Agarwal,
+Lama Ahmad, Ilge Akkaya, Florencia Leoni Ale-
+man, Diogo Almeida, Janko Altenschmidt, Sam Alt-
+man, Shyamal Anadkat, Red Avila, Igor Babuschkin,
+Suchir Balaji, Valerie Balcom, Paul Baltescu, Haim-
+ing Bao, Mohammad Bavarian, Jeff Belgum, and 262
+others. 2024. Gpt-4 technical report. arXiv preprint
+arXiv:2303.08774.
+Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida,
+Carroll Wainwright, Pamela Mishkin, Chong Zhang,
+Sandhini Agarwal, Katarina Slama, Alex Ray, John
+Schulman, Jacob Hilton, Fraser Kelton, Luke Miller,
+Maddie Simens, Amanda Askell, Peter Welinder,
+Paul F Christiano, Jan Leike, and Ryan Lowe. 2022.
+Training language models to follow instructions with
+human feedback. In Proceedings of the Advances in
+Neural Information Processing Systems (NeurIPS).
+
+
+Jiaxing QI, Zhongzhi Luan, Shaohan Huang, Carol
+Fung, Hailong Yang, and Depei Qian. 2024. FD-
+LoRA: Personalized federated learning of large lan-
+guage model via dual lora tuning. arXiv preprint
+arXiv:2406.07925.
+Yilun Qiu, Tianhao Shi, Xiaoyan Zhao, Fengbin Zhu,
+Yang Zhang, and Fuli Feng. 2025. Latent inter-user
+difference modeling for llm personalization. In Pro-
+ceedings of the Conference on Empirical Methods
+in Natural Language Processing (EMNLP), pages
+10599–10617.
+Chris Richardson, Yao Zhang, Kellen Gillespie, Sudipta
+Kar, Arshdeep Singh, Zeynab Raeesy, Omar Zia
+Khan, and Abhinav Sethy. 2023. Integrating sum-
+marization and retrieval for enhanced personaliza-
+tion via large language models.
+arXiv preprint
+arXiv:2310.20081.
+Stephen Robertson and Hugo Zaragoza. 2009. The prob-
+abilistic relevance framework: BM25 and beyond.
+Now Publishers Inc.
+Alireza Salemi, Sheshera Mysore, Michael Bendersky,
+and Hamed Zamani. 2024. Lamp: When large lan-
+guage models meet personalization. In Proceedings
+of the Annual Meeting of the Association for Compu-
+tational Linguistics (ACL), pages 7370–7392.
+Noam Shazeer, Azalia Mirhoseini, Krzysztof Maziarz,
+Andy Davis, Quoc Le, Geoffrey Hinton, and Jeff
+Dean. 2017. Outrageously large neural networks:
+The sparsely-gated mixture-of-experts layer. In Pro-
+ceedings of the International Conference on Learning
+Representations (ICLR).
+Teng Shi, Jun Xu, Xiao Zhang, Xiaoxue Zang, Kai
+Zheng, Yang Song, and Han Li. 2025. Retrieval
+augmented generation with collaborative filtering for
+personalized text generation. In Proceedings of the
+International ACM SIGIR Conference on Research
+and Development in Information Retrieval (SIGIR),
+pages 1294–1304.
+Taylor Sorensen, Liwei Jiang, Jena D. Hwang, Syd-
+ney Levine, Valentina Pyatkin, Peter West, Nouha
+Dziri, Ximing Lu, Kavel Rao, Chandra Bhagavatula,
+Maarten Sap, John Tasioulas, and Yejin Choi. 2024.
+Value kaleidoscope: Engaging ai with pluralistic hu-
+man values, rights, and duties. Proceedings of the
+AAAI Conference on Artificial Intelligence (AAAI),
+38:19937–19947.
+Haotian Sun, Yuchen Zhuang, Wei Wei, Chao Zhang,
+and Bo Dai. 2024. Bbox-adapter: Lightweight adapt-
+ing for black-box large language models. In Pro-
+ceedings of the International Conference on Machine
+Learning (ICML), pages 47280–47304.
+Zhaoxuan Tan, Zheyuan Liu, and Meng Jiang. 2024a.
+Personalized pieces: Efficient personalized large lan-
+guage models through collaborative efforts. In Pro-
+ceedings of the Conference on Empirical Methods
+in Natural Language Processing (EMNLP), pages
+6459–6475.
+Zhaoxuan Tan, Qingkai Zeng, Yijun Tian, Zheyuan Liu,
+Bing Yin, and Meng Jiang. 2024b. Democratizing
+large language models via personalized parameter-
+efficient fine-tuning. In Proceedings of the Confer-
+ence on Empirical Methods in Natural Language
+Processing (EMNLP), pages 6476–6491.
+Shitao Xiao, Zheng Liu, Peitian Zhang, Niklas Muen-
+nighoff, Defu Lian, and Jian-Yun Nie. 2024. C-pack:
+Packed resources for general chinese embeddings. In
+Proceedings of the International ACM SIGIR Confer-
+ence on Research and Development in Information
+Retrieval (SIGIR), pages 641–649.
+Linhai Zhang, Jialong Wu, Deyu Zhou, and Yulan He.
+2025a. PROPER: A progressive learning framework
+for personalized large language models with group-
+level adaptation. In Proceedings of the Annual Meet-
+ing of the Association for Computational Linguistics
+(ACL), pages 16399–16411.
+Zhehao Zhang, Ryan A. Rossi, Branislav Kveton, Yi-
+jia Shao, Diyi Yang, Hamed Zamani, Franck Der-
+noncourt, Joe Barrow, Tong Yu, Sungchul Kim,
+Ruiyi Zhang, Jiuxiang Gu, Tyler Derr, Hongjie Chen,
+Junda Wu, Xiang Chen, Zichao Wang, Subrata Mitra,
+Nedim Lipka, and 2 others. 2025b. Personalization
+of large language models: A survey. Transactions on
+Machine Learning Research (TMLR).
+Yanqi Zhou, Tao Lei, Hanxiao Liu, Nan Du, Yanping
+Huang, Vincent Zhao, Andrew Dai, Zhifeng Chen,
+Quoc Le, and James Laudon. 2022.
+Mixture-of-
+experts with expert choice routing. In Proceedings
+of the Advances in Neural Information Processing
+Systems (NeurIPS), pages 7103–7114.
+Zhanhui Zhou, Jie Liu, Jing Shao, Xiangyu Yue, Chao
+Yang, Wanli Ouyang, and Yu Qiao. 2024. Beyond
+one-preference-fits-all alignment: Multi-objective di-
+rect preference optimization. In Findings of the As-
+sociation for Computational Linguistics: ACL, pages
+10586–10613.
+Yuchen Zhuang, Haotian Sun, Yue Yu, Rushi Qiang,
+Qifan Wang, Chao Zhang, and Bo Dai. 2024. Hydra:
+Model factorization framework for black-box llm
+personalization. In Proceedings of the Advances in
+Neural Information Processing Systems (NeurIPS).
+A
+Detailed Preliminary Framework
+A.1
+Reranker
+The reranker sR
+ϕ takes the current query qu and
+retrieved history candidates as input, and outputs
+a score indicating the usefulness of each history
+item for generating a user-preferred response. For
+each user u, we first retrieve a set of M history
+candidates H′
+u = {h′
+u,1, h′
+u,2, . . . , h′
+u,M} from the
+full user history Hu based on their relevance to the
+target query qu. To construct the reranker training
+dataset DR, we randomly sample M history items
+
+
+from Hu and treat the query in each sampled his-
+tory item as a target query for retrieval-based train-
+ing instance construction. We create a binary super-
+vision label rR
+u,m ∈{0, 1} indicating whether the
+history item h′
+u,m helps generate a user-preferred
+response. For classification tasks, a positive label
+is assigned when the model output matches the
+ground-truth label. For generation tasks, a positive
+label is assigned when the evaluation score exceeds
+the average score across candidate responses. The
+reranker is optimized using the following binary
+classification objective:
+LR(ϕ) =
+X
+u∈U
+M
+X
+m=1
+ℓBCE
+
+sR
+ϕ (qu, h′
+u,m), rR
+u,m
+
+.
+(14)
+Based on the reranker scores, the top-k history
+items are selected to construct the personalized
+context set:
+H∗
+u = arg top-kh′u,m∈H′usR
+ϕ (qu, h′
+u,m)
+(15)
+A.2
+Adapter
+Given the query qu and the personalized context
+set H∗
+u, we sample a set of B candidate responses
+Ou = {o1
+u, . . . , oB
+u } from the black-box LLM. The
+adapter sA
+θ acts as a lightweight selection module
+that scores candidate responses without modifying
+the black-box LLM parameters, thereby aligning
+the output distribution with user preferences. The
+adapter assigns a preference score to each candidate
+response in Ou based on its alignment with user
+preferences. To build the adapter training dataset
+DA, we generate candidate response sets Ou for all
+history items in Hu. We assign a binary supervision
+label rA
+u,b ∈{0, 1} to each candidate response ob
+u,
+where rA
+u,b = 1 indicates that the response aligns
+with user preferences. Following the labeling strat-
+egy used for reranker training, positive labels are
+assigned based on exact matching for classification
+tasks and relative evaluation scores for generation
+tasks. The adapter is optimized using the following
+binary classification objective:
+LA(θ) =
+X
+u∈U
+B
+X
+b=1
+ℓBCE
+
+sA
+θ (qu, ob
+u), rA
+u,b
+
+. (16)
+The final personalized response is selected as the
+candidate with the highest adapter score:
+ˆyu = arg max
+b
+sA
+θ (qu, ob
+u).
+(17)
+A.3
+Training & Inference
+As illustrated in Figure 1, both the reranker sR
+ϕ and
+the adapter sA
+θ are trained in two stages: a train
+stage and a fit stage. During the train stage, the
+base model and scoring heads are jointly trained
+using data collected from a large number of users.
+This enables the model to capture shared preference
+signals across users while learning user-specific
+preference patterns through separate heads. Dur-
+ing the fit stage, only the heads are updated for
+unseen users while the shared base model remains
+frozen. This stage adapts the personalization mod-
+ules to the preference patterns of new users without
+modifying the shared parameters.
+During inference, retrieved history items are first
+reranked to select the more useful historical items
+H∗
+u for the current query, as defined in Eq. (15).
+Conditioned on H∗
+u, the black-box LLM gener-
+ates a set of candidate responses Ou. The adapter
+then assigns preference scores to the candidate re-
+sponses in Ou, and the response with the highest
+score is selected as the final personalized response
+ˆyu, as defined in Eq. (17).
+B
+Parameter Scalability Analysis
+We analyze how the number of trainable personal-
+ization parameters scales with the number of users.
+Let N denote the number of users, F the number
+of facet heads. For user-specific personalization
+approaches such as HYDRA, each user maintains
+an independent scoring head. The trainable per-
+sonalization parameters can therefore be expressed
+as
+PHYDRA(N) = NPhead,
+(18)
+where Phead denotes the parameter count of a sin-
+gle user-specific head. Consequently, introducing
+one additional user increases the parameter count
+by
+PHYDRA(N + 1) −PHYDRA(N) = Phead. (19)
+Thus, the personalization parameter complexity
+grows linearly with the number of users:
+PHYDRA(N) = O(N).
+(20)
+In contrast, MoF employs a fixed set of shared
+facet heads coupled with a shared routing module.
+The trainable personalization parameters become
+PMoF = FPψ + Prouter + PSAE,
+(21)
+
+
+where Pψ denotes the parameter count of a single
+facet head, and Prouter and PSAE denote the param-
+eters of the shared routing and sparse autoencoder
+modules, respectively. Since all terms in PMoF are
+independent of the number of users, introducing a
+new user does not increase the parameter count:
+PMoF(N + 1) −PMoF(N) = 0.
+(22)
+Therefore, MoF exhibits constant parameter com-
+plexity with respect to the number of users:
+PMoF = O(1).
+(23)
+This result indicates that personalization for un-
+seen users can be achieved solely through history-
+derived routing weights without introducing ad-
+ditional user-specific parameters. Consequently,
+MoF can scale to large and dynamically evolving
+user populations without increasing the number of
+trainable personalization parameters.
+C
+Task Details
+We evaluate LLM personalization using the LaMP
+benchmark (Salemi et al., 2024). The benchmark
+consists of seven personalized NLP tasks spanning
+both classification and generation settings. We ex-
+clude LaMP-1 and LaMP-7 because these tasks
+involve task-specific input structures that are not
+directly compatible with the reranker & adapter
+formulation adopted in our framework and prior
+black-box personalization methods. This exclu-
+sion reflects a limitation of the current reranker
+& adapter instantiation rather than an inherent re-
+striction of the MoF framework. Since our goal is
+to evaluate personalized preference modeling un-
+der a unified black-box personalization setting, we
+focus on tasks that share comparable interaction
+structures and evaluation protocols. In addition,
+LaMP-6 is not publicly available and therefore can-
+not be included in our experiments. This evaluation
+setting is consistent with the evaluation setting used
+in prior black-box personalization work (Zhuang
+et al., 2024).
+LaMP-2: Movie Tagging Classification.
+LaMP-
+2 evaluates whether a model can predict a user’s
+tagging behavior for movies. Each user’s history
+consists of a sequence of movie description–tag
+pairs, where the descriptions correspond to previ-
+ously viewed movies and the tags represent the
+user’s assigned labels. The task requires the model
+to capture personalized preference patterns from
+Table 8: Size of training data used in the train and fit
+stages of MoF across different LaMP datasets.
+Method
+Module
+Stage
+LaMP-2
+LaMP-3
+LaMP-4
+LaMP-5
+MoF
+Reranker
+Train
+10,228
+10,852
+10,816
+10,998
+Fit
+4,468
+4,926
+4,841
+4,999
+Adapter
+Train
+167,979
+140,195
+289,368
+71,226
+Fit
+45,401
+76,336
+128,871
+39,294
+Table 9: Training and fitting time of MoF across differ-
+ent LaMP datasets.
+Method
+Module
+Stage
+LaMP-2
+LaMP-3
+LaMP-4
+LaMP-5
+MoF
+Reranker
+Train
+00:04:40
+00:09:37
+00:03:36
+00:09:52
+Fit
+00:00:56
+00:01:14
+00:00:58
+00:01:19
+Adapter
+Train
+00:57:53
+01:53:06
+01:24:06
+00:50:08
+Fit
+00:31:42
+00:21:19
+00:25:03
+00:08:21
+the sequential interaction history and predict the
+appropriate tag for a target movie description. Fol-
+lowing prior work, we evaluate performance using
+Accuracy (Acc) and F1 score (F1).
+LaMP-3:
+Product
+Rating
+Classification.
+LaMP-3 evaluates personalized rating prediction
+based on users’ product reviews. User history is
+represented as a sequence of review–rating pairs
+generated by the same user. Given a target review,
+the model predicts the rating score that the user
+would assign. Although LaMP-3 is formulated
+as an ordinal classification task in the original
+benchmark, following prior work we report MAE
+and RMSE as evaluation metrics.
+LaMP-4: News Headline Generation.
+LaMP-4
+evaluates personalized text generation by requir-
+ing the model to generate headlines for news arti-
+cles. User history consists of article–headline pairs
+written by the same journalist. The task requires
+extracting the journalist’s writing characteristics
+and stylistic patterns from historical interactions
+and generating a personalized headline for a tar-
+get article. We evaluate generation quality using
+ROUGE-1 (R-1), ROUGE-L (R-L), and BLEU.
+LaMP-5: Scholarly Title Generation.
+LaMP-5
+focuses on generating titles for academic papers
+based on their abstracts. Similar to LaMP-4, each
+user’s history consists of abstract–title pairs writ-
+ten by the same author. The model is expected to
+infer the author’s writing style and title construc-
+tion patterns from historical data and generate a
+personalized title for a target abstract. We evaluate
+performance using ROUGE-1 (R-1), ROUGE-L
+(R-L), and BLEU.
+
+
+Table 10: Performance on the LaMP benchmark using gpt-4o-mini-2024-07-18 as the underlying proprietary
+black-box LLM. Experimental settings follow Table 1, while replacing the black-box LLM used in the main
+experiments. Results indicate that MoF maintains strong overall performance, demonstrating robustness beyond a
+specific black-box model.
+Dataset (→)
+LaMP-2
+LaMP-3
+LaMP-4
+LaMP-5
+Avg.
+Rank↓
+Method (↓)
+Acc ↑
+F1 ↑
+MAE ↓
+RMSE ↓
+R-1 ↑
+R-L ↑
+BLEU ↑
+R-1 ↑
+R-L ↑
+BLEU ↑
+Zero-Shot
+0.467
+0.281
+0.320
+0.639
+0.150
+0.134
+0.849
+0.422
+0.343
+3.113
+12.0
+ICL (k=1)
+0.513
+0.344
+0.413
+0.757
+0.150
+0.129
+0.908
+0.434
+0.364
+4.525
+12.0
+ICL (k=2)
+0.493
+0.365
+0.393
+0.716
+0.152
+0.135
+1.250
+0.433
+0.364
+4.043
+11.2
+ICL (k=4)
+0.520
+0.388
+0.327
+0.648
+0.156
+0.140
+1.681
+0.440
+0.375
+5.230
+7.9
+RAG (k=1)
+0.520
+0.349
+0.340
+0.647
+0.157
+0.141
+0.806
+0.432
+0.359
+4.204
+10.4
+RAG (k=2)
+0.527
+0.361
+0.367
+0.651
+0.165
+0.145
+1.425
+0.461
+0.385
+5.934
+7.6
+RAG (k=4)
+0.573
+0.405
+0.327
+0.594
+0.163
+0.147
+1.304
+0.466
+0.410
+6.078
+4.4
+PAG (k=0)
+0.507
+0.370
+0.287
+0.572
+0.127
+0.109
+0.183
+0.402
+0.329
+2.631
+12.0
+PAG (k=1)
+0.567
+0.470
+0.280
+0.566
+0.142
+0.123
+0.354
+0.399
+0.340
+2.890
+10.2
+CFRAG (k=4)
+0.673
+0.533
+0.347
+0.642
+0.171
+0.148
+1.441
+0.445
+0.383
+5.137
+5.3
+HYDRA-Reranker
+0.613
+0.417
+0.347
+0.635
+0.160
+0.140
+1.331
+0.464
+0.401
+5.362
+6.4
+HYDRA-Adapter
+0.527
+0.343
+0.307
+0.610
+0.143
+0.126
+0.728
+0.410
+0.328
+3.127
+11.5
+HYDRA
+0.653
+0.448
+0.347
+0.632
+0.168
+0.147
+1.230
+0.468
+0.405
+5.603
+5.0
+MoF-Reranker (ours)
+0.587
+0.452
+0.320
+0.611
+0.169
+0.148
+1.459
+0.462
+0.403
+5.252
+4.2
+MoF-Adapter (ours)
+0.507
+0.336
+0.300
+0.604
+0.152
+0.132
+1.116
+0.419
+0.345
+2.985
+10.5
+MoF (ours)
+0.653
+0.504
+0.327
+0.627
+0.180
+0.157
+1.109
+0.472
+0.405
+5.643
+3.6
+D
+Data Statistics
+Table 8 reports the number of training instances
+used in the train and fit stages for the reranker and
+adapter modules across different LaMP datasets.
+E
+Computational Cost
+Table 9 reports the training and fitting runtime of
+the reranker and adapter modules across different
+LaMP datasets.
+F
+Implementation Details
+All experiments are conducted on a machine
+equipped with an AMD Ryzen Threadripper 1950X
+CPU and a single NVIDIA GeForce RTX 3090
+GPU. For black-box LLM generation, we set the
+temperature to 1.0.
+For training, we employ
+AdamW (Loshchilov and Hutter, 2019) with a
+learning rate of 5.0 × 10−5, a batch size of 64,
+and a weight decay of 0.01. All models are trained
+for 2 epochs. We set λ = 0.5, λ1 = 8.6 × 10−4
+and τ = 2. For the reranker, we partition each
+user’s history into 10 clusters and retrieve one item
+from each cluster using BM25, yielding M = 10
+sampled candidates. For the adapter, we set the
+number of candidate responses B to 8. Based on
+validation performance, we set the number of facet
+heads to F = 7 and use top-3 sparse routing across
+all experiments. To construct user embeddings, we
+use up to the most recent 128 history items for each
+user. Additional sensitivity analyses are provided
+in Appendix H.
+G
+Generalization Across LLMs
+Table 10 presents additional experimental results
+using gpt-4o-mini-2024-07-18 (OpenAI, 2024)
+as the underlying proprietary black-box LLM while
+keeping all other experimental settings identical
+to those in the main experiments. We observe
+that the overall trends remain largely consistent
+with those in Table 1.
+Similar to the main re-
+sults, prompt-based personalization methods do
+not consistently improve performance across tasks,
+whereas reranker & adapter-based approaches gen-
+erally provide stronger and more stable gains. MoF
+maintains the strongest overall performance with
+the best average rank of 3.6, demonstrating strong
+performance across multiple tasks under a differ-
+ent black-box model setting. Specifically, MoF
+achieves the best performance on several evalua-
+tion metrics while remaining competitive on the
+remaining settings. For example, MoF improves F1
+from 0.448 to 0.504 on LaMP-2 compared with HY-
+DRA and also achieves stronger performance on
+
+
+Figure 6: Impact of the number of retrieved user-history
+items on personalization performance. (a) shows results
+on LaMP-2 and (b) shows results on LaMP-3. MoF
+generally benefits from additional retrieved information
+up to moderate retrieval sizes and maintains strong per-
+formance across different retrieval sizes.
+LaMP-4, improving R-1 from 0.168 to 0.180 and
+R-L from 0.147 to 0.157. Although absolute perfor-
+mance differs from the main experimental setting,
+the relative advantage of MoF remains largely pre-
+served. These results suggest that the proposed
+framework can generalize across different propri-
+etary black-box LLMs.
+H
+Sensitivity Analysis
+H.1
+Impact of Number of Retrieved Items
+Figure 6 presents the impact of varying the num-
+ber of retrieved items on personalization perfor-
+mance. We observe that increasing the number
+of retrieved items generally improves performance
+in both LaMP-2 and LaMP-3 up to a moderate
+retrieval size, while larger retrieval sizes may pro-
+vide diminishing returns. For LaMP-2 in Figure 6
+(a), MoF shows consistent performance improve-
+ments as the number of retrieved items increases,
+whereas BM25 and MoF-Reranker exhibit weaker
+gains or performance saturation. This trend sug-
+gests that the proposed framework benefits more
+from additional retrieved information. A similar
+trend can be observed for LaMP-3 in Figure 6 (b).
+Although performance slightly degrades at larger
+retrieval sizes, MoF maintains lower MAE and
+RMSE values than the baselines across different
+retrieval settings. These observations suggest that
+the proposed framework remains relatively robust
+under larger retrieval sizes while benefiting from
+richer user-history information.
+Figure 7: Impact of top-k routing on personalization
+performance while fixing the total number of facet heads
+to 7. (a) and (b) present results on LaMP-3 and LaMP-
+4, respectively. Performance varies with the number
+of activated facet heads, indicating the importance of
+routing selection in preference aggregation.
+H.2
+Impact of Top-k Routing
+Figure 7 presents the impact of varying the number
+of selected facet heads under top-k routing while
+fixing the total number of facet heads to 7. We
+observe that performance generally improves up to
+a moderate routing size, while larger routing sizes
+provide limited additional benefits. For LaMP-3
+in Figure 7 (a), MoF achieves its best performance
+around k=2, obtaining lower MAE and RMSE val-
+ues than the corresponding HYDRA variants across
+all settings. Similarly, for LaMP-4 in Figure 7
+(b), performance reaches its highest values around
+k=3 for both R-1 and R-L metrics. In addition,
+MoF achieves stronger performance than HYDRA
+across most routing settings. These observations
+suggest that selecting a moderate routing size pro-
+vides a better balance between utilizing diverse
+preference signals and maintaining focused pref-
+erence representations, which is consistent with
+prior MoE studies emphasizing sparse expert acti-
+vation and effective expert specialization (Zhou
+et al., 2022). While activating additional facet
+heads may incorporate richer preference informa-
+tion, excessively large routing sizes may reduce the
+effectiveness of preference aggregation by introduc-
+ing redundant or less relevant preference signals.
+H.3
+Impact of User Embedding History
+Length
+Figure 8 presents the impact of varying the number
+of recent user interactions used for constructing
+user embeddings. We observe that increasing the
+history length does not consistently improve per-
+sonalization performance. For LaMP-3 in Figure 8
+
+
+Figure 8: Impact of the number of recent user interac-
+tions used for user embedding construction on person-
+alization performance. (a) and (b) present results on
+LaMP-3 and LaMP-4, respectively. Moderate history
+lengths generally provide stronger performance across
+tasks.
+(a), MoF achieves its strongest performance at rela-
+tively short-to-moderate history lengths, with the
+best results observed around 128 recent interac-
+tions. Similarly, for LaMP-4 in Figure 8 (b), perfor-
+mance also peaks around moderate history lengths
+before showing limited additional gains. Across
+both tasks, MoF generally maintains stronger per-
+formance than the corresponding HYDRA variants.
+These observations suggest that incorporating ad-
+ditional historical interactions does not necessar-
+ily provide proportional benefits. Prior work on
+sequential recommendation has shown that user
+representations benefit from focusing on behavior
+signals that are more relevant to current preferences
+rather than uniformly aggregating long interaction
+histories (Kang and McAuley, 2018). Our results
+exhibit a similar trend, suggesting that moderate
+history lengths may provide a favorable balance be-
+tween preserving relevant preference information
+and limiting the influence of older interactions.
+I
+Case Study
+Figure 9 presents qualitative examples from LaMP-
+2 to illustrate how MoF performs preference-aware
+personalization under the same input query. In this
+task, the model is asked to predict the movie tag
+for the same target movie from a candidate tag
+set, while each user provides a different interaction
+history. Although the target query is identical, MoF
+retrieves different user-history samples and assigns
+different preference alignment scores depending on
+the user’s past tagging behavior.
+For User 101291, MoF selects historical movies
+that are mostly associated with the tag “based on a
+book.” The selected examples are distributed across
+multiple regions in the history embedding space,
+indicating that MoF does not simply rely on local
+semantic similarity, but instead gathers preference-
+relevant evidence from diverse historical clusters.
+As a result, the model assigns the highest scores to
+the “based on a book” candidates, suggesting that
+the user’s previous tagging patterns provide strong
+evidence for this preference.
+In contrast, for User 10497, MoF retrieves a dif-
+ferent set of historical examples under the same
+target query. The selected histories include mul-
+tiple examples associated with “comedy,” and the
+resulting preference scores are highest for the “com-
+edy” candidates. This shows that MoF can adapt
+its prediction behavior to a different user’s pref-
+erence pattern even when the input movie is un-
+changed. The comparison demonstrates that MoF
+personalizes the decision process by conditioning
+on user-specific historical preferences rather than
+producing a single globally preferred prediction.
+Overall, this case study highlights two important
+properties of MoF. First, the cluster-based history
+selection encourages the model to use diverse evi-
+dence from the user’s interaction history, which
+helps capture heterogeneous preference signals.
+Second, the preference-aware routing mechanism
+enables different users to emphasize different latent
+facets, leading to user-specific score distributions
+and final predictions. These qualitative results sup-
+port the main experimental findings that MoF can
+effectively model personalized preferences while
+avoiding user-specific scoring heads.
+J
+Prompt Templates
+Following prior work (Zhuang et al., 2024; Salemi
+et al., 2024), we employ prompt templates through-
+out the framework, including black-box LLM gen-
+eration and the construction of training instances
+for both the reranker and adapter modules. The
+prompts combine task-specific instructions with
+personalized contextual information derived from
+user histories. The complete prompt templates used
+in our experiments are illustrated in Figures 11, 12,
+13, and 14.
+
+
+Figure 9: Case study on LaMP-2 illustrating how MoF personalizes prediction behavior for the same query. MoF
+selects different user-history examples and assigns distinct preference alignment scores according to each user’s
+tagging patterns, resulting in user-specific evidence selection and predictions.
+Figure 10: Heatmap of routing weight distributions across users. Users with similar routing patterns are grouped
+together.
+
+
+Figure 11: Prompt template used for Movie Tagging Classification (LaMP-2). The prompt incorporates retrieved
+user history examples together with task instructions and the target movie description.
+Figure 12: Prompt template used for Product Rating Classification (LaMP-3). The prompt incorporates retrieved
+user history examples together with task instructions and the target review.
+Figure 13: Prompt template used for News Headline Generation (LaMP-4). The prompt incorporates retrieved user
+history examples together with task instructions and the target news article.
+
+
+Figure 14: Prompt template used for Scholarly Title Generation (LaMP-5). The prompt incorporates retrieved user
+history examples together with task instructions and the target paper abstract.
