@@ -208,15 +208,22 @@ class SiliconFlowReranker:
     for attempt in range(self.max_retries + 1):
       self._wait_for_rate_limit()
       started = time.perf_counter()
-      response = self.session.post(
-        self.base_url,
-        headers={
-          "Authorization": f"Bearer {self.api_key}",
-          "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=self.timeout,
-      )
+      try:
+        response = self.session.post(
+          self.base_url,
+          headers={
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+          },
+          json=payload,
+          timeout=self.timeout,
+        )
+      except (requests.ConnectionError, requests.Timeout):
+        # 网络抖动（连接断开、超时）也按临时错误重试。
+        if attempt < self.max_retries:
+          time.sleep(self._transient_retry_delay(attempt))
+          continue
+        raise
       self._last_request_at = time.perf_counter()
       elapsed = self._last_request_at - started
       self.call_count += 1
@@ -230,6 +237,10 @@ class SiliconFlowReranker:
         text = getattr(response, "text", "") or ""
         if attempt < self.max_retries and self._is_rate_limit_error(response, text):
           time.sleep(self.retry_delay_seconds)
+          continue
+        if attempt < self.max_retries and self._is_transient_server_error(response):
+          # 上游网关偶发 502/503/504：短暂等待后重试，不让整条流水线失败。
+          time.sleep(self._transient_retry_delay(attempt))
           continue
         raise requests.HTTPError(
           f"SiliconFlow rerank API failed: status={response.status_code} body={text[:500]}"
@@ -263,6 +274,15 @@ class SiliconFlowReranker:
     delay = self.min_interval_seconds - elapsed
     if delay > 0:
       time.sleep(delay)
+
+  @staticmethod
+  def _is_transient_server_error(response: requests.Response) -> bool:
+    status_code = int(getattr(response, "status_code", 0) or 0)
+    return status_code in (500, 502, 503, 504)
+
+  def _transient_retry_delay(self, attempt: int) -> float:
+    base = min(self.retry_delay_seconds, 15.0)
+    return base * (attempt + 1)
 
   @staticmethod
   def _is_rate_limit_error(response: requests.Response, text: str) -> bool:

@@ -46,6 +46,17 @@ class FakeRateLimitedResponse:
         return {}
 
 
+class FakeBadGatewayResponse:
+    status_code = 502
+    text = '{"detail":"upstream error: 502 Bad Gateway"}'
+
+    def raise_for_status(self):
+        raise requests.HTTPError("502 Server Error")
+
+    def json(self):
+        return {}
+
+
 class FakeSession:
     def __init__(self, responses=None):
         self.calls = []
@@ -156,6 +167,44 @@ class RerankerApiTest(unittest.TestCase):
         self.assertEqual(result["results"][0]["index"], 1)
         self.assertEqual(len(session.calls), 2)
         self.assertEqual(reranker.stats("Qwen/Qwen3-Reranker-0.6B")["api_calls"], 2)
+
+    def test_siliconflow_reranker_retries_bad_gateway(self):
+        session = FakeSession([FakeBadGatewayResponse(), FakeResponse()])
+        reranker = self.api_mod.SiliconFlowReranker(
+            api_key="test-key",
+            base_url="https://example.test/v1/rerank",
+            max_retries=1,
+            retry_delay_seconds=0,
+            session=session,
+        )
+
+        result = reranker.rerank(
+            query="graph neural networks",
+            documents=["doc a", "doc b"],
+            top_n=2,
+            model="Qwen/Qwen3-Reranker-0.6B",
+        )
+
+        self.assertEqual(result["results"][0]["index"], 1)
+        self.assertEqual(len(session.calls), 2)
+
+    def test_siliconflow_reranker_raises_after_bad_gateway_retries(self):
+        session = FakeSession([FakeBadGatewayResponse(), FakeBadGatewayResponse()])
+        reranker = self.api_mod.SiliconFlowReranker(
+            api_key="test-key",
+            base_url="https://example.test/v1/rerank",
+            max_retries=1,
+            retry_delay_seconds=0,
+            session=session,
+        )
+
+        with self.assertRaisesRegex(requests.HTTPError, "status=502"):
+            reranker.rerank(
+                query="graph neural networks",
+                documents=["doc a", "doc b"],
+                model="Qwen/Qwen3-Reranker-0.6B",
+            )
+        self.assertEqual(len(session.calls), 2)
 
     def test_siliconflow_reranker_requires_key(self):
         with patch.dict("os.environ", {}, clear=True):
