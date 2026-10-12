@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-11</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-12</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 35 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 4 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>4</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>0</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-11 19:06:03 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-12 22:32:24 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-11 日报已完成：35 篇论文分为 15 篇精读、20 篇速读，重点关注大模型记忆与多智能体协作。</p>
-<p>最值得看的是两篇均获 9.0/10 的精读论文，分别聚焦用反事实适应应对记忆诱发的迎合，以及评估记忆门控对不同来源迎合的防御效果。</p>
-<p>建议先读这两篇的摘要，再按兴趣选读 8.0/10 的多智能体协作或长对话记忆论文，了解 AI 如何更可靠地记忆与合作。</p>
+<p>今日共生成 4 篇推荐（精读 4 篇，速读 0 篇）</p>
+<p>精读：《From Retrieval to Reconstruction: Constructing Evolvable Cognitive Memory for Long-Term Dialogue》（8.0/10）, 《Deception by Omission: Language Models Knowingly Hide Their Mistakes》（8.0/10）</p>
+<p>这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">15 篇</strong>
+    <strong class="dpr-home-dashboard-count">4 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Memadapter: Counterfactual Adaptation Against Memory-induced Sycophancy">Memadapter: Counterfactual Adaptation Against Memory-induced Sycophancy</span></li><li><span class="dpr-home-dashboard-paper-title" title="Defense-in-Depth for LLMs: Evaluating Memory Gates Against Activation-Induced and Memory-Induced Sycophancy">Defense-in-Depth for LLMs: Evaluating Memory Gates Against Activation-Induced and Memory-Induced Sycophancy</span></li><li><span class="dpr-home-dashboard-paper-title" title="Juicy Interactive Visualization: Evaluating How Excessive Feedback Design Shapes Visualization Engagement">Juicy Interactive Visualization: Evaluating How Excessive Feedback Design Shapes Visualization Engagement</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="From Retrieval to Reconstruction: Constructing Evolvable Cognitive Memory for Long-Term Dialogue">From Retrieval to Reconstruction: Constructing Evolvable Cognitive Memory for Long-Term Dialogue</span></li><li><span class="dpr-home-dashboard-paper-title" title="Deception by Omission: Language Models Knowingly Hide Their Mistakes">Deception by Omission: Language Models Knowingly Hide Their Mistakes</span></li><li><span class="dpr-home-dashboard-paper-title" title="Personalization Matters: Long-Horizon Conversation Agent with User-Centric Information in Online Shopping Interactions">Personalization Matters: Long-Horizon Conversation Agent with User-Centric Information in Online Shopping Interactions</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>4</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>3</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>3</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>3</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>4</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -93,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">20 篇</strong>
+    <strong class="dpr-home-dashboard-count">0 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Cooperating with Future Collaborators: Multi-Agent RL under Staggered Participation">Cooperating with Future Collaborators: Multi-Agent RL under Staggered Participation</span></li><li><span class="dpr-home-dashboard-paper-title" title="Do LLMs Act on What They Know? From Partner Representations to Cooperative Actions">Do LLMs Act on What They Know? From Partner Representations to Cooperative Actions</span></li><li><span class="dpr-home-dashboard-paper-title" title="MINDSET: Energy-based Schema Evolution for Long Conversational Agent Memory">MINDSET: Energy-based Schema Evolution for Long Conversational Agent Memory</span></li></ul>
+<p class="dpr-home-dashboard-empty">今日暂无推荐。</p>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>6</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>3</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">ba <strong>1</strong></span></div>
+
 </section>
 </div>
 
