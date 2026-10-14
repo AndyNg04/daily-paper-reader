@@ -1,0 +1,1211 @@
+Title: CLEAT: Learning Value-Guided Clarification for Interactive Agents
+
+URL Source: https://arxiv.org/pdf/2610.12655v1
+
+Published Time: Mon, 12 Oct 2026 00:11:18 GMT
+
+Number of Pages: 34
+
+Markdown Content:
+MINDS LAB 
+
+# CLEAT: Learning Value-Guided Clarification for Interactive Agents 
+
+Jiatan Huang 1 Zheyuan Zhang 2 Ziming Li 1 Tianyi Ma 2
+
+Mingchen Li 3 Yanfang Ye 2 Chuxu Zhang 1,† 
+
+> 1
+
+University of Connecticut 2University of Notre Dame 
+
+> 3
+
+University of Massachusetts, Amherst 
+
+{jiatan.huang,chuxu.zhang}@uconn.edu †Corresponding author 
+
+LLM agents can execute increasingly complex tasks, but effective assistance also requires aligning their actions with goals and constraints that users may leave unstated. We study this problem as interactive intent alignment through clarification. Yet clarification is useful only when the agent can turn the answer into better decisions. As training changes how the agent handles incomplete information and uses additional answers, the same clarification can become more or less useful. We introduce CLEAT (CL arification through valu E-guided Agent co-Training), a framework that co-trains a clarification-value controller and the task policy from shared interaction outcomes. We formulate residual query value to measure the task utility gained by asking rather than proceeding under the current policy, and estimate it through paired rollouts from the same interaction history. These paired returns train the controller to predict clarification value and the task policy to select useful questions and act on the answers. The controller guides subsequent rollout collection, while outcomes from the updated agent provide new value labels that allow clarification guidance to adapt as the agent learns. With Qwen3-4B, CLEAT achieves the highest mean score in all ten evaluation settings across four benchmarks. Gains over the strongest baseline reach 13.2 and 6.5 percentage points on UserGym Travel and IN3 underspecification judgment accuracy, respectively. Ablations show that co-training improves the task policy even when the controller is removed at inference, while adapting clarification guidance to the evolving policy yields further gains. 
+
+# 1 Introduction 
+
+Large language model (LLM) agents have made rapid progress in planning and tool use, enabling them to carry out increasingly complex tasks (Zhou et al., 2024; Yang et al., 2024; Li et al., 2026). However, stronger execution alone does not ensure that an agent’s actions reflect what the user actually wants. In practice, users may leave important constraints unstated, rely on mistaken assumptions, or struggle to articulate their preferences (Qian et al., 2024; Vijayvargiya et al., 2026), creating a gap between their explicit requests and intended goals. Effective assistance therefore requires agents to help close this gap through interaction, rather than expect users to specify everything upfront. We study this problem as interactive intent alignment ,where agents align their task decisions with the user’s intended goals and constraints through interaction. Clarification can support this alignment by resolving uncertainty about the user’s goals and constraints. 1
+
+Yet clarification can reveal more about the user without improving the agent’s decisions, while still requiring the user’s time and attention. For example, suppose an agent must choose between two flights operated by the same airline but arriving at different times. Asking about airline preference may reveal more about the user, but it does not help distinguish between the two options. By contrast, asking about an unstated arrival deadline can determine which flight meets the user’s needs (Figure 1). The challenge is therefore to recognize when clarification can improve the task outcome and what information the agent needs to obtain.   
+
+> 1We use clarification broadly to refer to questions an agent asks before acting, whether to fill in missing information, resolve ambiguity, or challenge a questionable premise.
+
+1arXiv:2610.12655v1 [cs.AI] 8 Oct 2026 Direct execution Information-gain focus 
+
+> Booked the cheapest flight
+> But I must arrive before 2 pm !
+
+Intent-aware clarification    
+
+> Misses deadline
+> Which airline do you prefer? BlueAir.
+> Misses deadline More information, unchanged choice
+> When do you need to arrive? Before 2 pm.
+> An answer that changes the decision Meets deadline
+
+123Figure 1. Interactive intent alignment. CLEAT targets questions that improve task outcomes, not merely reduce uncertainty. 
+
+Prior work guides clarification through information-based signals (Deng et al., 2026; Kong et al., 2026), value-of-information estimates (Rao & Daumé III, 2018; Dong et al., 2026), and rewards from subsequent interaction out-comes (Zhang et al., 2025; Wu et al., 2025). Despite this progress, identifying which clarifications help the agent remains challenging, particularly while its policy is being trained. First, a clarification can appear useful without ac-tually improving the task outcome. A question may reveal additional information or be followed by a successful out-come, yet the same agent might have achieved an equally good result by proceeding on its own. Second, clarification value can change even at a fixed interaction history. Train-ing can improve how the agent uses an answer and how it proceeds on its own by different amounts. The incremental value of the same clarification can therefore change as the policy learns, requiring renewed value supervision. To address these challenges, we introduce CLEAT, which couples clarification-value learning with task-policy learning through paired interaction outcomes. For each evaluated clarification target, paired rollouts compare asking with native continuation under the current policy from the same interaction history. Native continuation retains the agent’s own ability to ask, so the utility difference measures the added benefit of the targeted clarification. We call this difference the residual query value (RQV). The same outcomes provide controller value targets and policy advantages; for each target, the mean query advantage equals its RQV label. During training, controller predictions prioritize which comparisons to collect, while sampling-corrected policy updates use observed task returns. Fresh outcomes renew value supervision as the agent learns. At inference, the trained agent acts on clarification answers, while the controller guides when and what to ask using predicted RQV. We evaluate CLEAT on four benchmarks spanning personalized decision making, user-in-the-loop tool use, and requests with missing information or false premises. With Qwen3-4B as the backbone, CLEAT achieves the highest mean score in all ten evaluation settings. Gains over the strongest baseline reach 13.2 and 6.5 percentage points on UserGym Travel and IN3 underspecification judgment accuracy, respectively. Ablations show that the trained policy improves over the original backbone even without controller-based action selection at inference. Updating the controller during policy training also yields higher mean scores than freezing it in all six ablation settings. Our contributions are summarized as follows. • We construct paired policy-relative supervision from matched ask-versus-proceed outcomes, provid-ing controller value targets and task-policy advantages relative to the agent’s native continuation. • We develop value-guided co-training , in which predicted values guide rollout collection, observed returns drive sampling-corrected policy updates, and fresh outcomes renew value supervision as the agent learns. • We demonstrate gains beyond inference-time guidance , with ablations showing that co-training improves the task policy itself and that updating clarification values provides benefits beyond fixed guidance. 
+
+# 2 Preliminaries 
+
+## 2.1 Interactive Intent Alignment 
+
+We consider interactive tasks in which the user’s initial request may not fully or accurately express the goals and constraints that determine success. For example, a travel assistant may need to establish whether the 2user prioritizes price or ticket flexibility, while a service agent may need to identify which reservation the user wants to change. Clarification can help resolve these gaps, but its purpose is to inform task decisions rather than serve as an objective in itself. Formally, let G denote the user’s latent goal and h the interaction history, which provides only partial information about G. The task policy πθ selects actions based on h and may ask for clarification when permitted by the environment, with replies added to h. We evaluate the resulting episode τ by its task utility U(τ, G), including any benchmark-specified interaction costs. To compare asking with proceeding, we consider their continuations from h, each comprising the remainder of an episode generated under πθ .During training, we assume access to an environment that can sample multiple continuations from the same 
+
+h and G, with the policy held fixed within each comparison. 
+
+## 2.2 Group-Relative Policy Optimization 
+
+To train the task policy from these sampled outcomes, we build on Group Relative Policy Optimization (GRPO) (Shao et al., 2024). GRPO estimates advantages by normalizing returns within a group, without a learned critic. In our setting, consider n continuations sampled under the matched conditions above, yielding completed episodes τ1, . . . , τn with utilities Ui = U(τi, G). Standard GRPO constructs the group-relative advantages as 
+
+Ai = Ui − ¯UsU + δ , ¯U = 1
+
+n
+
+> n
+
+# ∑
+
+> j=1
+
+Uj, (1) where sU is the standard deviation of the group utilities and δ > 0 ensures numerical stability. These advantages are used in a clipped policy-ratio objective with KL regularization toward a reference policy. Our method retains policy-ratio clipping and reference-policy regularization while modifying how rollouts are collected and how their utilities are used to construct advantages. Implementation details are provided in Appendix B. 
+
+# 3 CLEAT 
+
+CLEAT co-trains a task policy and a clarification-value controller from paired rollouts. At each training history, we compare asking about selected targets with letting the current policy continue on its own. The observed returns provide value labels for the controller and advantages for updating the task policy. The updated controller guides target selection in the next round, and new rollouts under the updated policy provide fresh value labels (Figure 2). 
+
+## 3.1 Problem Setup and Residual Query Value 
+
+At an interaction history h, we compare letting the task policy proceed ( PASS ) with first asking for additional information ( QUERY (z)). Here z identifies what information to request, such as a travel date or budget. Choosing PASS delegates the remaining interaction to the task policy, which retains its own ability to ask questions. A fixed target constructor supplies the finite candidate set Z(h). A history is clarification-eligible when another user exchange is permitted and this set is nonempty. For QUERY (z), a fixed question realizer turns the target into a question, and the question–answer exchange is appended to h before task execution resumes. This separates the decision of what to ask from question wording. For a fixed task policy π, let Vπ (h) denote the expected utility of choosing PASS and Qπ (h, z) that of choosing QUERY (z). Both continuations use the same policy π after the initial action. Their difference defines the residual query value (RQV), 
+
+gπ (h, z) = Qπ (h, z) − Vπ (h). (2) The expectations average over the latent goal G | h and rollout randomness. RQV measures what a targeted clarification adds beyond native continuation, including any questions the agent would ask on its own. Benchmark-specified interaction costs are included in utility. 31. Value-Guided Rollout Allocation 2. Learning from Paired Outcomes  
+
+> Candidate set 𝑍(ℎ)
+
+𝑧 !
+
+Deadline Budget Format 
+
+𝑧 " 𝑧 #
+
+PASS (hand control to task policy) QUERY( 𝑧 ) (ask about target 𝑧 , then continue) 
+
+> Tool use
+
+Training 
+
+Learning from paired outcomes with value-guided data collection 
+
+Fixed constructor         
+
+> Task Policy 𝜋 !Controller 𝑓 !
+> Book a flight to Boston
+> Sure, I can help
+> History ℎPASS returns Agent
+> History ℎRealizer Arrive by when?
+> User Before 2 pm
+> Tool use QUERY returns Agent
+
+For each selected target 𝑧 
+
+3. Online Co-Training 
+
+Controller update Policy Learning with Sampling Correction Current interaction 
+
+> same history same user goal same current agent
+
+Shared rollout batch 𝐷 !        
+
+> Paired RQV targets (from 𝐷 !)ℒ"#$%& = 𝑚𝑒𝑎𝑛[ 𝑓 'ℎ, 𝑧 − 𝑔 1(!ℎ, 𝑧 )
+> ]
+> Predict RQV Update controller
+> 𝑓 !𝑓 !"#
+> PASS-referenced advantages Within-arm gradient averaging Arm-inclusion correction
+> 𝜋 !𝜋 !"#
+> Semantic-action + Task execution
+
+Paired RQV target 
+
+𝑔 $"! ℎ, 𝑧 = 𝑈 )#$%&'()) − 𝑈 )+,--
+
+Inference Candidate targets 𝑍(ℎ) Yes No Best predicted RQV > 0? QUERY( 𝑧 ∗)
+
+PASS User reply Task policy 𝜋 
+
+…     
+
+> Value-guided + coverage sampling Selected targets
+> Prioritize targets with high predicted RQV
+> Selected targets
+> Observed task returns (from 𝐷 !)
+> 𝐴 $,& = 𝑈 $,& − 𝑈 ,'())
+> 𝐴 '()),& = 𝑈 '()),& − 𝑈 ,'()) (+&)
+> Next collection round
+
+Trajectories + task returns 
+
+𝑧 / 𝑧 0 …
+
+…
+
+> Updated policy +controller
+
+Refreshed controller Figure 2. Overview of CLEAT. Value-guided paired rollouts train the controller and task policy from shared outcomes. At inference, the controller gates clarification by predicted incremental utility. 
+
+Information gain, IG (h, z) = I(G; Yz | h), measures what an answer Yz reveals about the user’s goal. An informative answer need not improve the agent’s decisions, so IG and RQV can rank clarification targets differently. This reflects the classical distinction between information gain and decision value (Howard, 1966). RQV also depends on how the policy uses the answer. Ignoring it may leave utility unchanged, while misusing it can hurt even without interaction costs. Classical value of information evaluates an optimal decision maker; RQV evaluates the policy being trained. Training can improve answer use and native continuation by different amounts, changing RQV even for a fixed history and target. We therefore renew value supervision as the policy learns (Appendix A.1). 
+
+## 3.2 Learning from Paired Outcomes 
+
+We estimate RQV by comparing QUERY (z) and PASS continuations from the same history h and latent user goal G. We hold the task policy π fixed throughout the comparison. After the initial action, both branches follow π without further controller intervention. Writing ¯Ua for the mean task utility of continuations collected for action a, the paired estimate is 
+
+bgπ (h, z) = ¯UQUERY (z) − ¯UPASS . (3) Averaging these labels over rollout randomness and G | h recovers gπ (h, z) (Appendix A.2). These measured gains provide the training labels for a lightweight controller fϕ(h, z). The controller predicts RQV from the history and candidate target, without observing the latent goal. At training step t, we fit it to labels collected under πt by minimizing 
+
+Lvalue (ϕ; Dt) = 1
+
+|D t| ∑
+
+(h,z)∈D t
+
+  fϕ(h, z) − bgπt (h, z)2 , (4) where Dt contains the current batch of history–target pairs and their labels. Once fitted, the controller scores candidates without running paired continuations for each one. We use these predictions to allocate subsequent rollouts. 43.3 Value-Guided Rollout Allocation 
+
+Under a fixed rollout budget, sampling only from the task policy may overlook useful low-probability targets. We therefore compare a value-guided target zg and, when available, a distinct coverage target 
+
+zc against a shared PASS reference. The guided draw prioritizes predicted RQV, while the coverage draw gathers evidence about candidates the controller may undervalue. The task policy provides the starting distribution for both draws. It assigns probabilities πA 
+
+> θ
+
+(a | h)
+
+over PASS and the available QUERY (z) actions by scoring fixed text representations of these actions and normalizing across them, without an additional action head. Conditioning on asking gives the target distribution pπ (z | h). We mix it with a uniform component to form a reference that keeps every candidate reachable, ¯pπ (z | h) = ( 1 − ϵ)pπ (z | h) + ϵ
+
+|Z (h)| , 0 < ϵ < 1. For the guided target zg, we choose a sampling distribution μ that balances predicted RQV against deviation from the reference ¯ pπ ,max   
+
+> μ∈∆(Z(h))
+
+Ez∼μ[ fϕ(h, z)] − β−1 DKL (μ∥ ¯pπ ).The resulting proposal is 
+
+μ∗(z | h) ∝ ¯pπ (z | h) exp {β fϕ(h, z)}, (5) where β > 0 controls the strength of value guidance. We sample zg ∼ μ∗(· | h).For the coverage target zc, we sample from ¯ pπ (· | h) renormalized over the remaining candidates 
+
+Z(h) \ { zg}. This draw reserves rollout budget for another candidate without value guidance. At each history 
+
+h, we collect Kp ≥ 2 PASS continuations, Kg ≥ 1 continuations for QUERY (zg), and Kc ≥ 1 continuations for QUERY (zc). Each distinct semantic action is an arm. With only one candidate, its query arm receives 
+
+Kg + Kc continuations. The arms and replica counts are chosen before observing continuation outcomes (Appendix A.3). 
+
+## 3.4 Policy Learning with Sampling Correction 
+
+Controller predictions guide collection; observed returns provide policy advantages. We correct for nonuni-form arm inclusion to preserve the collecting policy’s action weighting at a fixed history. 
+
+Task-return advantages. Replacing the group-mean baseline in Equation 1 with PASS references gives the query and PASS advantages, 
+
+Az,k = Uz,k − ¯UPASS , APASS ,k = UPASS ,k − ¯U(−k) 
+
+> PASS
+
+,where Uz,k and UPASS ,k are the observed utilities of the kth continuation in the corresponding arms. The baseline ¯ U(−k) 
+
+> PASS
+
+is the mean return of the other PASS continuations. This leave-one-out reference prevents a  
+
+> PASS
+
+trajectory’s own return from entering its baseline. We treat advantages as fixed during optimization and do not apply group standard-deviation normalization. For each query arm, averaging these advantages gives exactly the RQV label in Equation 3. Thus, the controller learns the mean gain from asking about a target, while the policy learns from the return of each individual continuation. Both use observed outcomes; the controller’s predictions serve only to guide collection during training. 
+
+Correcting arm selection. Guided collection changes both how likely an arm is to appear and how many continuations it receives. We first average gradient contributions within each arm, then weight each arm mean to recover the collecting policy’s action probabilities. At a fixed history h, let Ih be the set of included arms and ρh(a) the probability that arm a is included. A query arm is included when selected by either 5the guided or the coverage draw, while ρh(PASS ) = 1. With collecting policy πθ , the Horvitz–Thompson correction is 
+
+bH(h) = ∑
+
+> a∈I h
+
+πA 
+
+> θ
+
+(a | h)
+
+ρh(a) ¯Fa, (6) where ¯ Fa is the mean policy-gradient contribution for arm a. Each continuation contributes its advantage multiplied by the gradient of the task policy’s log-probability. This log-probability covers the initial semantic action and subsequent agent-generated tokens. We hold the correction weights fixed when forming the gradient estimate. Uniform mixing and the always-included PASS arm ensure positive inclusion probabilities. Conditional on h, G, and the selected arms, continuations are sampled independently under the collecting policy. Under this conditioning, each reference is independent of the continuation it evaluates, and the shared and leave-one-out PASS references have the same expectation across arms. The baseline terms therefore cancel in expectation under on-policy arm weighting. 
+
+Proposition 1 (Policy Gradient Preservation under Guided Sampling). Fix a clarification-eligible history h and the collecting policy πθ . Let ma(h) denote the expected gradient contribution of arm a
+
+under on-policy continuation sampling. Suppose every arm with πA 
+
+> θ
+
+(a | h) > 0 has positive inclusion probability and 
+
+E[ ¯Fa | h, a ∈ I h] = ma(h).Then the corrected estimator satisfies 
+
+E[ bH(h) | h] = ∑
+
+> a
+
+πA 
+
+> θ
+
+(a | h) ma(h),recovering the expected gradient contribution under on-policy arm sampling at h.At a fixed history and collecting policy, the correction preserves the expected unclipped task-return gradient. Guidance can still affect finite-budget learning by changing estimator variance and the controller’s training distribution. This guarantee excludes policy-ratio clipping and reference-policy regularization (Appendix A.4). 
+
+## 3.5 Online Co-Training and Inference 
+
+Online co-training. We repeat collection and update both components to track how clarification value changes as the task policy learns. First, we bootstrap f0 on paired rollouts under π0, drawing targets from ¯pπ0 without value guidance. At step t, we hold both components fixed during collection. ft guides target selection, and πt generates the continuations. We then use the same batch to fit ft+1 to the paired value labels and update πt to πt+1 using the sampling-corrected policy update. Sharing the batch requires only one rollout phase for the two updates. It also introduces a one-update lag because ft+1 learns from outcomes under πt and then guides πt+1. After the final policy update, we hold 
+
+πT fixed and collect fresh paired rollouts to refresh the controller with labels generated under the final task policy. Algorithm 1 summarizes the procedure, and Appendix A.5 discusses the supervision lag. 
+
+Inference. At inference, we retain the target constructor and question realizer. While active, the refreshed controller asks about the highest-scoring target at each clarification-eligible history h only if its predicted RQV is positive, 
+
+z⋆ = arg max  
+
+> z∈Z (h)
+
+fϕ(h, z), a =
+
+(
+
+> QUERY
+
+(z⋆), fϕ(h, z⋆) > 0, 
+
+> PASS
+
+, otherwise. (7) After a query, the controller repeats this rule at the next eligible history. Choosing PASS ends controller intervention for the rest of the interaction; the task policy continues and may still ask questions on its 6Table 1. Task performance with Qwen3-4B is reported as mean ±std over 3 seeds (percentages except cumulative Intention credits), bold and underlined values indicate the best and second-best means, respectively. Method UserGym τ2-Bench IN3 AskBench 
+
+Travel Turtle Inten. Tele. Air. Ret. Telec. Judg.Acc AskMind AskOv. 
+
+Prompting-based 
+
+Vanilla 26.74 ±1.49 17.97 ±1.73 185.50 ±2.00 49.12 ±1.87 23.78 ±2.89 20.89 ±2.61 20.00 ±1.25 65.74 ±1.54 38.70 ±1.27 57.24 ±1.18 
+
+ReAct 28.66 ±1.87 19.93 ±1.63 192.17 ±3.81 53.66 ±2.44 26.67 ±2.89 24.54 ±1.29 20.83 ±2.77 70.99 ±1.42 44.34 ±2.33 56.55 ±1.18 
+
+Reflexion 29.34 ±1.76 21.70 ±3.96 195.67 ±3.95 52.03 ±4.28 26.67 ±1.55 24.26 ±1.89 21.33 ±2.20 71.61 ±4.18 45.01 ±1.59 58.75 ±1.52 
+
+Proactive CoT 27.01 ±0.32 23.96 ±4.06 176.17 ±3.41 52.97 ±2.84 25.44 ±3.03 27.50 ±2.50 20.83 ±1.44 69.14 ±2.33 42.58 ±0.57 57.83 ±1.23 
+
+PRIME 28.20 ±0.59 19.83 ±2.58 173.17 ±2.74 53.22 ±4.45 25.00 ±0.00 25.83 ±1.44 18.33 ±1.44 68.83 ±1.42 41.24 ±0.87 58.25 ±1.00 
+
+Threshold-based 
+
+CLAM 46.23 ±2.88 10.56 ±2.65 200.00 ±3.95 20.33 ±1.41 28.53 ±2.89 26.33 ±2.20 21.67 ±2.20 71.67 ±1.07 45.01 ±1.10 59.50 ±1.25 
+
+INTENT-SIM 27.59 ±1.54 18.78 ±1.26 198.42 ±2.32 52.03 ±1.41 33.33 ±2.89 27.17 ±2.46 18.33 ±2.89 73.06 ±2.95 42.07 ±2.06 59.00 ±1.30 
+
+VoI-Gate 49.19 ±1.67 21.15 ±2.45 198.08 ±3.68 38.96 ±2.63 31.67 ±2.77 27.50 ±3.01 21.17 ±1.82 71.91 ±1.42 44.64 ±2.03 57.17 ±1.88 
+
+Information-based training 
+
+IG-Reward 43.75 ±1.20 28.58 ±2.99 194.68 ±2.43 54.22 ±3.45 25.00 ±2.50 17.99 ±3.82 22.06 ±2.89 66.67 ±4.24 42.87 ±1.48 58.92 ±1.76 
+
+InfoPO 35.41 ±1.13 25.52 ±2.38 198.75 ±3.88 53.66 ±3.14 25.00 ±0.00 30.02 ±1.84 22.50 ±1.25 68.21 ±5.35 46.32 ±2.61 60.15 ±1.77 
+
+IGPO 31.62 ±0.13 18.75 ±0.63 194.25 ±3.53 52.03 ±3.84 26.67 ±3.64 26.67 ±2.89 16.67 ±2.89 66.67 ±2.83 45.31 ±4.10 58.58 ±0.29 
+
+Supervised and outcome-based training 
+
+SFT 50.48 ±1.76 27.92 ±3.11 198.25 ±4.72 38.96 ±3.63 25.77 ±1.82 26.80 ±3.12 21.83 ±3.20 77.47 ±5.26 43.92 ±1.19 58.50 ±1.30 
+
+GRPO 42.26 ±0.94 28.96 ±2.29 196.42 ±1.51 54.85 ±3.08 24.33 ±3.23 27.50 ±4.33 24.17 ±2.89 66.05 ±3.25 39.65 ±0.35 58.67 ±0.63 
+
+CLEAT (ours) 63.72 ±0.48 29.79 ±1.15 209.17 ±3.52 57.67 ±2.45 35.00 ±2.00 32.50 ±1.29 24.94 ±1.77 83.95 ±1.42 48.37 ±2.66 61.27 ±2.19 
+
+own. The rule uses predicted gains relative to continuation under πT, with no paired rollouts or sampling correction at inference. We fix the threshold at zero as implied by the RQV definition, without validation tuning. To separate the policy’s learned behavior from controller guidance, we also evaluate the trained policy with semantic actions selected by πAT instead of controller scores. 
+
+# 4 Experiments 
+
+## 4.1 Experimental Setup 
+
+Benchmarks. We evaluate on four benchmarks spanning ten settings. UserGym (Qian et al., 2025) com-prises Travel, Turtle, Intention, and Telepathy, with Intention and Telepathy held out from training. τ2-Bench (Barres et al., 2026) evaluates user–agent coordination and tool use in the Airline, Retail, and Telecom domains. IN3 (Qian et al., 2024) evaluates whether an agent recognizes underspecified instructions and recovers missing task requirements. AskBench (Zhao et al., 2026) distinguishes requests with missing information in AskMind from requests with false premises in AskOverconfidence. 
+
+Baselines. We compare four groups of baselines. Prompting-based methods use fixed model weights and guide behavior through prompting or agent scaffolds, including Vanilla (Yang et al., 2025), ReAct (Yao et al., 2023), Reflexion (Shinn et al., 2023), Proactive CoT (Deng et al., 2023), and PRIME (Wang & Jiang, 2026). 
+
+Threshold-based methods include CLAM (Kuhn et al., 2023), INTENT-SIM (Zhang & Choi, 2025), and VoI-Gate, which score ambiguity, intent uncertainty, and expected clarification utility, respectively. We tune their decision thresholds on validation data. VoI-Gate is our threshold-based adaptation of value-of-information reasoning (Dong et al., 2026). Information-based training methods include IG-Reward (Deng et al., 2026), InfoPO (Kong et al., 2026), and IGPO (Wang et al., 2026), which use information-derived signals either alone or alongside task-return supervision. Supervised and outcome-based training methods include SFT, which learns from demonstrations, and GRPO (Shao et al., 2024), which constructs group-relative advantages from task returns. 
+
+Evaluation and metrics. All main comparisons use Qwen3-4B as the backbone. We use the official evaluation harnesses with our configured turn budgets and report main results as mean and standard deviation over 3 seeds. Table 1 reports UserGym Pass-1 scores; domain-level task pass rates on τ2-Bench; underspecification judgment accuracy (Judg.Acc) on IN3; and answer accuracy (Acc) on AskBench. All 7columns are percentages except UserGym Intention, whose per-detail credits accumulate within an episode. Benchmark-specific settings, baseline implementations, and metric definitions are detailed in Appendix C. 
+
+## 4.2 RQ1: Overall Performance 
+
+CLEAT achieves the highest mean score in all ten settings in Table 1, including gains of 13.24 points on Travel and 6.48 points in IN3 judgment accuracy over the strongest baselines. Baseline strengths vary across settings. SFT leads the baselines on Travel and IN3, while InfoPO leads on AskBench and GRPO on Turtle and Telepathy. CLEAT improves across these different interaction demands using the same paired-outcome learning procedure. The gains on Intention and Telepathy further support transfer to held-out environments without additional training of either the policy or controller. On AskBench and IN3, CLEAT also achieves higher mean scores than ACT (Chen et al., 2025) and CollabLLM (Wu et al., 2025), which learn from interaction outcomes, across all six reported metrics (Table 8). We next examine how renewing value supervision and guiding collection contribute to these gains, and how much the trained policy retains without controller guidance at inference. 
+
+## 4.3 RQ2: Where the Gain Comes From 
+
+RQV compares targeted clarification with continuation under the current policy. Better answer use can increase the benefit of asking, while stronger native continuation can reduce it. This motivates renewing value supervision as the policy learns. We test its practical benefit by freezing the controller after bootstrap while continuing task-policy training. Freezing lowers mean scores by 1.27–6.70 points across all six settings (Figure 3, bottom). Both variants retain controller-guided collection, so this comparison assesses the benefit of updating the controller within the training loop. The results support renewing supervision over reusing guidance fitted to the initial backbone. All variants retain policy learning from observed task returns, with no additional reward from the controller’s predictions. Airline Telec. AskOv. Retail Turtle Travel −4 048Gain vs. no guidance (pp)  +8.3 +2.1 +4.0 +2.0 +3.7 +7.5        
+
+> -3.3 -2.0 +0.7 +1.2 +2.4 +4.8 24 30 36
+> Airline
+> 18 24 30
+> Telecom
+> 54 60 66
+> AskOv.
+> 24 30 36
+> Retail
+> 22 28 34
+> Turtle
+> 54 60 66
+> Travel
+> Task score (%)
+> RQV guidance IG guidance
+> Ours
+> w/o co-training w/o controller w/o guidance
+> Figure 3. Effects of rollout guidance (top, gains over unguided collection in percentage points) and component ablations (bottom, mean
+
+±std over 3 seeds) on task performance. 
+
+Removing value guidance during collection reduces mean scores by 1.97–8.33 points (Figure 3, bottom). This variant retains paired comparisons, task-return advantages, sampling correction, and controller updates, with five con-tinuations per eligible history. These gains support value-guided allocation for joint policy and controller learning under a fixed rollout budget. To test the guidance signal, we replace predicted RQV with an IG proxy in the same proposal rule. RQV guidance achieves higher mean scores than both unguided collection and IG guidance in all six settings (Figure 3, top). Relative to unguided collection, IG guidance improves four settings but reduces Airline and Telecom by 3.34 and 2.00 points. With the proposal rule and task-return objective retained, this comparison tests which training outcomes the guid-ance signal favors. Under a shared turn budget, informa-tive questions may leave fewer turns for execution; this is one possible explanation for the degradation on these two settings. RQV instead prioritizes the estimated benefit rel-ative to native continuation while keeping policy updates grounded in observed returns. The resulting gains also persist in the trained policy. Replacing the controller with policy-based semantic action selection at inference reduces mean scores by 0.44–6.14 points, but the policy still exceeds the strongest baseline on Travel (59.49% vs. 50.48%). In five of six settings, the mean drop from removing collection guidance exceeds that from removing controller-based selection at inference. This pattern highlights the controller’s role in shaping training experience alongside 8its deployment role. Comparisons using the same constructor and realizer also support gains beyond the menu interface (Appendix D.1). 
+
+## 4.4 RQ3: What the Agent Resolves AskMind Coverage AskOv. Coverage IN3 Recovery 020 40 60 80 
+
+> Score (%)
+> 34.87 51.49 67.58
+> Vanilla SFT CLAM GRPO InfoPO
+> Ours
+
+Figure 4. Instruction recovery on IN3 and complete clarification coverage on AskBench measure how fully agents resolve user requests (mean ±std over 3 seeds). 
+
+Task success alone does not reveal how completely an agent resolves the user’s request. Figure 4 examines this distinc-tion. On IN3, instruction recovery (Recover) measures the importance-weighted fraction of missing details resolved. On AskBench, clarification coverage (Cov) measures the frac-tion of tasks with every required point resolved, includ-ing missing information in AskMind and false premises in AskOverconfidence. CLEAT achieves the highest mean on all three metrics, with recovery of 67.58% and coverage of 34.87% and 51.49%, respectively. Because coverage requires resolving all required points, these gains reflect more com-plete clarification, including correction of false premises rather than only elicitation of missing details. Yet coverage remains below answer accuracy on both AskBench settings. An agent can therefore score well on final answers while leaving parts of a request unresolved. IN3 separates another pair of capabilities. Judgment accuracy evaluates whether the agent asks on un-derspecified instructions and proceeds on fully specified ones, while instruction recovery measures how much of the missing information the exchange resolves. Improvements in both support gains in recognizing clarification needs as well as recovering task-relevant details. Identifying an underspecified request alone does not ensure that subsequent questions obtain the information needed to complete it. These metrics capture distinct aspects of interactive intent alignment, from recognizing a need to clarify to resolving requirements and producing a correct answer. 
+
+## 4.5 RQ4: Performance across Model Scales 30 50 70 Accuracy (%)  AskMind           
+
+> +5.0 +8.7 +2.1
+> AskOv.
+> +0.5 +2.6 +2.5
+> 1.7B 4B 8B 20 40 60 Coverage (%)
+> +3.0 +10.6 +4.7
+> 1.7B 4B 8B
+> +7.2 +8.0 +5.7
+> Backbone parameters
+> Labels: gain vs. best baseline (pp)
+> Backbone GRPO Ours
+
+Figure 5. Answer accuracy and clarification coverage on AskBench, with gains over the stronger baseline in points. 
+
+At each model size (Qwen3-1.7B, 4B, and 8B), we compare CLEAT with the backbone and GRPO on AskBench, matching continuation budgets per clarification-eligible history for the two training methods. CLEAT achieves higher mean accuracy and coverage than both baselines at all three sizes (Figure 5). At 8B, accuracy exceeds GRPO by 2.08 points on AskMind and 2.50 points on AskOverconfidence. Coverage improves by 4.74 and 5.66 points, respectively. The benefit of clarification learn-ing thus persists as the underlying policy becomes stronger within the tested range. Model scale does not improve both metrics in lockstep. For CLEAT on AskMind, mean answer accuracy increases with size, while mean coverage peaks at 4B rather than 8B. These mean trends suggest that stronger answering ability alone does not ensure more complete clarification. 
+
+# 5 Related Work 
+
+Clarification and adaptive decisions. Research on clarification addresses how to resolve ambiguous information needs (Aliannejadi et al., 2020; Min et al., 2020) in settings such as question answering (Kuhn et al., 2023; Zhang & Choi, 2025), code generation (Mu et al., 2024), and planning (Zhang et al., 2024). 9Interactive agent benchmarks extend this focus to implicit user intentions and tool use (Qian et al., 2024; Chen et al., 2026), incomplete instructions (Ji et al., 2026), and communication failures (Bao et al., 2026; Zhang et al., 2026). These settings require agents to recognize missing information and decide when to seek it. Value-of-information methods offer a decision-theoretic view of this problem by weighing the expected benefit of obtaining information against the cost of the interaction (Rao & Daumé III, 2018; Dong et al., 2026; Howard, 1966). 
+
+Learning from interaction outcomes. Another line of work evaluates questions through the interactions they produce. Future-turn simulation (Zhang et al., 2025) generates preference labels from anticipated dialogue, and CollabLLM (Wu et al., 2025) incorporates subsequent turns into its rewards. STaR-GATE (An-dukuri et al., 2024) uses gains in personalized-response likelihood to select questions. For dialogue-action learning, ACT (Chen et al., 2025) constructs and refreshes preference pairs through on-policy simulations. Related ideas appear in retrieval, where RICE-PO (Li et al., 2026) assigns credit using local counterfactual outcomes. 
+
+Information-based rewards and guided collection. A complementary approach measures how feedback changes an agent’s beliefs or subsequent decisions. IGPO rewards answer-likelihood gains (Wang et al., 2026), while clarification-specific rewards track user-goal belief updates (Deng et al., 2026). InfoPO (Kong et al., 2026) combines next-action likelihood changes under observed versus masked feedback with outcome advantages. Beyond reward design, experience prioritization (Schaul et al., 2016) addresses how to allocate training effort across collected experiences. CLEAT connects these strands by using predicted clarification value to guide collection and paired task outcomes to train both the value model and the policy. Appendix E discusses additional evaluation settings and broader adaptive-agent mechanisms. 
+
+# 6 Conclusion, Limitations and Future Work 
+
+We presented CLEAT for interactive intent alignment through value-guided clarification. Paired interaction outcomes supervise both a clarification-value controller and the task policy, while renewed supervision tracks the policy’s changing capabilities. Across four benchmarks, CLEAT improves task performance and clarification quality with Qwen3-4B. The fixed target constructor and question realizer restrict the controller’s available clarification choices. Training also relies on repeated continuations from the same history and user goal, an assumption that is difficult to satisfy in live interactions. Our evaluation uses simulated users, so effectiveness with real users and evolving goals remains to be established. Future work could jointly learn target construction and question realization, and develop value supervision that requires fewer paired rollouts. 
+
+# References 
+
+Shuyan Zhou, Frank F. Xu, Hao Zhu, Xuhui Zhou, Robert Lo, Abishek Sridhar, Xianyi Cheng, Tianyue Ou, Yonatan Bisk, Daniel Fried, Uri Alon, and Graham Neubig. Webarena: A realistic web environment for building autonomous agents. In ICLR , 2024. John Yang, Carlos E. Jimenez, Alexander Wettig, Kilian Lieret, Shunyu Yao, Karthik Narasimhan, and Ofir Press. Swe-agent: Agent-computer interfaces enable automated software engineering. In NeurIPS , 2024. Ziming Li, Xiaoming Wu, Zehong Wang, Jiazheng Li, Yijun Tian, Jinhe Bi, Yunpu Ma, Yanfang Ye, and Chuxu Zhang. Graph is a substrate across data modalities. arXiv preprint arXiv:2601.22384 , 2026. Cheng Qian, Bingxiang He, Zhong Zhuang, Jia Deng, Yujia Qin, Xin Cong, Zhong Zhang, Jie Zhou, Yankai Lin, Zhiyuan Liu, and Maosong Sun. Tell me more! towards implicit user intention understanding of language model driven agents. In ACL , 2024. 10 Sanidhya Vijayvargiya, Xuhui Zhou, Akhila Yerukola, Maarten Sap, and Graham Neubig. Ambig-swe: Interactive agents to overcome underspecificity in software engineering. In ICLR , 2026. Mengyi Deng, Zhiwei Li, Xin Li, Tingyu Zhu, Ying Zhao, Zhijiang Guo, and Wei Wang. Uncertainty-aware clarification in llm agents with information gain. In ICML , 2026. Fanqi Kong, Jiayi Zhang, Mingyi Deng, Chenglin Wu, Yuyu Luo, and Bang Liu. Infopo: Information-driven policy optimization for user-centric agents. arXiv preprint arXiv:2603.00656 , 2026. Sudha Rao and Hal Daumé III. Learning to ask good questions: Ranking clarification questions using neural expected value of perfect information. In ACL , 2018. Yijiang River Dong, Tiancheng Hu, Zheng Hui, Caiqi Zhang, Ivan Vuli´ c, Andreea Bobu, and Nigel Collier. Value of information: A framework for human-agent communication. In ACL , 2026. Michael J. Q. Zhang, W. Bradley Knox, and Eunsol Choi. Modeling future conversation turns to teach llms to ask clarifying questions. In ICLR , 2025. Shirley Wu, Michel Galley, Baolin Peng, Hao Cheng, Gavin Li, Yao Dou, Weixin Cai, James Zou, Jure Leskovec, and Jianfeng Gao. Collabllm: From passive responders to active collaborators. In ICML , 2025. Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, Y. K. Li, Y. Wu, and Daya Guo. Deepseekmath: Pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 , 2024. Ronald A. Howard. Information value theory. IEEE Transactions on Systems Science and Cybernetics , 1966. Cheng Qian, Zuxin Liu, Akshara Prabhakar, Jielin Qiu, Zhiwei Liu, Haolin Chen, Shirley Kokane, Heng Ji, Weiran Yao, Shelby Heinecke, Silvio Savarese, Caiming Xiong, and Huan Wang. Userrl: Training interactive user-centric agent via reinforcement learning. arXiv preprint arXiv:2509.19736 , 2025. Victor Barres, Honghua Dong, Soham Ray, Xujie Si, and Karthik Narasimhan. τ2-bench: Evaluating conversational agents in a dual-control environment. In ICML , 2026. Jiale Zhao, Ke Fang, and Lu Cheng. When and what to ask: Askbench and rubric-guided rlvr for llm clarification. In ACL , 2026. An Yang, Anfeng Li, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chang Gao, Chengen Huang, Chenxu Lv, Chujie Zheng, Dayiheng Liu, Fan Zhou, Fei Huang, Feng Hu, Hao Ge, Haoran Wei, Huan Lin, Jialong Tang, Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin Yang, Jiaxi Yang, Jing Zhou, Jingren Zhou, Junyang Lin, Kai Dang, Keqin Bao, Kexin Yang, Le Yu, Lianghao Deng, Mei Li, Mingfeng Xue, Mingze Li, Pei Zhang, Peng Wang, Qin Zhu, Rui Men, Ruize Gao, Shixuan Liu, Shuang Luo, Tianhao Li, Tianyi Tang, Wenbiao Yin, Xingzhang Ren, Xinyu Wang, Xinyu Zhang, Xuancheng Ren, Yang Fan, Yang Su, Yichang Zhang, Yinger Zhang, Yu Wan, Yuqiong Liu, Zekun Wang, Zeyu Cui, Zhenru Zhang, Zhipeng Zhou, and Zihan Qiu. Qwen3 technical report. arXiv preprint arXiv:2505.09388 , 2025. Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik Narasimhan, and Yuan Cao. React: Synergizing reasoning and acting in language models. In ICLR , 2023. Noah Shinn, Federico Cassano, Edward Berman, Ashwin Gopinath, Karthik Narasimhan, and Shunyu Yao. Reflexion: Language agents with verbal reinforcement learning. In NeurIPS , 2023. Yang Deng, Lizi Liao, Liang Chen, Hongru Wang, Wenqiang Lei, and Tat-Seng Chua. Prompting and evalu-ating large language models for proactive dialogues: Clarification, target-guided, and non-collaboration. In EMNLP , 2023. Prince Zizhuang Wang and Shuli Jiang. Prime: Training free proactive reasoning via iterative memory evolution for user-centric agent. arXiv preprint arXiv:2604.07645 , 2026. 11 Lorenz Kuhn, Yarin Gal, and Sebastian Farquhar. Clam: Selective clarification for ambiguous questions with generative language models. arXiv preprint arXiv:2212.07769 , 2023. Michael J. Q. Zhang and Eunsol Choi. Clarify when necessary: Resolving ambiguity through interaction with lms. In ACL , 2025. Guoqing Wang, Sunhao Dai, Guangze Ye, Zeyu Gan, Wei Yao, Yong Deng, Xiaofeng Wu, and Zhenzhe Ying. Information gain-based policy optimization: A simple and effective approach for multi-turn search agents. In ICLR , 2026. Maximillian Chen, Ruoxi Sun, Tomas Pfister, and Sercan Ö. Arık. Learning to clarify: Multi-turn conversa-tions with action-based contrastive self-training. In ICLR , 2025. Mohammad Aliannejadi, Julia Kiseleva, Aleksandr Chuklin, Jeff Dalton, and Mikhail Burtsev. Convai3: Generating clarifying questions for open-domain dialogue systems (clariq). arXiv preprint arXiv:2009.11352 ,2020. Sewon Min, Julian Michael, Hannaneh Hajishirzi, and Luke Zettlemoyer. Ambigqa: Answering ambiguous open-domain questions. In EMNLP , 2020. Fangwen Mu, Lin Shi, Song Wang, Zhuohao Yu, Binquan Zhang, Chenxue Wang, Shichao Liu, and Qing Wang. Clarifygpt: Empowering llm-based code generation with intention clarification. PACMSE , 2024. Xuan Zhang, Yang Deng, Zifeng Ren, See-Kiong Ng, and Tat-Seng Chua. Ask-before-plan: Proactive language agents for real-world planning. In EMNLP , 2024. Junzhi Chen, Harsh Trivedi, Jane Pan, Michael JQ Zhang, Tejas Srinivasan, Niranjan Balasubramanian, and Ashish Sabharwal. Appworld-ul: Benchmarking diverse agent-user interactions for tool-use. In ICML ,2026. Zimo Ji, Zekai Zhang, Congying Xu, Zongjie Li, Yudong Gao, Shuai Wang, and Shing-Chi Cheung. Coding agents are guessing: Measuring action-boundary violations in underspecified devops instructions. arXiv preprint arXiv:2607.02294 , 2026. Han Bao, Zheyuan Zhang, Pengcheng Jing, Zhengqing Yuan, Kaiwen Shi, and Yanfang Ye. Drift-bench: Diagnosing cooperative breakdowns in llm agents under input faults via multi-turn interaction. In ICML ,2026. Zheyuan Zhang, Mengyuan Chao, Ke Xiao, Ziyi Chen, Daoan Zhang, Yan Zhang, Yanfang Ye, and Wei Xu. Beyond oracle communication: Benchmarking interactive intent alignment under miscommunication and evolving user intent. arXiv preprint arXiv:2609.38604 , 2026. Chinmaya Andukuri, Jan-Philipp Fränken, Tobias Gerstenberg, and Noah D. Goodman. Star-gate: Teaching language models to ask clarifying questions. In COLM , 2024. Mingchen Li, Hansi Zeng, Zhuo Qian, Jiatan Huang, Sunjae Kwon, Hamed Zamani, and Hong Yu. Rice-po: Turning retrieval interactions into credit signals for reasoning agents. arXiv preprint arXiv:2605.26352 , 2026. Tom Schaul, John Quan, Ioannis Antonoglou, and David Silver. Prioritized experience replay. In ICLR , 2016. Yanfang Ye, Zheyuan Zhang, Tianyi Ma, Zehong Wang, Yiyang Li, Shifu Hou, Weixiang Sun, Kaiwen Shi, Yijun Ma, Wei Song, et al. Llms4all: A review of large language models across academic disciplines. arXiv preprint arXiv:2509.19580 , 2025. Zheyuan Zhang, Kaiwen Shi, Zhengqing Yuan, Zehong Wang, Tianyi Ma, Keerthiram Murugesan, Vin-cent Galassi, Chuxu Zhang, and Yanfang Ye. Agentrouter: A knowledge-graph-guided llm router for collaborative multi-agent question answering. arXiv preprint arXiv:2510.05445 , 2025. Siheng Xiong, Oguzhan Gungordu, James C Kerce, and Faramarz Fekri. Adaptive information control for search-augmented llm reasoning. arXiv preprint arXiv:2602.01672 , 2026a. 12 Siheng Xiong, Ali Payani, Oguzhan Gungordu, and Faramarz Fekri. Dive: Unlocking self-improvement in frozen language models through diversity-driven skill evolution. arXiv preprint arXiv:2608.12486 , 2026b. Zheyuan Zhang, Kaiwen Shi, Han Bao, Zehong Wang, Tianyi Ma, and Yanfang Ye. Why semantic entropy fails: Geometry-aware and calibrated uncertainty for policy optimization. arXiv preprint arXiv:2605.21801 ,2026. Kaiwen Shi, Zheyuan Zhang, and Yanfang Ye. Sage: Answer-conditioned uncertainty targets for verbal uncertainty alignment. arXiv preprint arXiv:2606.11512 , 2026a. Kaiwen Shi, Zheyuan Zhang, Zhengqing Yuan, Keerthiram Murugesan, Vincent Galassi, Chuxu Zhang, and Yanfang Ye. Ng-router: Graph-supervised multi-agent collaboration for nutrition question answering. In 
+
+EACL , 2026b. Jiatan Huang, Zheyuan Zhang, Kaiwen Shi, Yanfang Ye, and Chuxu Zhang. Evolverouter: Co-evolving routing and prompt for multi-agent question answering. arXiv preprint arXiv:2604.05149 , 2026. Mingchen Li, Jiatan Huang, Chuxu Zhang, Liang Zhao, and Hong Yu. In-context optimization for retrieval-augmented generation: A gradient-descent perspective. arXiv preprint arXiv:2605.26356 , 2026a. Ziming Li, Jiatan Huang, Xiaoguang Guo, Guilin Wang, and Chuxu Zhang. Same signal, opposite meaning: Direction-informed adaptive learning for llm agents. arXiv preprint arXiv:2605.06908 , 2026b. Jiatan Huang, Mingchen Li, Ziming Li, Sunjae Kwon, Hong Yu, and Chuxu Zhang. Counterfactual graph for multi-agent llm calibration. arXiv preprint arXiv:2605.30653 , 2026. Cheng Qian, Bingxiang He, Zhong Zhuang, Jia Deng, Yujia Qin, Xin Cong, Zhong Zhang, Jie Zhou, Yankai Lin, Zhiyuan Liu, and Maosong Sun. Tell me more! towards implicit user intention understanding of language model driven agents. In ACL , 2024. Yujian Gan, Changling Li, Jinxia Xie, Luou Wen, Matthew Purver, and Massimo Poesio. Clarq-llm: A benchmark for models clarifying and requesting information in task-oriented dialog. arXiv preprint arXiv:2409.06097 , 2024. Shuyue Stella Li, Vidhisha Balachandran, Shangbin Feng, Jonathan S. Ilgen, Emma Pierson, Pang Wei Koh, and Yulia Tsvetkov. Mediq: Question-asking llms and a benchmark for reliable interactive clinical reasoning. In NeurIPS , 2024. Tong Zhang, Peixin Qin, Yang Deng, Chen Huang, Wenqiang Lei, Junhong Liu, Dingnan Jin, Hongru Liang, and Tat-Seng Chua. Clamber: A benchmark of identifying and clarifying ambiguous information needs in large language models. In ACL , 2024. Sanxing Chen, Sam Wiseman, and Bhuwan Dhingra. Chatshop: Interactive information seeking with language agents. arXiv preprint arXiv:2404.09911 , 2024. Cheng Qian, Zuxin Liu, Akshara Prabhakar, Zhiwei Liu, Jianguo Zhang, Haolin Chen, Heng Ji, Weiran Yao, Shelby Heinecke, Silvio Savarese, and Huan Wang. Userbench: An interactive gym environment for user-centric agents. In NeurIPS 2025 Workshop on Scaling Environments for Agents (SEA) , 2025. Weiwei Sun, Xuhui Zhou, Weihua Du, Xingyao Wang, Sean Welleck, Graham Neubig, Maarten Sap, and Yiming Yang. Training proactive and personalized llm agents. In COLM , 2026. Siheng Xiong, Ali Payani, and Faramarz Fekri. Enhancing language model reasoning with structured multi-level modeling. In ICLR , 2026. Siheng Xiong, Ali Payani, Yuan Yang, and Faramarz Fekri. Deliberate reasoning in language models as structure-aware planning with an accurate world model. In ACL , 2025. Wenxuan Wang, Shi Juluan, Zixuan Ling, Yuk-Kit Chan, Chaozheng Wang, Cheryl Lee, Youliang Yuan, Jen-tse Huang, Wenxiang Jiao, and Michael R Lyu. Learning to ask: When llm agents meet unclear instruction. In EMNLP , 2025. 13 Zheyuan Zhang, Manqing Mao, Hong Wang, Zhuoer Wang, Samson Koelle, Jie Yuan, Yanjun Lin, James Feng, Nikki Lijing Kuang, Yanfang Ye, et al. Optimizing what policies learn from: Recoverability-aware rollout intervention learning. arXiv preprint arXiv:2608.05080 , 2026. Emre Can Acikgoz, Jinoh Oh, Jie Hao, Joo Hyuk Jeon, Heng Ji, Dilek Hakkani-Tür, Gokhan Tur, Xiang Li, Chengyuan Ma, and Xing Fan. Speakrl: Synergizing reasoning, speaking, and acting in language models with reinforcement learning. In Proceedings of the 16th International Workshop on Spoken Dialogue System Technology . Association for Computational Linguistics, 2026. Jialin Li, Yuan Wu, and Yi Chang. Clareval: A benchmark for evaluating clarification skills of code agents under ambiguous instructions. arXiv preprint arXiv:2603.00187 , 2026. Tu Trinh, Mohamed Elfeki, Guangze Luo, Kelvin Luu, Nathan Hunt, Ernesto Hernandez, Nandan Marwaha, Yannis Yiming He, Charles Wang, Fernando Carabedo, Alessa Castillo, and Bing Liu. Hil-bench (human-in-loop benchmark): Do agents know when to ask for help? arXiv preprint arXiv:2604.09408 , 2026. 14 Appendix Contents 
+
+A Additional Theory and Method Details 16 
+
+A.1 Defining Policy-Relative Clarification Value . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16 A.2 Estimating RQV from Paired Continuations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 16 A.3 Value-Guided Collection under a Fixed Budget . . . . . . . . . . . . . . . . . . . . . . . . . . . 18 A.4 Policy Learning with Sampling Correction . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 20 A.5 Online Co-Training and Inference . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 23 
+
+B Implementation Details 23 C Experimental Details 26 
+
+C.1 Benchmarks and Evaluation Metrics . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 C.2 Baselines . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 26 
+
+D Additional Experimental Results 27 
+
+D.1 Component Ablations . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 27 D.2 Comparison with Larger Backbones . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 29 D.3 CLEAT across Backbone Sizes . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 29 D.4 Clarification-Specific Metrics . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 30 D.5 Comparison with ACT and CollabLLM . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 30 D.6 Asking on Underspecified Instructions . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 D.7 Co-Training Dynamics . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 31 D.8 Qualitative Examples of Policy Behavior . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32 D.9 Cross-Method Clarification Cases . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 32 
+
+E Additional Related Work 33 F Prompts 34 
+
+15 A Additional Theory and Method Details 
+
+CLEAT learns clarification value relative to the task policy and uses that value to guide the experiences from which the policy learns. This appendix develops the reasoning behind this design. We first explain what the value comparison should measure and how paired continuations provide its supervision. We then derive the rollout allocation rule and the sampling correction needed to learn from these selectively collected outcomes. Finally, we connect the two learning processes through co-training as the task policy evolves. 
+
+## A.1 Defining Policy-Relative Clarification Value 
+
+To learn useful clarification, we need to distinguish the utility achieved after an exchange from the utility added by that exchange. A successful outcome alone cannot make this distinction because the agent may already have been able to succeed by proceeding on its own. We therefore compare a targeted clarification with native continuation from the same interaction history under the same task policy. We identify a clarification by its information target z, such as a travel date or a budget, rather than by its surface wording. At history h, a fixed constructor supplies candidate targets, and a fixed realizer turns a selected target into a question. The comparison is between QUERY (z), which obtains the corresponding user response before task execution resumes, and PASS , which delegates the continuation to the task policy, including its native ability to ask. Let Qπ (h, z) and Vπ (h) denote the expected task utilities of these two continuations under policy π. Their difference defines residual query value, 
+
+gπ (h, z) = Qπ (h, z) − Vπ (h).This reference makes clarification value specific to both the information requested and the policy that will act on the answer. Both branches use the same task utility, including any benchmark-specified interaction costs. 
+
+Information and decision value can rank questions differently. To see why this comparison differs from information gain, consider a zero-cost, single-decision task with latent goal G = ( X, W), where 
+
+X ∼ Bernoulli (1/2 ) and W ∼ Unif {1, . . . , K} are independent, with K > 2. The agent receives reward one for predicting X correctly and zero otherwise. Revealing W provides information gain log K but leaves the best achievable expected reward at 1/2, whereas revealing X provides only log 2 information gain but raises that reward to one. The more informative question therefore need not provide greater task value, even when both answers are reliable and free to obtain. Even when the answer is task-relevant, however, its benefit still depends on the policy receiving it. Keeping the same task and question, consider two policies that both predict zero without clarification. After observing X, one follows the answer and achieves reward one, whereas the other ignores it and retains expected reward 1/2. Their residual query values are therefore 1/2 and zero, respectively, despite receiving exactly the same information. This difference motivates evaluating clarification through the outcomes of the current task policy rather than through the information revealed alone. 
+
+Relation to classical value of information. Unlike classical value of information, which evaluates the benefit to an optimal decision maker, RQV measures the benefit under the policy that actually continues the task. Because training can improve the QUERY and PASS continuations by different amounts, the value of the same clarification can change even when the information it reveals remains fixed. We therefore estimate this policy-relative value from paired outcomes generated by the policy being trained. 
+
+## A.2 Estimating RQV from Paired Continuations 
+
+To turn this policy-relative comparison into a learning signal, we collect paired continuations that share the same history, latent user goal, and task policy. Holding these quantities fixed isolates the initial clarification decision from differences in the task or the agent. For each selected target, the QUERY branch obtains a user response before execution resumes, while the PASS branch delegates directly to the task policy. Both then continue without further controller intervention, including any questions the policy asks on its own. 16 Specifically, at a history h, the constructor supplies a finite candidate set Z(h). When another user exchange is permitted and Z(h) is nonempty, the semantic action set is 
+
+A(h) = {PASS } ∪ { QUERY (z) : z ∈ Z (h)}.Otherwise, it reduces to {PASS }.
+
+Target construction and realization. The candidate constructor is fixed across training and inference. It uses predefined information fields from the task interface where available; otherwise, a frozen model constructs a small target set from the current history. Target construction does not use hidden annotations, rollout outcomes, task rewards, or RQV labels. We hold the realized candidate set fixed within each comparison, so every branch starts from the same decision menu. Let G ∼ p(G | h) denote the latent user goal, which is held by the environment rather than supplied to the policy or controller. Executing QUERY (z) invokes a fixed realizer that produces a benchmark-native question, followed by a user response y ∼ pU (· | G, h, z). The exchange is appended to the history before task execution resumes. Its tokens are environment-side and masked from the task-policy loss, so the learnable decisions are which target to select and how to act on the answer. Keeping the constructor and realizer fixed separates these two sources of improvement from changes in candidate generation or question wording. 
+
+Utility and interaction cost. To compare the two branches on the same scale, we use the task utility 
+
+U(τ, G) = R(τ, G) − ∑
+
+> z∈Q (τ)
+
+c(z), (8) where R(τ, G) is the benchmark return, Q(τ) collects clarification events with multiplicity, and c(z) ≥ 0is the interaction cost of an event. We set c(z) = 0 when no such cost is specified. Comparing QUERY and  
+
+> PASS
+
+under the same utility measures whether the information obtained is worth the interaction required to obtain it. 
+
+From branch utilities to a paired estimate. With this common utility, we can estimate the comparison by sampling both continuations under a fixed collecting policy π. Let τa denote a continuation whose initial semantic action is fixed to a and whose subsequent behavior follows π. Conditional on the same history and user goal, the two branch values are 
+
+Qπ (h, z; G) = E[U(τQUERY (z), G) | h, G],
+
+Vπ (h; G) = E[U(τPASS , G) | h, G]. (9) These expectations include the user response and all subsequent rollout randomness. Each group holds h
+
+and G fixed, and its arms and replica counts are chosen before observing continuation outcomes. We then sample continuations independently conditional on these quantities. If a selected target receives Kz query continuations with utilities Uz,k and the shared reference contains Kp continuations with utilities UPASS ,j,Equation 3 becomes 
+
+bgπ (h, z) = ¯UQUERY (z) − ¯UPASS = 1
+
+KzKz
+
+# ∑
+
+> k=1
+
+Uz,k − 1
+
+KpKp
+
+# ∑
+
+> j=1
+
+UPASS ,j.Conditional on the allocated arms and their replica counts, each sample mean has expectation equal to its branch value. Averaging over the allocation therefore preserves these expectations, and linearity gives 
+
+E[bgπ (h, z) | h, G, z included ] = E[ ¯UQUERY (z) | h, G, z included ]
+
+− E[ ¯UPASS | h, G, z included ]= Qπ (h, z; G) − Vπ (h; G).17 Thus matching the user goal makes the paired difference estimate the effect of the initial clarification, rather than a difference in what the two users wanted. To recover the history-conditioned RQV in Section 3.1, we next average over the latent goal. In CLEAT, target construction and selection use the visible history, not the hidden goal or future outcomes, so including z does not change p(G | h). The law of total expectation then yields 
+
+E[bgπ (h, z) | h, z included ] = EG|h
+
+Qπ (h, z; G) − Vπ (h; G)
+
+= gπ (h, z). (10) 
+
+Learning from the paired labels. Accordingly, we fit fϕ(h, z) to these paired differences using the squared-error objective in Equation 4. Squared-error regression targets the conditional mean of the label, which the derivation above identifies as RQV under the collecting policy. The controller thereby learns to predict the utility added by clarification, rather than the utility attained after asking alone, and scores new state–target pairs without observing the latent goal or collecting paired continuations at inference. 
+
+## A.3 Value-Guided Collection under a Fixed Budget 
+
+Paired evaluation identifies the value of a selected target, but evaluating every candidate at every history would spread the rollout budget thinly. We instead combine value-guided target selection with a separate coverage draw and repeated continuations. These serve complementary purposes. Guidance prioritizes promising questions, coverage collects evidence beyond that prioritization, and replication improves the precision of the resulting comparisons. 
+
+Semantic-action probabilities. Before applying value guidance, we construct a reference distribution that represents the task policy’s own preferences. The task policy defines a categorical policy over the menu A(h)
+
+without an additional action head. Each action has a nonempty canonical serialization s(a), scored by its mean token log-probability conditioned on the history and available actions, 
+
+Lθ (a | h) = 1
+
+|s(a)| log πθ
+
+ s(a) | h, A(h),where |s(a)| is its token count. Normalizing these length-adjusted scores gives 
+
+πA 
+
+> θ
+
+(a | h) = exp Lθ (a | h)
+
+∑a′ ∈A (h) exp Lθ (a′ | h) . (11) This distribution provides both the policy reference for collection and the on-policy arm weights used in Proposition 1. 
+
+A policy-based reference with full support. Conditioned on asking, the task policy induces 
+
+pπ (z | h) = πA 
+
+> θ
+
+(QUERY (z) | h)
+
+∑z′ πA 
+
+> θ
+
+(QUERY (z′) | h) .We use this distribution as the starting point for exploration, retaining the policy’s preferences among targets. To keep low-probability candidates reachable, we mix it with a uniform distribution, ¯pπ (z | h) = ( 1 − ϵ)pπ (z | h) + ϵ
+
+|Z (h)| , 0 < ϵ < 1. This gives every candidate positive reference probability before applying value guidance. 18 Guided proposal. With this reference in place, we use the controller to concentrate part of the rollout budget on clarifications with higher predicted value. Rather than replace the policy’s preferences with a greedy choice, we penalize departure from the reference. At fixed h and fixed collecting policy and controller, write p(z) = ¯pπ (z | h) > 0 and assume finite predicted values. For β > 0, the resulting tradeoff is max   
+
+> μ∈∆(Z(h))
+
+Ez∼μ[ fϕ(h, z)] − β−1 DKL (μ∥p).To derive the proposal, introduce a multiplier λ for the normalization constraint ∑z μ(z) = 1. Differentiating with respect to each positive μ(z) gives the stationarity condition and its solution, 0 = fϕ(h, z) − 1
+
+β
+
+
+
+log μ(z)
+
+p(z) + 1
+
+
+
++ λ,
+
+μ(z) = p(z) exp {β fϕ(h, z) + βλ − 1}.The multiplier contributes the same factor to every target. Enforcing normalization therefore yields 
+
+μ∗(z | h) = p(z) exp {β fϕ(h, z)}
+
+∑z′ p(z′) exp {β fϕ(h, z′)} ,which recovers Equation 5. Positive reference probabilities and finite predictions make this solution interior, and strict concavity of the objective makes it the unique maximizer. As β → 0, the proposal approaches p;increasing β gives predicted value more influence relative to the reference. The tilt prioritizes predicted RQV, while its effect on actual task utility depends on how these predictions align with current-policy outcomes. 
+
+Coverage complements guidance. To obtain evidence beyond this prioritization, we reserve a separate draw for reference-based sampling. When at least two candidates are available, we first draw zg ∼ μ∗(· | h),then draw a distinct target from the reference distribution over the remaining candidates, Pr (zc = z | h, zg) = ¯pπ (z | h)
+
+1 − ¯pπ (zg | h) , z̸ = zg.Support smoothing and this second draw address different needs. Smoothing keeps every target reachable, whereas the coverage draw reserves rollout budget for sampling without the value tilt among the remaining targets. Excluding zg ensures that this budget evaluates an additional candidate rather than replicating the guided choice. Guidance uses the controller’s current estimates; coverage supplies comparisons that can revise them. 
+
+A shared reference for paired comparisons. Having chosen which targets to evaluate, we allocate continu-ations to the query arms and a shared PASS reference. Reusing the same PASS sample mean supports both comparisons without collecting a separate reference for each target. With at least two candidates, the group contains Kp ≥ 2 PASS continuations, Kg ≥ 1 continuations for the guided target, and Kc ≥ 1 for the coverage target, 
+
+Sh = {PASS ×Kp , QUERY (zg)×Kg , QUERY (zc)×Kc }.Using at least two PASS replicas also allows each to use the others as its policy-learning baseline, as developed in the next subsection. When |Z (h)| = 1, the single query target receives Kg + Kc continuations. The GRPO comparison uses the same total continuation budget per clarification-eligible history. Experimental allocations are given in Appendix B. 
+
+Precision under a fixed budget. To quantify the effect of replication, fix the collecting policy and condition on C, comprising the shared history h, latent goal G, selected arms, and replica counts. Let σ2 
+
+> z
+
+and σ2 
+
+> P
+
+denote 19 the finite per-continuation return variances under QUERY (z) and PASS , respectively. Since continuations are sampled independently within and across arms, the variance of their sample-mean difference is Var  bgπ (h, z) | C  = Var   ¯UQUERY (z) | C  + Var   ¯UPASS | C 
+
+= σ2
+
+> z
+
+Kz
+
++ σ2
+
+> P
+
+Kp
+
+, (12) where Kz is the replica count of the selected query arm. The two terms explain how replication improves the comparison. Increasing Kp reduces reference noise in both labels, whereas increasing Kz reduces the query-specific noise for target z. The two labels share reference noise, which cancels when comparing their empirical values with each other but still affects either comparison against proceeding. Under the fixed total budget, we assign more query replicas to the guided target, sharpening the prioritized comparison while retaining a coverage arm to evaluate another candidate. 
+
+## A.4 Policy Learning with Sampling Correction 
+
+Guided collection changes which arms are observed and how many continuations each receives, but not the task utility that the policy is trained to improve. We therefore start from the task-return objective under the policy’s own action distribution, then derive how the shared PASS reference and the sampling correction recover its gradient from the structured rollout groups. 
+
+The task-return objective. Fix the history h, candidate set, and conditional goal distribution p(G | h).Let Pa 
+
+> θ
+
+(τ | h, G) denote the law of a continuation whose initial action is fixed to a and whose subsequent behavior follows the task policy. Conditional on G, the expected utility under the policy’s own arm selection is 
+
+Jh(θ; G) = ∑
+
+> a∈A (h)
+
+πA 
+
+> θ
+
+(a | h)Eτ∼Pa 
+
+> θ
+
+[U(τ, G)] .Averaging over the latent goal gives Jh(θ) = EG|h[Jh(θ; G)] . We first derive the update conditional on G and take this final average below. All gradients are evaluated at the collecting policy. We assume differentiable continuation laws with locally parameter-independent support and that differentiation can be interchanged with expectation; utility and environment kernels have no direct dependence on θ.Both arm selection and subsequent execution depend on the task-policy parameters. Their joint score is 
+
+Sθ (a, τ | h, G) = ∇θ log πA 
+
+> θ
+
+(a | h) + ∇θ log Pa 
+
+> θ
+
+(τ | h, G). (13) The second term sums token scores over the agent’s native continuation after the initial semantic action. Fixed question realization, user responses, and other environment transitions contribute no score, and G
+
+indexes the environment law rather than becoming an input to the policy. Applying the product rule and score identity to Jh therefore gives the gradient we aim to recover, 
+
+∇θ Jh(θ; G) = ∑
+
+> a
+
+πA 
+
+> θ
+
+(a | h)Eτ∼Pa 
+
+> θ
+
+[U(τ, G)Sθ (a, τ | h, G)] .
+
+PASS-referenced advantages. The paired group already supplies a common task-return reference. Reusing it for policy learning makes each query advantage measure utility relative to proceeding, consistently with the controller’s supervision. For a query continuation, we use 
+
+Az,k = Uz,k − ¯UPASS .For a PASS continuation, however, including its own return in the reference would make the baseline depend on the execution it evaluates. We therefore leave that continuation out, 
+
+APASS ,k = UPASS ,k − 1
+
+Kp − 1 ∑ 
+
+> j̸=k
+
+UPASS ,j.20 The mean query advantage is exactly the empirical RQV label in Equation 3, so the policy and controller learn from the same outcome comparison at trajectory and arm level, respectively. We treat advantages as fixed coefficients in the policy update and do not divide them by a group-dependent standard deviation. 
+
+Why the reference preserves the objective. Write Ba,k for the reference subtracted from Ua,k. Conditional on h, G and the selected arms, Ba,k is independent of its own continuation and has expectation Vπ (h; G) for every arm. This follows from independent continuation sampling, the fixed number of PASS replicas, and leave-one-out construction for the PASS arm itself. Because each continuation law is normalized, its expected score is zero, 
+
+Eτ∼Pa 
+
+> θ
+
+[∇θ log Pa 
+
+> θ
+
+(τ | h, G)] = 0. The independent baseline therefore contributes only the arm-selection score in expectation, 
+
+E[Ba,kSθ (a, τa,k | h, G) | h, G, a included ] = Vπ (h; G)∇θ log πA 
+
+> θ
+
+(a | h).Crucially, the expected reference is the same for all arms, so weighting by the policy’s arm probabilities makes the remaining term cancel, 
+
+Vπ (h; G) ∑
+
+> a
+
+πA 
+
+> θ
+
+(a | h)∇θ log πA 
+
+> θ
+
+(a | h) = Vπ (h; G)∇θ ∑
+
+> a
+
+πA 
+
+> θ
+
+(a | h) = 0. Thus replacing returns with PASS -referenced advantages preserves the gradient of Jh(θ; G) for both arm selection and execution. Although a PASS continuation has zero expected advantage, its advantage can still covary with the continuation score, so its execution gradient need not vanish. Native task behavior can therefore improve on PASS trajectories as well as on query trajectories. 
+
+Averaging within each arm. We now account for the two ways guided collection changes the data. First, an arm can receive more replicas without being intended to carry more weight in the task objective. We therefore average its contributions, ¯Fa = 1
+
+KaKa
+
+# ∑
+
+> k=1
+
+Aa,kSθ (a, τa,k | h, G).Let ma(h, G) denote the expected contribution of one on-policy continuation of arm a with the same reference construction. Conditional on inclusion, the continuation law and expected reference are unchanged, whether the target was selected for guidance or coverage. Even when these roles receive different replica counts, we therefore have 
+
+E[ ¯Fa | h, G, a included ] = ma(h, G).The baseline calculation above establishes ∑a πA 
+
+> θ
+
+(a | h)ma(h, G) = ∇θ Jh(θ; G).
+
+Correcting arm inclusion. Second, guided collection makes some arms more likely to appear in a group. Let Ih be the set of included arms and ρh(a) = Pr (a ∈ I h | h) their inclusion probabilities. For |Z (h)| ≥ 2, write μ(z) = μ∗(z | h) and p(z) = ¯pπ (z | h). A query arm enters either as the guided target or as the coverage target after a different guided draw. Summing these disjoint events gives 
+
+ρh(QUERY (z)) = μ(z) + ∑ 
+
+> z′̸=z
+
+μ(z′) p(z)
+
+1 − p(z′) . (14) The PASS arm is always included, so ρh(PASS ) = 1. When there is only one candidate, its query arm also has inclusion probability one. Having removed replica-count weighting, we correct this second effect by weighting each included arm mean by πA 
+
+> θ
+
+(a | h)/ρh(a), as in Equation 6. Write Ia = 1[a ∈ I h], with zero contribution for excluded arms. 21 Target selection is independent of G conditional on h, so E[Ia | h, G] = ρh(a). Taking expectations makes the correction explicit, 
+
+E[ bH(h) | h, G] = ∑
+
+> a
+
+πA 
+
+> θ
+
+(a | h)
+
+ρh(a) E[Ia ¯Fa | h, G]= ∑
+
+> a
+
+πA 
+
+> θ
+
+(a | h)
+
+ρh(a) ρh(a)ma(h, G)= ∑
+
+> a
+
+πA 
+
+> θ
+
+(a | h)ma(h, G) = ∇θ Jh(θ; G).(15) Finally, averaging over the fixed distribution G | h gives 
+
+E[ bH(h) | h] = ∑
+
+> a
+
+πA 
+
+> θ
+
+(a | h)ma(h) = ∇θ Jh(θ),where ma(h) = EG|h[ma(h, G)] and the objective Jh(θ) is the one defined at the start of this subsection. This proves Proposition 1 for the fixed-history task-return contribution of both action selection and execution. All inclusion weights are treated as fixed when forming this estimator. The controller can therefore change which arms receive data without giving those arms extra weight in the expected task-return gradient at h.Reference-policy regularization and the subsequent optimization step are specified separately in Appendix B. 
+
+Coverage bounds the correction weights. The coverage draw also controls the size of the correction, independently of how strongly the controller concentrates the guided proposal. 
+
+Proposition 2 (Coverage-Induced Bounds on Correction Weights). Fix a clarification-eligible history 
+
+h and 0 < ϵ < 1. Use the smoothed reference p = ¯pπ and the guided-plus-coverage selection rule in Equation 14, including the single-candidate convention. For any guided distribution μ and every candidate z,
+
+πA 
+
+> θ
+
+(QUERY (z) | h)
+
+ρh(QUERY (z)) ≤ 11 − ϵ ,
+
+πA 
+
+> θ
+
+(PASS | h)
+
+ρh(PASS ) = πA 
+
+> θ
+
+(PASS | h) ≤ 1. (16) 
+
+Proof. For at least two candidates, 0 < p(z) < 1, and Equation 14 implies 
+
+ρh(QUERY (z)) ≥ μ(z) + p(z) ∑ 
+
+> z′̸=z
+
+μ(z′) = p(z) + ( 1 − p(z)) μ(z) ≥ p(z).Since pπ (z | h) conditions on asking, pπ (z | h) ≥ πA 
+
+> θ
+
+(QUERY (z) | h). Support smoothing then gives 
+
+ρh(QUERY (z)) ≥ p(z) ≥ (1 − ϵ)pπ (z | h) ≥ (1 − ϵ)πA 
+
+> θ
+
+(QUERY (z) | h).Dividing by the positive inclusion probability gives the query bound. The single-candidate case satisfies the same bound because its inclusion probability is one. The PASS bound follows from ρh(PASS ) = 1. The bound depends neither on the guidance strength nor on the range of controller predictions. Thus, coverage serves both to broaden supervision and to keep guided collection compatible with bounded, untruncated correction weights. With our ϵ = 0.2, every inclusion weight is at most 1.25. 
+
+Relation to information-based training signals. Information-based objectives provide intermediate su-pervision by measuring how an observation changes a reference quantity, such as the likelihood of a gold answer, the inferred user goal, or subsequent agent behavior (Deng et al., 2026; Kong et al., 2026; Wang et al., 2026). These signals can also be combined with task-return supervision. In CLEAT, predicted RQV instead guides which experiences are collected, while policy advantages use observed task utilities and 22 the correction above preserves their intended arm weighting. The controller’s prediction thus allocates the learning opportunity rather than becoming an additional reward, allowing the controller and task policy to learn different quantities from the same outcomes. 
+
+## A.5 Online Co-Training and Inference 
+
+Co-training follows from the policy-relative definition of RQV. As the task policy learns, it can improve both its use of an answer and its native continuation, changing the comparison that the controller should predict. For a fixed history h and target z, subtracting Equation 2 across consecutive policy versions gives 
+
+gπt+1 (h, z) − gπt (h, z) = Qπt+1 (h, z) − Qπt (h, z)
+
+− Vπt+1 (h) − Vπt (h).Improved use of an answer can increase its residual value, whereas improved native execution can make the same exchange redundant. What matters is the relative change in the two branches, which motivates renewing the controller’s supervision as the policy evolves rather than treating the values learned at bootstrap as fixed. 
+
+One collection phase, two updates. We implement this feedback loop through a shared rollout batch. First, we bootstrap f0 on paired outcomes under π0, drawing targets from the policy-based reference without value guidance. At step t, we hold πt and ft fixed during collection, so the controller guides target selection while all continuations follow the same task policy. The batch then provides paired RQV labels for fitting 
+
+ft+1 and sampling-corrected task-return gradients for updating πt to πt+1. The controller learns the value of intervention, while the policy learns both target selection and subsequent task execution from observed returns. Controller fitting uses only the current batch, keeping its labels tied to one collecting policy. The next round uses both updated components, so the controller shapes exploration and the policy’s resulting behavior supplies fresh value supervision. 
+
+One-update lag and final refresh. Because both updates use outcomes generated before the policy step, 
+
+ft+1 is fitted to gπt and then guides collection under πt+1. This introduces a one-update lag between value supervision and the policy being guided. The next batch renews supervision under πt+1, tying the targets to successive policy versions while retaining only one collection phase per training step. After the final policy update, we hold πT fixed and collect fresh paired outcomes solely to refresh the controller, without another policy update. Its regression targets are therefore generated by the same policy used at inference. Algorithm 1 summarizes bootstrap, joint updates, and final refresh, using the group allocation in Appendix A.3. 
+
+From exploration to intervention. At inference, the same value comparison determines intervention rather than rollout allocation. While active, the refreshed controller follows Equation 7, selecting the highest-valued query only when its predicted RQV is positive and otherwise choosing PASS . Because any benchmark-specified interaction cost is already included in the utility, the zero threshold compares asking with native continuation on the same scale. The constructor and realizer remain unchanged, and deployment requires neither paired rollouts nor sampling correction. Selecting PASS ends controller intervention for the remainder of the interaction, while the trained policy retains its own ability to ask. The w/o controller variant retains the trained policy, constructor, and realizer, but selects menu actions using πA instead of controller scores. 
+
+# B Implementation Details 
+
+Across benchmarks, CLEAT follows a shared paired-outcome learning framework with shared training settings and benchmark-specific interaction interfaces. The target constructor remains frozen throughout training and is reused at inference. 23 Algorithm 1 Online co-training in CLEAT 
+
+Require: task policy π0, updates T, budgets (Kp, Kg, Kc)
+
+1: Bootstrap f0 on paired rollouts collected with μ = ¯pπ0
+
+2: for t = 0, 1, . . . , T − 1 do 
+
+3: Sample a batch Bt of clarification-eligible states (h, G)
+
+4: for each (h, G) ∈ B t do 
+
+5: μt(z | h) ∝ ¯pπt (z | h) exp {β ft(h, z)}
+
+6: Draw guided target zg ∼ μt(· | h)
+
+7: Draw a distinct coverage target from renormalized ¯ pπt when available 8: Collect paired continuations Sh under πt at the same (h, G)
+
+9: Compute bgt(h, z) = ¯UQUERY (z) − ¯UPASS for each selected target 10: Form PASS -referenced contributions and compute bH(h) using Eq. 6 11: end for 
+
+12: Fit ft+1 to the batch’s paired value targets using Eq. 4 13: πt+1 ← UPDATE 
+
+ πt, |B t|−1 ∑(h,G)∈B t bH(h)
+
+14: end for 
+
+15: Refresh f on fresh paired rollouts under the fixed final policy πT
+
+16: return task policy πT and refreshed controller f
+
+Data and training schedule. We follow the data partitions used by InfoPO (Kong et al., 2026) and the original benchmarks. The fixed training pool is drawn from the training split. A development set of 64 tasks from the tuning split is used only for monitoring, and the official test split is reserved for final evaluation. Histories are visited in an order determined by a fixed seed, with 16 histories per collection step and at most one pass through the pool. We use a budget of 120 policy-update steps, in addition to the controller-only bootstrap and final refresh described below. 
+
+Controller parameterization. The controller fϕ predicts RQV from the interaction history and a candidate information target. Each input is encoded by the frozen backbone with LoRA adapters disabled, using the final-token representation from the last layer and retaining the last 1,536 tokens. The target is serialized as 
+
+Information target: followed by z. Separate projection towers produce 128-dimensional state and target features, which a linear head combines with their elementwise product and the normalized remaining-turn budget. The feature encoder remains fixed, while the projection towers and output head are trained on paired RQV targets. 
+
+Rollout collection. At each selected clarification-eligible history, we generate fresh paired PASS and QUERY 
+
+continuations under the current task policy, using the allocation in Table 2. After the contrasted decision, the task policy completes each continuation without further controller intervention and may still ask questions on its own. The shared batch supplies paired RQV targets for controller fitting and task returns for policy updates. 
+
+Bootstrap and final refresh. Before policy training, we bootstrap the controller over four collection steps with value guidance disabled ( β = 0), using 64 histories and 320 continuations while holding the task policy fixed. Controller fitting minimizes unweighted mean squared error for four passes over each batch. After policy training, we collect fresh paired continuations from 16 new histories under the fixed final policy and refit the controller without another policy update. 
+
+Training utility. Across benchmarks, we derive task utility from benchmark evaluator outputs reflecting the task-specific criteria for successful interaction (Table 2). The same utility supervises both paired RQV 24 Table 2. Shared training configuration of CLEAT. 
+
+Component Parameter Setting Task policy LoRA rank / scaling α 16 / 32 Adapted modules Attention and MLP projections Optimizer / learning rate AdamW / 2 × 10 −5
+
+Policy-ratio clipping 0.2 Reference-KL coefficient 0.01 Maximum context length 8,192 tokens 
+
+Controller Maximum history length 1,536 tokens Projection block LayerNorm → Linear → tanh Projection dimension 128 Output head Linear (385 → 1) Remaining-turn feature b/16 Output-layer initialization Zero Trainable parameters (4B backbone) Approximately 0.67M Optimizer / learning rate AdamW / 3 × 10 −4
+
+Fitting passes per collection batch 4
+
+Both optimizers Maximum gradient norm 1.0 
+
+Training rollouts Histories per collection step 16 Maximum candidate targets m 6Continuations (Kp, Kg, Kc) (2, 2, 1 )
+
+Support smoothing ϵ 0.2 Guidance strength β 1.0 Temperature / top-p 1.0 / 1.0 Maximum generated tokens per turn 1,024   
+
+> The rollout allocation applies to states with at least two candidate targets; with one candidate, its query arm receives the combined query budget. Here bdenotes the number of turns remaining in the episode. For AskBench and IN3, task utility sums benchmark evaluator scores for requirement fulfillment and answer correctness; UserGym and
+> τ2-Bench use environment-provided task rewards.
+
+estimation and policy optimization. Controller predictions guide rollout collection but are not added to the policy reward. 
+
+Policy optimization. Each collected batch is used for one full-batch policy update, with advantages com-puted from observed task returns. The objective includes KL regularization toward the frozen backbone over both semantic-action choices and agent-generated tokens. Optimization hyperparameters are summarized in Table 2. 
+
+Loss aggregation and sampling correction. The semantic-action term uses the normalized menu distribu-tion, while contributions from subsequent agent-generated tokens are summed within each continuation; tokens supplied by the fixed realizer and the user are excluded. We average return-weighted contributions within each sampled arm, apply the sampling-correction weights, and average across states. The correction weights are held fixed during optimization and used without truncation. 
+
+Compute. Each online co-training run uses two NVIDIA H100 GPUs with 80 GB of memory each. One GPU hosts task-policy rollout generation, LoRA optimization, and the lightweight controller, while the other hosts the Qwen3-30B-A3B model used for user simulation and evaluation. Before each new collection step, we load the updated LoRA adapter into vLLM for rollout generation. 25 C Experimental Details 
+
+## C.1 Benchmarks and Evaluation Metrics 
+
+We follow the task formulations and evaluation criteria of the original benchmarks, using benchmark-specific interaction budgets consistently across methods. We use Qwen3-30B-A3B for user simulation and model-based judging, with benchmark-specific prompts shared across methods. Main results are reported as means and standard deviations over 3 seeds. The definitions below specify the scoring rules and the sets of instructions over which each metric is computed. They complement the task overview in Section 4.1. 
+
+UserGym (Qian et al., 2025). We use the official UserGym evaluation implementation and report Pass-1 scores on Travel, Turtle, Intention, and Telepathy. Travel uses the highest single-step reward within an episode, whereas Turtle, Intention, and Telepathy sum rewards over the episode. Scores are averaged over tasks and scaled by 100. The underlying reward differs across environments. Travel averages results over eight travel environments, with rewards for preference elicitation, correct search, and final recommendation quality. Turtle evaluates the similarity between the final explanation and the reference explanation. Telepathy rewards identification of the hidden target through a twenty-questions interaction. Intention assigns importance-weighted credit to recovered details and penalizes asking about multiple details at once. Because these credits accumulate, its reported score is not a percentage and can exceed 100. For UserGym, we jointly train the task policy and controller on Travel and Turtle. Both components are transferred unchanged to Intention and Telepathy, which are held out from training. 
+
+τ2-Bench (Barres et al., 2026). We use the official test split in Airline, Retail, and Telecom and report the task pass rate separately for each domain. These tasks require the agent to coordinate information obtained from the user with tool-based execution. Clarification and tool use share the configured interaction budget, so asking can affect the opportunity to complete subsequent task steps. The official evaluator determines whether the task is completed successfully. 
+
+IN3 (Qian et al., 2024). We report three complementary metrics. Judg.Acc evaluates the agent’s under-specification judgment over all instructions. Asking before answering counts as a positive prediction that clarification is needed, which is compared with the instruction’s underspecification annotation. Instruction recovery (Recover) measures the importance-weighted fraction of missing details resolved before the final answer, evaluated on instructions annotated as underspecified. Vague ask rate is the fraction of those underspecified instructions on which the agent asks before answering. It therefore measures recall of clarifi-cation need, while Judg.Acc also accounts for decisions on fully specified instructions. Instruction recovery measures what the interaction resolves rather than whether a question is asked. 
+
+AskBench (Zhao et al., 2026). We evaluate AskMind and AskOverconfidence using the official split and simulated user. Acc is the fraction of tasks answered correctly. Clarification coverage (Cov) is the fraction of tasks in which every required point is resolved before the final answer. These points concern missing information in AskMind and false premises that must be identified and corrected in AskOverconfidence. Coverage therefore measures complete resolution at the task level, rather than the average fraction of individual points recovered. Reporting it alongside accuracy distinguishes resolution during interaction from correctness of the final answer. 
+
+## C.2 Baselines 
+
+We describe the baseline implementations used in Table 1, grouped by how they guide interaction or train the task policy. 26 Prompting-based. These methods keep model weights fixed and modify the context or interaction proce-dure. Vanilla (Yang et al., 2025) uses each benchmark’s default agent prompt and serves as the backbone reference without task-specific training. ReAct (Yao et al., 2023) interleaves reasoning with environment actions, including clarification where supported by the benchmark. Reflexion (Shinn et al., 2023) uses verbal feedback from previous attempts to guide subsequent attempts through an updated memory. Proactive CoT (Deng et al., 2023) explicitly prompts the model to assess whether the request is sufficiently specified before deciding to ask or answer. PRIME (Wang & Jiang, 2026) maintains and retrieves structured memories of successful strategies, failure patterns, and user preferences, adapting interaction behavior through memory evolution rather than parameter updates. 
+
+Threshold-based. Our threshold-based implementations keep model weights fixed and gate clarification using a scalar score. We sweep the threshold τ on validation data separately for each method and benchmark. 
+
+CLAM (Kuhn et al., 2023) gates clarification by estimated request ambiguity. INTENT-SIM (Zhang & Choi, 2025) uses uncertainty over the user’s intent. Following the value-of-information perspective of Dong et al. (2026), our VoI-Gate adaptation compares the agent’s predicted task-success probabilities for asking first and acting directly. At each turn, it triggers clarification when the difference exceeds a benchmark-family threshold selected on tuning data and fixed at test time. 
+
+Information-based training. These methods use information-derived intermediate supervision, either alone or alongside task outcomes. IG-Reward (Deng et al., 2026) rewards the belief update toward the ground-truth user goal induced by a clarification exchange. InfoPO (Kong et al., 2026) compares the likelihood of the same next action under observed and masked feedback, then combines this information signal with outcome-based advantages. IGPO (Wang et al., 2026) uses increases in the likelihood of the ground-truth answer as turn-level rewards and combines them with outcome rewards. These baselines provide information-based credit assignment. CLEAT instead uses predicted query value to allocate rollouts, while constructing policy advantages from observed task utilities relative to a PASS reference. 
+
+Supervised and outcome-based training. SFT optimizes demonstration likelihood, providing a supervised reference for learning clarification behavior. For GRPO , we follow the group-relative policy optimization framework (Shao et al., 2024). 
+
+Shared settings. All main comparisons use Qwen3-4B and follow the same benchmark-specific evaluation protocol, including test splits, episode-level interaction limits, and scoring procedures. Training objectives and optimization settings follow the respective methods. 
+
+# D Additional Experimental Results 
+
+## D.1 Component Ablations 
+
+Table 3 provides the numerical results underlying RQ2. Without controller retains the trained policy, menu, and realizer at inference, using πA rather than controller scores to select actions. Without co-training 
+
+holds the bootstrapped controller fixed throughout policy training, then refreshes it on fresh paired rollouts under the fixed final policy before evaluation. With final refresh retained in both variants, this comparison assesses the benefit of controller updates during policy training. Without guidance removes value-guided target selection during rollout collection while retaining controller updates and controller-based action selection at inference. IG guidance replaces predicted RQV with a model-based proxy in the same proposal rule during rollout collection. For each candidate question, it averages the change in ground-truth intent log-likelihood over answers generated by the backbone from the visible history and question, without additional user-simulator calls. The variants distinguish the controller’s role at deployment from its roles in tracking policy-relative value and directing training-time exploration. Entries report means and standard deviations over 3 seeds, with decreases measured relative to the full method. 27 Table 3. Ablation of CLEAT (mean ±std over 3 seeds, Qwen3-4B ). Parentheses on the second line report changes from the full method in percentage points. Deployment-time intervention and training-time components are ablated separately; IG guidance retains the proposal rule and changes its scoring signal. 
+
+Variant UserGym τ2-Bench AskBench 
+
+Travel Turtle Airline Retail Telecom AskOv. 
+
+CLEAT (full) 63.72 ±0.48 29.79 ±1.15 35.00 ±2.00 32.50 ±1.29 24.94 ±1.77 61.27 ±2.19 
+
+Deployment-time ablation 
+
+w/o controller 59.49 ±0.59 (−4.23) 
+
+28.89 ±1.16 (−0.90) 
+
+28.86 ±3.86 (−6.14) 
+
+28.50 ±2.66 (−4.00) 
+
+24.50 ±2.00 (−0.44) 
+
+59.08 ±1.38 (−2.19) 
+
+Training-time ablations 
+
+w/o co-training 61.77 ±0.62 (−1.95) 
+
+27.19 ±1.41 (−2.60) 
+
+28.30 ±3.19 (−6.70) 
+
+30.00 ±2.61 (−2.50) 
+
+23.67 ±2.29 (−1.27) 
+
+59.25 ±1.95 (−2.02) 
+
+w/o guidance 56.17 ±0.56 (−7.55) 
+
+26.07 ±2.07 (−3.72) 
+
+26.67 ±2.89 (−8.33) 
+
+30.53 ±2.06 (−1.97) 
+
+22.83 ±1.89 (−2.11) 
+
+57.28 ±1.90 (−3.99) 
+
+IG guidance 60.98 ±0.69 (−2.74) 
+
+28.47 ±1.60 (−1.32) 
+
+23.33 ±2.89 (−11.67) 
+
+31.73 ±1.44 (−0.77) 
+
+20.83 ±2.82 (−4.11) 
+
+58.00 ±2.39 (−3.27) 
+
+Menu-augmented variants. Table 4 compares native and menu-based variants on Travel, IN3, and AskOver-confidence. 
+
+Table 4. Menu-augmented variants (Qwen3-4B; mean scores over 3 seeds, %). 
+
+Method Travel IN3 AskOv. 
+
+Pass-1 Recover Judg.Acc Acc Cov Vanilla 26.74 54.26 65.74 57.24 40.98 Menu-Vanilla 28.35 55.13 66.18 57.78 41.75 GRPO 42.26 53.68 66.05 58.67 43.50 Menu-GRPO 44.83 58.47 70.03 59.17 44.58 w/o guidance 56.17 64.49 78.95 57.28 47.70 
+
+CLEAT (full) 63.72 67.58 83.95 61.27 51.49 
+
+Both menu variants use the same frozen con-structor and realizer as CLEAT. At inference, the policy selects actions using πA, without controller scores. Menu-Vanilla uses the backbone without task-specific training. For Menu-GRPO, each train-ing group contains five continuations whose initial actions are sampled independently from πA over 
+
+PASS and the available QUERY (z) actions. Each con-tinuation then follows the task policy. Advantages subtract the mean utility of all five continuations and divide by their utility standard deviation, with a numerical stabilizer, as in Equation 1. There is no prescribed PASS count or value-guided sampling. The w/o guidance variant instead retains paired rollout collection, PASS -referenced advantages, sampling correction, and controller, while removing the value tilt. Both use five continuations per state with a nonempty menu; the full method additionally uses value guidance. Menu augmentation improves the native baselines, but does not account for the full gains of CLEAT. The full method achieves the highest mean across the reported metrics, with particularly large improvements over Menu-GRPO on Travel and IN3. These results support gains from the full CLEAT procedure beyond the shared candidate menu and question realizer alone. 
+
+Table 5. Comparison with larger backbones. Qwen3-4B, 8B, and 14B without additional task-specific training are compared with CLEAT on Qwen3-4B (mean ±std over 3 seeds). All columns are percentages except Intention, whose per-detail credits accumulate within an episode. 
+
+Model UserGym τ2-Bench IN3 AskBench 
+
+Travel Turtle Inten. Tele. Air. Ret. Telec. Judg.Acc AskMind AskOv. Qwen3-4B 26.74 ±1.49 17.97 ±1.73 185.50 ±2.00 49.12 ±1.87 23.78 ±2.89 20.89 ±2.61 20.00 ±1.25 65.74 ±1.54 38.70 ±1.27 57.24 ±1.18 
+
+Qwen3-8B 42.90 ±2.41 35.62 ±2.25 189.42 ±2.14 52.85 ±2.84 28.33 ±2.89 31.47 ±3.20 23.78 ±2.89 66.97 ±2.83 45.23 ±0.50 61.08 ±1.26 
+
+Qwen3-14B 55.69 ±1.56 50.27 ±2.20 191.25 ±2.79 53.66 ±1.79 30.33 ±3.41 35.67 ±1.55 24.33 ±2.00 70.06 ±2.83 43.58 ±1.79 63.58 ±2.13 
+
+CLEAT (Qwen3-4B) 63.72 ±0.48 29.79 ±1.15 209.17 ±3.52 57.67 ±2.45 35.00 ±2.00 32.50 ±1.29 24.94 ±1.77 83.95 ±1.42 48.37 ±2.66 61.27 ±2.19 
+
+28 Table 6. Accuracy and coverage across model sizes (mean ±std over 3 seeds). Method AskMind AskOverconfidence 
+
+Acc Cov Acc Cov 
+
+Qwen3-1.7B 
+
+Backbone 31.93 ±0.93 24.54 ±1.20 47.79 ±1.04 26.95 ±0.88 
+
+GRPO 27.66 ±0.36 22.97 ±0.83 48.50 ±0.90 28.92 ±1.53 
+
+CLEAT 36.89 ±1.34 27.56 ±1.34 49.00 ±1.00 36.17 ±1.28 
+
+Qwen3-4B 
+
+Backbone 38.70 ±1.27 24.23 ±0.75 57.24 ±1.18 40.98 ±2.02 
+
+GRPO 39.65 ±0.35 24.03 ±1.11 58.67 ±0.63 43.50 ±3.28 
+
+CLEAT 48.37 ±2.66 34.87 ±2.20 61.27 ±2.19 51.49 ±0.58 
+
+Qwen3-8B 
+
+Backbone 45.23 ±0.50 26.39 ±0.55 61.08 ±1.26 51.54 ±2.46 
+
+GRPO 47.79 ±0.91 26.95 ±0.79 64.25 ±1.15 54.17 ±2.27 
+
+CLEAT 49.87 ±1.34 31.69 ±1.09 66.75 ±0.95 59.83 ±1.76 
+
+## D.2 Comparison with Larger Backbones 
+
+Figure 6 compares CLEAT trained on Qwen3-4B with Qwen3-4B, 8B, and 14B backbones without ad-ditional task-specific training. It shows gains over the 4B backbone reference alongside absolute scores for the nine percentage-valued settings. Table 5 pro-vides the full results, including Intention, whose reward uses a different scale. The trained 4B model exceeds the 8B backbone in mean score on nine of ten settings and the 14B back-bone on seven. Its IN3 judgment accuracy exceeds that of the 14B backbone by 13.89 points, showing that interaction-focused training can outperform a substantial increase in backbone size on this task. Larger backbones retain an advantage on Turtle, with the 14B model also ahead on Retail and AskOverconfidence. This comparison places the 4B results in the context of backbone capacity; the next comparison evaluates training methods within each size. 0+10 +20 +30 +40 Gain vs. Base 4B (pp)       
+
+> UserGym τ²-Bench IN3 AskBench
+> Travel Turtle Tele. Air. Ret. Telec. IN3 AskMind AskOv. 030 60 90 Score (%)
+> Base 4B Base 8B Base 14B Ours 4B
+
+Figure 6. Backbone comparison with gains over Qwen3-4B (top) and mean ±std over 3 seeds (bottom). 
+
+## D.3 CLEAT across Backbone Sizes 
+
+Table 6 expands the analysis in Figure 5 and Section 4.5 with means and standard deviations over 3 seeds at 1.7B, 4B, and 8B. Within each size, CLEAT and GRPO start from the same backbone with matched continuation budgets per clarification-eligible history. Backbone denotes the model without additional task-specific training. Acc and Cov report answer accuracy and clarification coverage, respectively, computed from the same evaluation runs. CLEAT achieves the highest mean on both metrics in both AskBench settings at every size. At 1.7B, it raises coverage over GRPO from 22.97% to 27.56% on AskMind and from 28.92% to 36.17% on AskOvercon-fidence. Together with the 8B comparison in the main text, these results show benefits for both smaller and larger policies than the 4B backbone used in the main evaluation. 29 D.4 Clarification-Specific Metrics 
+
+Table 7 reports clarification-specific metrics for the methods in Table 1, expanding the comparison in Figure 4. These comprise importance-weighted instruction recovery on IN3 and clarification coverage on the two AskBench settings. All methods use Qwen3-4B, with means and standard deviations over 3 seeds. Bold and underlined entries mark the best and second-best results, respectively. 
+
+Table 7. Clarification-specific metrics on Qwen3-4B (mean ±std over 3 seeds). Method IN3 AskBench 
+
+Recover AskMind Cov AskOv. Cov 
+
+Prompting-based 
+
+Vanilla 54.26 ±2.21 24.23 ±0.75 40.98 ±2.02 
+
+ReAct 59.62 ±3.51 23.97 ±2.36 39.64 ±1.34 
+
+Reflexion 57.94 ±3.36 26.57 ±0.62 39.74 ±2.03 
+
+Proactive CoT 55.23 ±0.42 24.24 ±2.40 41.12 ±0.68 
+
+PRIME 55.86 ±0.63 25.78 ±2.39 43.21 ±2.16 
+
+Threshold-based 
+
+CLAM 54.84 ±4.88 26.93 ±1.02 44.27 ±2.01 
+
+INTENT-SIM 58.66 ±2.87 24.64 ±0.88 42.18 ±0.21 
+
+VoI-Gate 58.55 ±2.54 25.64 ±1.42 40.55 ±1.12 
+
+Information-based training 
+
+IG-Reward 53.71 ±6.96 25.69 ±0.49 42.38 ±1.45 
+
+InfoPO 55.90 ±4.30 25.12 ±2.08 47.19 ±1.74 
+
+IGPO 51.65 ±1.16 25.47 ±1.18 43.37 ±1.44 
+
+Supervised and outcome-based training 
+
+SFT 63.22 ±2.23 25.70 ±1.15 40.27 ±1.11 
+
+GRPO 53.68 ±6.15 24.03 ±1.11 43.50 ±3.28 
+
+CLEAT (ours) 67.58 ±3.80 34.87 ±2.20 51.49 ±0.58 
+
+The strongest baseline differs across metrics, with SFT leading IN3 recovery, CLAM leading AskMind coverage, and InfoPO leading AskOverconfidence coverage. CLEAT achieves the highest mean in all three columns, extending the comparison in the figure beyond the displayed subset of methods. 
+
+## D.5 Comparison with ACT and CollabLLM 
+
+Table 8 compares CLEAT with ACT (Chen et al., 2025) and CollabLLM (Wu et al., 2025) on AskBench and IN3. All methods follow the same benchmark-specific evaluation protocol. 
+
+Table 8. Additional comparisons with Qwen3-4B (mean ±std over 3 seeds; all metrics in %). Method AskMind AskOv. IN3                        
+
+> Acc Cov Acc Cov Recover Judg.Acc ACT 45.30 ±0.96 26.51 ±0.56 59.00 ±1.38 42.33 ±1.59 51.17 ±0.59 66.05 ±1.42
+> CollabLLM 44.84 ±1.53 25.86 ±2.48 58.08 ±1.38 39.83 ±1.42 56.44 ±3.24 67.90 ±3.50
+> CLEAT 48.37 ±2.66 34.87 ±2.20 61.27 ±2.19 51.49 ±0.58 67.58 ±3.80 83.95 ±1.42
+
+Both methods are adapted to Qwen3-4B with a shared training pool and benchmark-specific rewards. Training uses a fixed set of preference pairs constructed from simulated conversations, following ACT’s action-contrastive learning principle and CollabLLM’s multiturn-aware reward framework. CLEAT achieves the highest mean on all six reported metrics. Relative to ACT, the stronger of the two additional baselines on AskBench, answer accuracy improves by 3.07 points on AskMind and 2.27 points on AskOverconfidence, while clarification coverage improves by 8.36 and 9.16 points, respectively. On IN3, it exceeds CollabLLM, the stronger additional baseline on this benchmark, by 11.14 points in instruction recovery and 16.05 points in judgment accuracy. The gains therefore extend beyond final-answer accuracy to 30 recognizing underspecification and more complete resolution of missing information and false premises. These results complement the component ablations in Appendix D.1 by comparing the full framework with other outcome-based approaches to learning interaction behavior. 
+
+## D.6 Asking on Underspecified Instructions 60 70 80 90 
+
+Vague ask rate (%) 
+
+65 70 75 80 85 90 
+
+> Judgment accuracy (%)
+
+IN3: Vague Ask Rate vs. Accuracy 
+
+> Vanilla GRPO ReAct InfoPO CLAM
+> Ours
+> SFT
+
+Figure 7. Vague ask rate versus overall judgment accuracy on IN3. The star denotes CLEAT. 
+
+Figure 7 examines two complementary aspects of clarification behavior. Vague ask rate measures the fraction of underspecified IN3 instructions on which the agent asks before answering. 
+
+Judgment accuracy evaluates the agent’s decision across both underspecified and fully specified instructions. The former cap-tures whether an agent responds to missing information; the latter measures whether it correctly recognizes when clarification is needed. CLEAT reaches a vague ask rate of 85.6%, the highest among the displayed methods, while also achieving the highest overall judgment accuracy at 83.95%. Methods with similar ask-ing rates can differ substantially in judgment accuracy, so the two axes reveal distinctions that asking frequency alone does not cap-ture. Together with its leading instruction recovery in Figure 4, these results show that CLEAT improves both the decision to clarify and the recovery of missing requirements. 
+
+## D.7 Co-Training Dynamics 0 50 100 0.5 1.0 1.5 2.0 2.5           
+
+> AskOv Actor gradient norm
+> 050 100 0.0 0.1 0.2 0.3
+> KL to reference policy
+> 050 100 0.0 0.2 0.4 0.6 0.8
+> Co-training signal
+> 050 100
+> co-training step
+> 01234
+> AskMind
+> 050 100
+> co-training step
+> 0.00 0.25 0.50 0.75 1.00 1.25 050 100
+> co-training step
+> −1.0
+> −0.5 0.0 0.5 1.0 1.5
+
+Figure 8. Training diagnostics for CLEAT on AskOverconfidence (top) and AskMind (bottom), with raw per-step values in light and a moving average in dark. Columns show the logged actor gradient norm, KL to the frozen reference policy, and the batch-averaged empirical RQV of collected query arms. One step comprises a shared collection phase followed by controller and policy updates. Empirical RQV is the paired return difference ¯ UQUERY (z) − ¯UPASS from Equation 3. 
+
+Figure 8 examines how policy updates and paired value supervision evolve during co-training. After an initial transient, the smoothed actor gradient norm settles into a lower range in both settings. The KL to the frozen reference increases to approximately 0.3 on AskOverconfidence and fluctuates around 0.5 in the later part of AskMind training. These trajectories show continued policy adaptation under the KL regularization used in our implementation. 31 The right column shows empirical RQV labels from the collected batches, whose moving averages remain positive in both settings. These batch-level diagnostics characterize the supervision collected as the policy, visited histories, and selected targets evolve together. 
+
+## D.8 Qualitative Examples of Policy Behavior 
+
+We present two selected examples from the offline co-training collections, comparing the base and trained Qwen3-4B policies on matched tasks, visible histories, and frozen-constructor targets. Each target was examined with two QUERY continuations and two PASS continuations. The examples illustrate native task handling and the use of user feedback. Task and trajectory descriptions are condensed for presentation. 
+
+Case 1 (IN3) – Native handling of an unspecified detail Task. Write a Python script to parse a CSV file and calculate the average. 
+
+Trajectory comparison. The base policy’s PASS continuation hard-codes the first column, whereas the trained policy’s sampled native continuation supports selection by column name. The same underspecified request therefore leads to different implementations in these trajectories. 
+
+Interpretation. The native continuation determines what an added clarification must improve upon. Handling a detail through the task output can change the role of explicitly asking about it, even when the request itself is unchanged. 
+
+Case 2 (UserGym Travel) – Using an indirect answer Task. Arrange a flight, rental car, and restaurant reservation at the lowest cost consistent with the user’s preferences. 
+
+User feedback. The user specifies a gasoline car and expresses the airline preference indirectly as “the same airline logo on every plane.” 
+
+Trajectory comparison. In the sampled continuations, the base policy copies the indirect airline preference into a malformed search, whereas the trained policy uses the reply to select an itinerary satisfying that preference. 
+
+Interpretation. Obtaining a preference and using it correctly are distinct steps. These trajectories illustrate why evaluating a clarification requires considering how the task policy acts on the reply. 
+
+## D.9 Cross-Method Clarification Cases 
+
+We present two selected successful interactions from the AskBench test sets, using the same CLEAT checkpoint as in the main experiments. Methods receive the same initial task, and the descriptions condense transcripts from seed 1 for each method. The cases illustrate how the full system handles a misleading premise and a missing condition, respectively. On AskOverconfidence, constructor targets can include premises to check; the realizer expresses the selected target as a premise-checking request. 32 AskOverconfidence – Resolving a misleading premise Task. Choose between (A) “awful huge iron walking sock” and (B) “huge awful iron walking sock.” The request incorrectly states that adjective order follows word length. The reference answer is A (task ad6f21dd ). 
+
+CLEAT interaction. The exchange addresses the ordering rule itself. The simulated user accepts the correction, and the task policy then answers A. 
+
+Baseline interactions. GRPO and ACT also seek clarification, but their exchanges leave the word-length premise unresolved. Both subsequently answer B using that rule. 
+
+Interpretation. The contrast links successful clarification to addressing the source of the error and carrying the feedback into the final answer. What the exchange resolves matters alongside whether the agent asks. 
+
+AskMind – Recovering a condition needed for computation Task. Find the unique odd integer t with 0 < t < 23 such that t + 2 is the inverse of t modulo an unspecified number. The modulus has been removed from the request (task b09a2647 ). 
+
+CLEAT interaction. The agent asks, “What is the specific modulus used in the problem?” The simulated user replies, “The modulus is 23.” The policy then solves t(t + 2) ≡ 1 (mod 23 ) and obtains the reference answer 
+
+t = 17. 
+
+Baseline interactions. In the GRPO and ACT transcripts, the agents assume a modulus instead of requesting it and reason about the resulting, incorrectly specified congruence. 
+
+Interpretation. Naming the missing quantity gives the user a specific question to answer and supplies the condition needed for the subsequent computation. The example connects target selection to how the policy solves the task after receiving the answer. 
+
+# E Additional Related Work 
+
+Agent capabilities and adaptive computation. Progress in large language models (Ye et al., 2025; Zhang et al., 2025; Xiong et al., 2026a,b) has broadened the capabilities of agents that plan, use tools, and interact with external environments (Zhang et al., 2026; Shi et al., 2026a,b; Huang et al., 2026). Related adaptation mecha-nisms include joint routing–prompt refinement in EvolveRouter (Huang et al., 2026), context-conditioned evidence use in RAG (Li et al., 2026a), and utility-based computation gating in DIAL (Li et al., 2026b). These mechanisms adapt how an agent processes a task. CLEAT focuses on acquiring information from the user according to its incremental value for the evolving task policy. 
+
+Counterfactual comparisons and confidence calibration. CAGE-CAL (Huang et al., 2026) calibrates multi-agent confidence by comparing post-communication agent graphs with matched no-communication graphs, accounting for dependencies induced by agent communication. CLEAT uses paired continuations to estimate the task utility added by user clarification under the current policy. 
+
+Evaluation under imperfect communication. Benchmarks complement clarification methods by construct-ing tasks with missing, ambiguous, or faulty information. IN3, ClarQ-LLM, and MediQ support asking for additional information before committing to an answer (Qian et al., 2024; Gan et al., 2024; Li et al., 2024); CLAMBER examines identifying and clarifying ambiguous information needs (Zhang et al., 2024). Interactive information seeking and user-centric agent settings further connect user exchanges to subsequent actions and task outcomes (Chen et al., 2024; Qian et al., 2025; Sun et al., 2026). Perturbation-based gen-eration extends evaluation to systematically constructed misaligned or underspecified tasks (Zhang et al., 2026). Related work on reasoning and planning (Xiong et al., 2026, 2025), learning to ask under unclear instructions (Wang et al., 2025), and rollout interventions (Zhang et al., 2026) highlights the broader need to 33 connect uncertainty with effective task behavior. This motivates evaluating both whether an agent obtains useful information and whether it successfully acts on that information. 
+
+Specialized clarification and user assistance. SpeakRL studies the integration of reasoning, speaking, and acting (Acikgoz et al., 2026), while ClarEval evaluates clarification by code agents under ambiguous instructions (Li et al., 2026). HiL-Bench examines whether agents recognize when external human assistance is needed (Trinh et al., 2026). These settings broaden the scope of interaction beyond answering an ambiguous question, encompassing task execution and decisions to seek help. Our evaluation measures task performance and clarification quality with simulated users. Robustness to real user behavior and evolving goals remains an important direction beyond the present study. 
+
+# F Prompts 
+
+We illustrate the core interfaces with prompts for missing-information tasks. Blue placeholders denote variable inputs. User simulation and evaluation reuse the benchmark-provided prompts. 
+
+> Target construction Missing-information targets
+> List up to {m} specific missing pieces of information that would help complete the task in this conversation. Do not list information already provided. One target per line; only the list, or NONE if nothing is missing. {visible conversation}
+> Semantic-action selection
+> {visible conversation} Choose the next high-level action. QUERY asks the user about the named target. PASS delegates this turn to your normal task-solving policy (which may itself ask). Copy exactly one line from this menu: <QUERY> {z_1} ... <PASS>
+> Question realization Question template
+> Could you tell me: {z}?
+
+34
