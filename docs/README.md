@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-14</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-15</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 49 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 35 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>29</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-14 19:01:17 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-15 18:25:51 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,10 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日共生成 49 篇推荐（精读 29 篇，速读 20 篇）</p>
-<p>精读：《When Pleasing the User Compromises Care: AI Sycophancy in Caregiver-Mediated Healthcare》（10.0/10）, 《Big-Big-SycoBench: A Benchmark to Detect Sycophancy Through Model Responses to Valid vs. Invalid Arguments》（10.0/10）</p>
-<p>速读：《Training Advisors for LLM Agents from Task Outcomes》（8.0/10）, 《Conversational Task Disambiguation over Tabular Data: Leakage-Aware Formulation, Benchmark Suite, and Training》（8.0/10）, 《Use and Disuse: Intent-Structured Experience Consolidation for Memory and Learning in LLM Agents》（8.0/10）</p>
-<p>这些结果覆盖了当下较热的方向，建议先看精读区论文的关键问题与方法。</p>
+<p>2026-10-15 论文日报已更新：共推荐 35 篇，分为精读 15 篇、速读 20 篇，聚焦 AI 在真实场景中的应用与治理。</p>
+<p>最值得关注的是两篇获评 9.0/10 的精读：以本体支撑 GraphRAG 的临床自杀风险评估，以及通过注视唤起、可见状态支持同场协作的 AR 助手。</p>
+<p>普通读者可先从 8.0/10 的《Who Can Say No?》入手，了解前沿 AI 的控制与问责议题，再按兴趣深入医疗或 AR 方向。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -81,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">29 篇</strong>
+    <strong class="dpr-home-dashboard-count">15 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="When Pleasing the User Compromises Care: AI Sycophancy in Caregiver-Mediated Healthcare">When Pleasing the User Compromises Care: AI Sycophancy in Caregiver-Mediated Healthcare</span></li><li><span class="dpr-home-dashboard-paper-title" title="Big-Big-SycoBench: A Benchmark to Detect Sycophancy Through Model Responses to Valid vs. Invalid Arguments">Big-Big-SycoBench: A Benchmark to Detect Sycophancy Through Model Responses to Valid vs. Invalid Arguments</span></li><li><span class="dpr-home-dashboard-paper-title" title="Claim Framing as a Driver of LLM Sycophancy">Claim Framing as a Driver of LLM Sycophancy</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="BEACON-SP: Ontology-Grounded GraphRAG Framework for Clinical Suicide Risk Assessment">BEACON-SP: Ontology-Grounded GraphRAG Framework for Clinical Suicide Risk Assessment</span></li><li><span class="dpr-home-dashboard-paper-title" title="Beyond Activation: Gaze Invocation with Visible Status for an Embodied AR Assistant in Co-Located Collaboration">Beyond Activation: Gaze Invocation with Visible Status for an Embodied AR Assistant in Co-Located Collaboration</span></li><li><span class="dpr-home-dashboard-paper-title" title="Terrarium: Growing Personal Assistants via Scalable Synthesis of App Worlds">Terrarium: Growing Personal Assistants via Scalable Synthesis of App Worlds</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">ai-social-psych <strong>8</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>7</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>5</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>3</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -97,9 +96,9 @@
     <strong class="dpr-home-dashboard-count">20 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Training Advisors for LLM Agents from Task Outcomes">Training Advisors for LLM Agents from Task Outcomes</span></li><li><span class="dpr-home-dashboard-paper-title" title="Conversational Task Disambiguation over Tabular Data: Leakage-Aware Formulation, Benchmark Suite, and Training">Conversational Task Disambiguation over Tabular Data: Leakage-Aware Formulation, Benchmark Suite, and Training</span></li><li><span class="dpr-home-dashboard-paper-title" title="Use and Disuse: Intent-Structured Experience Consolidation for Memory and Learning in LLM Agents">Use and Disuse: Intent-Structured Experience Consolidation for Memory and Learning in LLM Agents</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Structured pre-generation elicitation versus single-shot prompting in AI-assisted enterprise decision-making: a randomised online experiment">Structured pre-generation elicitation versus single-shot prompting in AI-assisted enterprise decision-making: a randomised online experiment</span></li><li><span class="dpr-home-dashboard-paper-title" title="Who Can Say No? Control, Accountability and the Pace of Frontier AI">Who Can Say No? Control, Accountability and the Pace of Frontier AI</span></li><li><span class="dpr-home-dashboard-paper-title" title="Collective Autonomous Vehicle Routing Needs Social Awareness for Coexistence with Human Drivers">Collective Autonomous Vehicle Routing Needs Social Awareness for Coexistence with Human Drivers</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>7</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>6</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">ba <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>6</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>3</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span></div>
 </section>
 </div>
 
