@@ -48,7 +48,7 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-15</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-16</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
     <strong class="dpr-home-dashboard-count">共 35 篇</strong>
@@ -58,7 +58,7 @@
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-15 18:25:51 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-16 17:59:49 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-15 论文日报已更新：共推荐 35 篇，分为精读 15 篇、速读 20 篇，聚焦 AI 在真实场景中的应用与治理。</p>
-<p>最值得关注的是两篇获评 9.0/10 的精读：以本体支撑 GraphRAG 的临床自杀风险评估，以及通过注视唤起、可见状态支持同场协作的 AR 助手。</p>
-<p>普通读者可先从 8.0/10 的《Who Can Say No?》入手，了解前沿 AI 的控制与问责议题，再按兴趣深入医疗或 AR 方向。</p>
+<p>2026-10-16 论文日报已更新：共收录 35 篇，分为精读 15 篇、速读 20 篇，聚焦 AI 操控风险、人机协作与隐私等议题。</p>
+<p>最值得关注的是两篇均获 10/10 推荐的精读：DISARM 探索揭示大模型操控策略的界面，Kolab 关注长流程人机协作的基准评测。</p>
+<p>建议先按兴趣选读其中一篇，再速读 8/10 推荐的《Loose Lips》，进一步了解智能体对话中的隐私泄露问题。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -83,9 +83,9 @@
     <strong class="dpr-home-dashboard-count">15 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="BEACON-SP: Ontology-Grounded GraphRAG Framework for Clinical Suicide Risk Assessment">BEACON-SP: Ontology-Grounded GraphRAG Framework for Clinical Suicide Risk Assessment</span></li><li><span class="dpr-home-dashboard-paper-title" title="Beyond Activation: Gaze Invocation with Visible Status for an Embodied AR Assistant in Co-Located Collaboration">Beyond Activation: Gaze Invocation with Visible Status for an Embodied AR Assistant in Co-Located Collaboration</span></li><li><span class="dpr-home-dashboard-paper-title" title="Terrarium: Growing Personal Assistants via Scalable Synthesis of App Worlds">Terrarium: Growing Personal Assistants via Scalable Synthesis of App Worlds</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="DISARM-ing the Hidden Puppetmaster: An Interface for Exposing Manipulative Tactics in Large Language Models">DISARM-ing the Hidden Puppetmaster: An Interface for Exposing Manipulative Tactics in Large Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="Kolab: Benchmarking Human-Agent Collaboration in Long-Horizon Workflows">Kolab: Benchmarking Human-Agent Collaboration in Long-Horizon Workflows</span></li><li><span class="dpr-home-dashboard-paper-title" title="&quot;Do You Trust It... or Check It?&quot;: Exploring Children&#x27;s Verification Behaviors in Game-Based Human-AI Collaboration">&quot;Do You Trust It... or Check It?&quot;: Exploring Children&#x27;s Verification Behaviors in Game-Based Human-AI Collaboration</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>5</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>3</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -96,9 +96,9 @@
     <strong class="dpr-home-dashboard-count">20 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Structured pre-generation elicitation versus single-shot prompting in AI-assisted enterprise decision-making: a randomised online experiment">Structured pre-generation elicitation versus single-shot prompting in AI-assisted enterprise decision-making: a randomised online experiment</span></li><li><span class="dpr-home-dashboard-paper-title" title="Who Can Say No? Control, Accountability and the Pace of Frontier AI">Who Can Say No? Control, Accountability and the Pace of Frontier AI</span></li><li><span class="dpr-home-dashboard-paper-title" title="Collective Autonomous Vehicle Routing Needs Social Awareness for Coexistence with Human Drivers">Collective Autonomous Vehicle Routing Needs Social Awareness for Coexistence with Human Drivers</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="A data-driven heuristic-ensemble method for behavioural inference in collective-risk dilemma experiments">A data-driven heuristic-ensemble method for behavioural inference in collective-risk dilemma experiments</span></li><li><span class="dpr-home-dashboard-paper-title" title="Loose Lips: Understanding Privacy Leakage in Agentic Dialogue">Loose Lips: Understanding Privacy Leakage in Agentic Dialogue</span></li><li><span class="dpr-home-dashboard-paper-title" title="AuthScribe: Supporting Agency and Authorship in LLM-Assisted Reflective Journaling">AuthScribe: Supporting Agency and Authorship in LLM-Assisted Reflective Journaling</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>6</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>3</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>4</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>4</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>2</strong></span><span class="dpr-home-dashboard-tag">ba <strong>1</strong></span></div>
 </section>
 </div>
 
