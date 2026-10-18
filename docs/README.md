@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-17</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-18</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 35 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 31 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>11</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-17 17:36:54 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-18 17:51:18 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-17 论文日报出炉：共梳理 35 篇论文，精读 15 篇、速读 20 篇，聚焦大模型与多智能体研究。</p>
-<p>最值得关注的是“用强化学习让大模型解释贴近人类决策”和“大模型情感类个人信息学综述”两条方向，相关精读论文均获 9.0/10。</p>
-<p>普通读者可先从这两篇高分精读入手，再按兴趣速读 GUI 智能体执行稳定性诊断或多智能体协作控制论文，推荐分均为 8.0/10。</p>
+<p>2026-10-18 论文日报已出炉：梳理 31 篇论文，分为 11 篇精读、20 篇速读。</p>
+<p>最值得关注的是两篇均获 9.0/10 的精读：人机协同优化中的意见测量界面，以及将图像编辑意图转为持久化参数控制。</p>
+<p>建议先从你更感兴趣的精读方向入手，再按需速读 GUI 智能体过程奖励、自我认知或多模态记忆相关论文。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">15 篇</strong>
+    <strong class="dpr-home-dashboard-count">11 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Calibrating LLM Explanations to Human Decisions with Reinforcement Learning">Calibrating LLM Explanations to Human Decisions with Reinforcement Learning</span></li><li><span class="dpr-home-dashboard-paper-title" title="Scoping the Landscape of Large Language Model-based Affective Personal Informatics: Review, Reflection, Future Direction">Scoping the Landscape of Large Language Model-based Affective Personal Informatics: Review, Reflection, Future Direction</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Caricature to Collective Artifact: How Persona Construction Drives Polarization in Generative Social Simulations">From Caricature to Collective Artifact: How Persona Construction Drives Polarization in Generative Social Simulations</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Rethinking Opinion Measurement Interfaces for Human-in-the-Loop Optimization">Rethinking Opinion Measurement Interfaces for Human-in-the-Loop Optimization</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Semantic Editing Intentions to Persistent Parametric Controls for AI-Assisted Image Editing">From Semantic Editing Intentions to Persistent Parametric Controls for AI-Assisted Image Editing</span></li><li><span class="dpr-home-dashboard-paper-title" title="SIGN-MAPPO: State-Intent-Aware Graph Multi-Agent Reinforcement Learning for Cooperative Driving under Imperfect V2X">SIGN-MAPPO: State-Intent-Aware Graph Multi-Agent Reinforcement Learning for Cooperative Driving under Imperfect V2X</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>4</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>7</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -96,9 +96,9 @@
     <strong class="dpr-home-dashboard-count">20 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="CALM: Decentralized Control of Cooperative Aerial Manipulation with Multi-Agent Reinforcement Learning">CALM: Decentralized Control of Cooperative Aerial Manipulation with Multi-Agent Reinforcement Learning</span></li><li><span class="dpr-home-dashboard-paper-title" title="Optimizing Team Behavior via Extremum-seeking Control in Multi-agent Reinforcement Learning">Optimizing Team Behavior via Extremum-seeking Control in Multi-agent Reinforcement Learning</span></li><li><span class="dpr-home-dashboard-paper-title" title="How GUI Agents Fail: GraceBench for Execution Stability Diagnosis">How GUI Agents Fail: GraceBench for Execution Stability Diagnosis</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Adaptive-Group Process Rewards for GUI Agents">Adaptive-Group Process Rewards for GUI Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="Agentic Self-Awareness: Aligning Knowing, Acting, and Holding">Agentic Self-Awareness: Aligning Knowing, Acting, and Holding</span></li><li><span class="dpr-home-dashboard-paper-title" title="Seeing, Maintaining, and Learning: The Evolution of Multimodal Agent Memory">Seeing, Maintaining, and Learning: The Evolution of Multimodal Agent Memory</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>8</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>7</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>6</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>5</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
 </section>
 </div>
 
