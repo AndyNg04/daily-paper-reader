@@ -1,0 +1,789 @@
+Title: MARS: Memory-Aware Routing for Session-Level LLM Assistants
+
+URL Source: https://arxiv.org/pdf/2610.23583v1
+
+Published Time: Mon, 19 Oct 2026 01:26:19 GMT
+
+Number of Pages: 32
+
+Markdown Content:
+# MARS: Memory-Aware Routing for Session-Level LLM Assistants 
+
+Minghan Wang 1, Jinhang Zuo 2, Zhongxiang Dai 3,Zhiyong Wang 4, Fang Kong 1
+
+> 1
+
+Southern University of Science and Technology 
+
+> 2
+
+City University of Hong Kong 
+
+> 3
+
+The Chinese University of Hong Kong, Shenzhen 
+
+> 4
+
+Harbin Institute of Technology (Shenzhen) 
+
+Abstract 
+
+Long-term LLM assistants must repeatedly decide what prior context to expose and which model should answer as an interaction evolves. Existing memory systems and model routers usually make these decisions separately, although memory construction changes the evidence, distractors, and difficulty of the resulting input. We introduce MARS, a memory-aware routing framework that uses session state as a shared control interface between memory construction and model selection. A Query and Topic Manager (QTM) estimates compact decision-relevant state that guides a fixed state-conditioned memory policy and an online router, enabling each turn to receive an appropriate memory view and a suitable model under a quality–memory–cost trade-off. We evaluate MARS on R EAL MEM and M ULTI CHALLENGE with 16 system configurations each, covering long-history memory-driven interaction and bounded sessions with structured context interference. On R EAL MEM , MARS preserves 98.2% of full-context GPT-4o’s QA while using only 14.5% of its generation API cost, including both generation and controller calls for MARS, and achieves the strongest measured memory-recall and retrieval scores among compared systems. On M ULTI CHALLENGE , MARS trails the strongest static system overall but approaches its performance at lower recorded cost on a mechanism-focused subset. Together, these results support a favorable quality–memory–cost trade-off for long-history, memory-dependent interaction. 
+
+# 1 Introduction 
+
+Modern LLM assistants are no longer used only for isolated questions; they increasingly support ongoing work across many turns and sessions. In long-term use, interactions can span many turns and recur across tasks, a setting highlighted by recent work on long-term conversational and memory-driven agents (Maha-rana et al., 2024; Park et al., 2023; Packer et al., 2023; Bian et al., 2026). Users may resume unfinished artifacts, request revisions, refer to earlier constraints, or ask for final answers that depend on decisions made several turns or sessions earlier. Before answering such turns, an assistant must decide both what prior context to include and which model should answer. This creates a quality–memory–cost trade-off: richer memory can provide necessary evidence but also increases context length and distractors, while stronger models can better interpret complex memory views but are more expensive. Existing systems usually handle these decisions separately. Memory systems store, update, and retrieve prior information (Lewis et al., 2020; Packer et al., 2023; Chhikara et al., 2025; Xu et al., 2025), while model routers select a generator from a candidate pool to trade off quality and cost (Chen et al., 2023; Hu et al., 2024; Ding et al., 2024; Ong et al., 2024; Nguyen et al., 2024; Poon et al., 2025; Wang et al., 2025). This separation overlooks a key dependency: memory construction determines what evidence, constraints, and distractors enter the prompt, while routing determines whether the selected model can use that context reliably and cost-effectively. This dependency makes memory construction and model routing inherently coupled. As Figure 1 illustrates, finalizing a launch brief requires using the updated launch date (May 19, superseding May 12) while preserving an earlier constraint of exactly three paragraphs. Omitting the constraint or exposing the obsolete date can cause errors, while an unsuitable model may fail even when the relevant memory is present. Exposing all history can add distractors and increase context difficulty (Liu et al., 2024; Bai et al., 2023), 1arXiv:2610.23583v1 [cs.CL] 16 Oct 2026 Missing constraint Stale memory Model mismatch Overuse 
+
+# MARS  
+
+> QTM: Infer shared state
+> Latest update | Rule
+> Task memory
+> Date Rule
+> Router
+> Finalize the launch brief.
+> v1
+> Launch:
+> May 12
+
+v2        
+
+> Moved to
+> May 19
+> Exactly
+> 3 paragraphs
+> Date Rule Date Rule Date Rule Date Rule
+> v2
+> May 19
+
+# ? v1            
+
+> May 12
+> v2
+> May 19
+> Exactly 3 paras.
+> v2
+> May 19
+> v2
+> May 19
+> Exactly
+> 3 paras.
+> BBACABC
+> Strong model
+> Launch: May 19 Launch: May 12 Launch: May 19 Launch: May 19
+> Launch: May 19
+> COST
+> HIGH
+> COST
+> LOWER
+> 4 paras. 3 paras. 4 paras. 3 paras.
+> 3 paras.
+> Format violation Outdated memory Format violation High cost
+> Exactly 3 paras. Exactly 3 paras.
+
+Figure 1: Illustrative motivation for memory-aware routing in a multi-turn session. MARS uses a shared QTM-derived session state to coordinate task-relevant memory construction and online model routing. The surrounding panels illustrate missing constraints, stale memory, model mismatch, and costly overuse. A–C denote candidate models; outputs are schematic and costs qualitative, with “lower” relative to the overuse configuration. and always invoking a stronger model can incur unnecessary cost. The appropriate model depends on the selected memory view rather than the raw query alone. The key challenge is therefore to coordinate what history becomes input and which model can use that context reliably and cost-effectively. Motivated by this coupling, we study session-level adaptive memory routing : coordinating memory exposure and model selection throughout a session under a quality–memory–cost trade-off. We formulate this as a sequential decision problem: the system estimates session state, constructs a candidate memory view, selects a model, packs the view for that model, generates a response, and updates its routing preference from turn-level feedback. Because the memory view changes the evidence, distractors, context length, and reasoning burden faced by the selected model, the system needs a shared session-state interface for both memory construction and model routing. We introduce MARS , a memory-aware routing framework for session-level LLM assistants. MARS uses a Query and Topic Manager (QTM) to infer structured session state from the query, active thread, recent turns, and memory pool. The memory policy uses this state to build a task-relevant candidate memory view. The online router uses the same state and pre-packing view statistics to select a model; the selected model’s budget then determines the final context packing. After generation, turn-level feedback updates the router, enabling lightweight adaptation without retraining the underlying LLMs. The QTM prompt, schema, guardrails, and state-to-memory mapping are fixed; the memory view varies by turn, while the router learns online. MARS achieves coordination through a shared structured session-state interface. We evaluate MARS on two representative multi-turn benchmarks, R EAL MEM (Bian et al., 2026) and M UL -
+
+TI CHALLENGE (Sirdeshmukh et al., 2025), using 16 system configurations on each. The experiments test reliability across bounded session interference and long-history memory-driven interaction. On R EAL MEM ,MARS retains 98.2% of full-context GPT-4o’s persona-macro QA with generation-controller API cost equal to 14.5% of GPT-4o’s generation cost while obtaining the strongest measured memory-recall and retrieval 2scores. On full M ULTI CHALLENGE , full-context Qwen2.5 72B is strongest (67/245), followed by GPT-4o (64/245), while MARS reaches 58/245. On the two axes most aligned with state recovery and version editing, MARS reaches 44/137 versus 45/137 for Qwen2.5 72B at lower recorded cost. Together, these results support our central claim: coordinating memory exposure and model choice through shared session state provides a useful quality–memory–cost operating point in long-history, memory-dependent interaction. Our contributions are: • We formulate session-level adaptive memory routing as a coordinated sequential decision problem over memory exposure and model selection under a quality–memory–cost trade-off. • We introduce MARS, which uses QTM-derived state as a shared control interface for fixed-policy memory construction, online model routing, and feedback updates. • We provide a cross-regime evaluation on two representative multi-turn benchmarks, showing that MARS achieves a strong quality–memory–cost trade-off in long-history interaction. 
+
+# 2 Related Work 
+
+LLM routing and online model selection. Model routing reduces inference cost by selecting among candidate LLMs instead of using a single expensive model for every request. Prior work studies cascades, benchmark-trained routers, quality-aware routing, preference-trained routers, and dynamic model selection for quality–cost trade-offs (Chen et al., 2023; Shnitzer et al., 2023; Ding et al., 2024; Hu et al., 2024; Ong et al., 2024; Nguyen et al., 2024; Wang et al., 2025). Recent work builds on contextual-bandit foundations (Li et al., 2010; Chu et al., 2011; Abbasi-Yadkori et al., 2011) and frames multi-LLM choice as a sequential decision problem with feedback, preferences, or budget constraints (Poon et al., 2025; Panda et al., 2025; Wei et al., 2025). These methods primarily route from the current query, prompt, or learned query–model affinity. MARS differs in the decision interface: the router operates over structured session state, and this same state also controls memory construction. 
+
+Long-term memory, adaptive retrieval, and session evaluation. Long-term memory systems help agents store, update, and retrieve information across interactions, from retrieval-augmented generation (Lewis et al., 2020) and generative agents (Park et al., 2023) to memory-management systems such as MemGPT, Mem0, and A-MEM (Packer et al., 2023; Chhikara et al., 2025; Xu et al., 2025). Long-context studies show that simply increasing context length does not guarantee reliable evidence use: agents still struggle with very long conversational history (Maharana et al., 2024), and models can fail depending on where evidence appears in the context (Liu et al., 2024; Bai et al., 2023). Closest to adaptive retrieval, MBA-RAG uses a multi-armed bandit to select retrieval strategies based on question complexity and retrieval cost (Tang et al., 2024); however, it does not jointly route the generator model or reason over evolving session state. Benchmarks such as R EAL MEM and M ULTI CHALLENGE evaluate complementary aspects of memory-driven and path-dependent multi-turn interaction (Bian et al., 2026; Sirdeshmukh et al., 2025). We use them to ask a different question: whether memory exposure and model routing remain reliable when the operating regime shifts from bounded session interference to longer histories, stronger memory pressure, and more difficult retrieval. 
+
+# 3 Method: Session-Level Adaptive Memory Routing 
+
+We study session-level adaptive memory routing : coordinating what memory to expose and which model to invoke during long-term assistant interaction. At turn t, the system observes the current query qt, previous interaction history H<t, and a persistent memory store Bt−1 containing active-task records, recent-turn summaries, and longer-term memories from earlier sessions. Let A be the candidate model pool. Before generating a response, the system builds a candidate memory view ˜ ct, chooses a model at ∈ A , and packs the final context ct(at) for that model. 3This formulation makes explicit how simpler systems restrict the decision space. A fixed configuration uses both a fixed memory policy ˜ ct = π0mem (qt, H<t, Bt−1) and a fixed generator a0. A routing-only system chooses at under a memory policy that does not share the router’s session-state interface, while a memory-only system adapts ˜ ct under a fixed generator. These abstractions are incomplete for session-level interaction because memory construction and at interact: the constructed context changes the input difficulty and evidence structure, while the selected model determines how reliably that context is interpreted. 
+
+## 3.1 Session-State Interface 
+
+MARS introduces an explicit state estimation step. A Query and Topic Manager (QTM) maps the current turn into a structured session state: 
+
+zt = fQTM (qt, H<t, Bt−1). (1) Rather than producing a free-form summary, QTM emits a constrained control state designed around the two downstream decisions: constructing the candidate memory view ˜ ct and selecting the model at.We organize zt into three functional groups. First, session-continuity fields identify whether the turn continues the active thread, shifts topic, or enters a revision, verification, or synthesis phase. Second, memory-control fields indicate whether prior state is needed, which memory scope should be considered, whether recent history should be preferred, and how much evidence should be exposed. Third, routing-difficulty fields describe the expected burden placed on the generator, such as memory dependence, ambiguity, and interaction phase; the router later combines these state signals with pre-packing load statistics from the candidate memory view. These fields are control signals rather than topic labels: the memory policy uses them to determine what parts of Bt−1 enter ˜ ct, while the router uses them, together with the candidate-view statistics, to estimate which model capacity is appropriate. The full QTM schema and allowed values are provided in Appendix B.1, and the QTM prompt template is provided in Appendix B.2. The corresponding memory-view and router-feature mappings are detailed in Appendices B.3 and B.4. The key design is to use zt as the shared interface between memory construction and model routing, rather than treating retrieval as a preprocessing step and routing as a separate decision over the raw query. The QTM prompt, schema, guardrails, and mapping ψmem are fixed before evaluation, while the routing policy updates from online feedback. The two decisions are coordinated through a shared structured session-state interface. 
+
+## 3.2 Coupled Memory Construction and Model Routing 
+
+Given the session state, MARS first derives memory-view controls: 
+
+mt = ψmem (zt), (2) where mt summarizes the QTM-induced memory lens, retrieval scope, exposure budget, and recency preference. The memory policy first constructs a candidate memory view, before model-specific packing: ˜ct = πmem (mt, qt, H<t, Bt−1). (3) In our implementation, the candidate view is assembled from three ordered memory blocks: ˜ct = Select mt
+
+
+
+sactive  
+
+> t
+
+, hrecent  
+
+> t
+
+, rhist 
+
+> t
+
+
+
+, (4) where sactive  
+
+> t
+
+stores the active thread or artifact state, hrecent  
+
+> t
+
+contains recent turns, and rhist  
+
+> t
+
+contains selected historical evidence. The operator Select mt denotes candidate block selection and ordering under the controls in mt, before model-specific prompt-budget packing. For example, QTM-derived memory need and lens fields decide whether memory is included in the candidate view, retrieval scope selects local active-thread evidence or broader historical memory, top-k hints set the retrieval budget, recency preference biases ranking, and action/phase fields preserve active state for continuation, revision, or verification turns. Thus, MARS separates access to memory from exposure of memory: a system may store a large history, but the 4generator receives the selected evidence after packing for its input budget. Appendix B.3 gives the concrete memory-view policy and prompt assembly. The router uses the candidate view to select a generator; final packing follows that selection: 
+
+xt = ϕ(zt, ˜ ct, qt), (5) 
+
+at = πt(xt), at ∈ A , (6) 
+
+ct(at) = Pack at ( ˜ct, qt), (7) 
+
+yt = gat (qt, ct(at)) . (8) Here xt is the routing feature vector, πt is the online routing policy, and Pack at clips and assembles the context under the selected model’s input budget. The router features describe the pre-packing candidate view, including estimated memory-token load, similarity statistics, and QTM fields; they do not describe the final window-clipped prompt. If generation falls back to another model, the candidate view is repacked for that model. Appendix B.3 details budget estimation and prompt assembly. The router does not memorize raw topic identifiers; instead, it learns state-level patterns such as when memory-heavy revision, temporal recall, or final synthesis requires a stronger operating point. Appendix B.4 gives the full feature mapping. We instantiate πt with a LinUCB-style contextual bandit (Abbasi-Yadkori et al., 2011). For each model, 
+
+Aa = γI, ba = 0, and ˆ θa = A−1 
+
+> a
+
+ba initially; selection is 
+
+at = arg max 
+
+> a∈A
+
+
+
+ˆθ⊤ 
+
+> a
+
+xt + α
+
+q
+
+x⊤ 
+
+> t
+
+A−1 
+
+> a
+
+xt
+
+
+
+, (9) where Aa tracks uncertainty, γ > 0 is the ridge parameter, and α controls exploration. LinUCB is a design choice rather than the central contribution. The central contribution is the decision interface: the router learns over the same structured state that controls memory exposure. 
+
+## 3.3 Turn-Level Feedback 
+
+After the selected model produces yt, MARS estimates a local feedback signal for the routing decision. Following cost-aware LLM routing and online multi-LLM selection (Chen et al., 2023; Poon et al., 2025), we convert turn-level quality into a cost-aware scalar utility: ˆrt = Jturn (yt, qt, zt, ct(at)) − λCgen  
+
+> t
+
+(at, ct(at)) , (10) where Cgen  
+
+> t
+
+(at, ct(at)) denotes the selected generator’s inference cost, including model-specific pricing and token usage of the final model-specific prompt, and λ controls the quality–cost trade-off. The quality term Jturn is computed by a rubric-based turn judge rather than by a single unstructured score. The rubric checks whether the response answers the current query, uses the exposed memory consistently, and avoids hard failures such as topic drift or missing required state. These diagnostics are mapped to a bounded quality score by a fixed weighting and penalty rule, before subtracting generation cost; the rubric, prompt structure, and reward form are provided in Appendix B.5. Cost affects model choice through the observed reward rather than through direct price subtraction at decision time. Expensive model calls are penalized after generation, so future routing decisions gradually favor models that provide better quality–cost utility under similar session states. Only the selected arm is updated: 
+
+Aat ← Aat + xt x⊤ 
+
+> t
+
+, bat ← bat + ˆrt xt, (11) then ˆ θat = A−1 
+
+> at
+
+bat is recomputed. The reward is computed only from information available at turn t and does not use future turns, final labels, or benchmark-level pass decisions. 
+
+## 3.4 Turn-Level Workflow 
+
+Algorithm 1 summarizes the turn-level workflow of MARS. We write It = ( qt, H<t, Bt−1) for the turn input. At each turn, QTM first estimates a structured session state. The memory policy converts this state 5Algorithm 1 MARS turn-level workflow 
+
+Require: turn input It = ( qt, H<t, Bt−1), model pool A, router policy πt 
+
+> 1:
+
+STATE : zt ← fQTM (It) 
+
+> 2:
+
+MEMORY CONTROLS : mt ← ψmem (zt) 
+
+> 3:
+
+CANDIDATE VIEW : ˜ ct ← πmem (mt, It) 
+
+> 4:
+
+FEATURES : xt ← ϕ(zt, ˜ ct, qt) 
+
+> 5:
+
+ROUTE : at ← πt(xt) 
+
+> 6:
+
+PACK : ct(at) ← Pack at ( ˜ct, qt) 
+
+> 7:
+
+GENERATE : yt ← gat (qt, ct(at))  
+
+> 8:
+
+UTILITY : ˆ ut ← Jturn (yt, qt, zt, ct(at))  
+
+> 9:
+
+REWARD : ˆ rt ← ˆut − λCgen  
+
+> t
+
+(at, ct(at))  
+
+> 10:
+
+ROUTER UPDATE : πt+1 ← Update (πt, xt, at, ˆ rt) 
+
+> 11:
+
+MEMORY UPDATE :
+
+(H≤t, Bt) ← MemoryUpdate (It, yt, zt)
+
+into memory-view controls and constructs the candidate view. The router selects a generator using the shared state and pre-packing candidate statistics; the view is then packed for that model before generation. Turn-level feedback updates the routing policy. The underlying LLMs are not retrained. 
+
+# 4 Experimental Setup 
+
+Our controlled experiments evaluate MARS across two complementary regimes. R EAL MEM tests long-history memory-driven interaction; M ULTI CHALLENGE tests bounded structured sessions with interference and path-dependent evaluation. The same 16-system matrix is used on both, enabling consistent comparison across the two regimes. 
+
+## 4.1 Benchmarks 
+
+REAL MEM . REAL MEM is an external benchmark for real-world memory-driven interaction (Bian et al., 2026). We evaluate its 10-persona evaluation slice: 10 personas and 1,415 queries. We report normalized QA, Mem Recall, Recall@20 (R@20), normalized discounted cumulative gain at 20 (NDCG@20), and API cost. Main quality and memory metrics are macro-averaged over personas; query-weighted aggregates and scored coverage are reported in the appendix. 
+
+MULTI CHALLENGE . MULTI CHALLENGE evaluates state maintenance in bounded but structured multi-turn conversations (Sirdeshmukh et al., 2025). Our converted split contains 245 scenarios and 1,480 turns. Each scenario contains intermediate turns followed by a verification turn that uses the official binary rubric question as the final user query. The expected answer is YES when the supplied pass criterion is satisfied, testing whether the system preserved the required topic state and constraints (Appendix C.2). The four axes are I NFERENCE MEMORY (102 scenarios), I NSTRUCTION RETENTION (62), S ELF COHERENCE 
+
+(46), and R ELIABLE VERSION EDITING (35). We report the full aggregate first and analyze the first and fourth axes (137 scenarios) separately because they directly test state recovery and local revision. Chunk size 3 bundles trajectories into context blocks with distractor sessions (Appendix C.2). For the MARS run, we use 
+
+λcost = 0.002, matching the main R EAL MEM routing objective. 
+
+## 4.2 Baselines 
+
+For both benchmarks, we evaluate 16 systems formed from memory settings and model/router choices. Full-context baselines use one fixed generator for all turns: GPT-4o (OpenAI, 2024b), Qwen2.5 72B (Yang et al., 2024), Mixtral 8 ×7B Instruct (Jiang et al., 2024), or Llama3B (Meta, 2024). Memory baselines pair MEM 0 (Chhikara et al., 2025) or A-MEM (Xu et al., 2025) with each fixed generator. Routing baselines 6include a M ETA LLM-style router (Nguyen et al., 2024) and hybrids that combine M EM 0 or A-MEM with META LLM-style routing. MARS is the full system, using QTM-guided memory construction and online model routing. We use M EM 0 and A-MEM as representative plug-in memory substrates because they can be consistently crossed with fixed generators and routers across both benchmarks. QTM uses Qwen2.5-7B-Instruct (Yang et al., 2024) with a fixed prompt, schema, guardrails, and state-to-memory mapping. A GPT-4o-mini (OpenAI, 2024a) turn judge supplies local reward after generation; it never sees future turns, final labels, gold final answers, or benchmark pass decisions (Appendix B.5). 
+
+## 4.3 Ablation Protocol 
+
+We run diagnostic ablations on a fixed three-persona R EAL MEM evaluation slice containing 473 turns. All variants use the same candidate model pool, deterministic generation, and a matched top-10 historical retrieval budget. The slice uses λcost = 0.5, compared with λcost = 0.002 in the main R EAL MEM run; its retrieval budget also differs from the main policy’s top-k hints. Comparisons are therefore made within this diagnostic configuration. The ablations examine QTM-guided context construction versus raw-query semantic retrieval, QTM state/header exposure in the generator prompt, QTM-derived routing versus query-embedding routing with semantic or recency-based memory, and online adaptation via a no-update diagnostic. The no-update variant freezes the router at initialization, so we treat it as a stress test of online adaptation rather than as a tuned static-router baseline. Ablation metrics follow the official R EAL MEM 
+
+evaluation pipeline, with QA normalized to the same scale as the main results. Full settings and diagnostics are provided in Appendix E. 
+
+## 4.4 Evaluation, Cost, and Reporting 
+
+For R EAL MEM , we use the official retrieval and generation evaluation pipeline, with GPT-4o as the final judge when judging is required. This final evaluator is separate from the GPT-4o-mini turn-level judge used for online routing updates. For M ULTI CHALLENGE , we use a GPT-4o path-aware final judge following the benchmark style: it checks trajectory continuity and final-answer correctness. A scenario passes only when both checks are accepted and the model’s parseable final YES/NO answer matches the expected criterion (Appendix C.4). For R EAL MEM , main tables report generator and QTM/controller API cost, excluding online feedback; Results separately reports reconstructed feedback-inclusive totals. For M ULTI CHALLENGE , the archived runs did not itemize QTM/controller cost separately, so tables retain the original run-level recorded-cost convention. Final benchmark evaluators and local memory compute and storage are excluded from these API cost views. The online reward uses only selected-generator cost (Appendix B.6). We bootstrap R EAL MEM 
+
+by persona and M ULTI CHALLENGE by scenario, and separately test eight chunk orders on 30 fixed M ULTI -CHALLENGE scenarios; Appendix B.7 gives these diagnostics. 
+
+# 5 Results 
+
+We evaluate the quality–memory–cost trade-off across long-history interaction on R EAL MEM and bounded session interference on M ULTI CHALLENGE .
+
+## 5.1 REAL MEM : QA–Cost Trade-off and Memory Metrics 
+
+Table 1 and Figure 2 report persona-macro quality and generation-controller API cost over 10 personas. Appendix D.1 gives all 16 systems. Full-context GPT-4o obtains 0.7540 QA at $184.40. MARS reaches 0.7406 (98.2%) at $26.65 (14.5%) under the generation-controller view and has the best memory-recall and retrieval scores. A-MEM+MetaLLM is cheaper ($20.29) but has lower QA (0.7044) and memory metrics, giving a different operating point. Adding 7Memory Setting Model / Router QA ↑ Mem Rec. ↑ R@20 ↑ NDCG@20 ↑ Gen.-Ctrl. ($) ↓                                         
+
+> MARS 0.7406 0.6794 0.8015 0.6168 26.6480 Full context GPT-4o 0.7540 0.1640 0.5188 0.3216 184.3967 Full context META LLM 0.7331 0.1603 0.5188 0.3216 180.0189 MEM 0GPT-4o 0.6909 0.5997 0.6305 0.5388 41.3834 MEM 0META LLM 0.6652 0.6048 0.6305 0.5388 24.3499 A-MEM GPT-4o 0.7172 0.6479 0.6817 0.5846 43.1311 A-MEM META LLM 0.7044 0.6471 0.6817 0.5846 20.2875
+
+Table 1: R EAL MEM key systems (10 personas; 1,415-query pool). Metrics are persona-macro averages. Cost records generation and controller API calls; online feedback and final evaluation are excluded. Overflow-dominated full-context rows remain in Appendix D.1. 0 25 50 75 100 125 150 175 200 Generation-controller API cost (USD) 0.62 0.64 0.66 0.68 0.70 0.72 0.74 0.76 QA (persona macro) 
+
+Full + GPT-4o Full + MetaLLM Mem0 + GPT-4o Mem0 + MetaLLM A-MEM + GPT-4o A-MEM + MetaLLM 
+
+MARS 
+
+Baselines MARS 
+
+Figure 2: R EAL MEM persona-macro QA versus generation-controller API cost for key systems. Online feedback and final evaluation are excluded. the estimated GPT-4o-mini feedback cost gives MARS a feedback-inclusive API total of approximately $32.53 (17.6% of full-context GPT-4o), compared with approximately $23.49 for A-MEM+MetaLLM under the same accounting. These estimates use logged input-token counts and estimated output usage; final benchmark evaluation and local compute are excluded (Appendix B.6). The persona-bootstrap 95% interval for QA is [0.7183, 0.7641]; other intervals are in Appendix B.7. Archived provider errors show context-limit failures on 1,344/1,415 queries for both Qwen2.5-72B and Mixtral, and 1,247/1,415 for Llama3B; affected rows receive zero score and zero recorded cost. Their low QA therefore reflects the evaluated full-history configuration’s context limits as well as response quality. 85.2 MULTI CHALLENGE : Full Aggregate and Mechanism-Focused Subset 
+
+Table 2 reports the full aggregate first and the mechanism-focused subset second; complete matrices are in Appendices D.2–D.3.                   
+
+> System Full pass ↑Subset pass ↑Recorded subset cost ($) ↓
+> MARS 58/245 44/137 1.5670 Full Qwen2.5 72B 67/245 45/137 1.8528 Full GPT-4o 64/245 36/137 9.1044 MEM 0+Mixtral 57/245 39/137 0.4620
+
+Table 2: M ULTI CHALLENGE full aggregate and mechanism-focused subset. Costs follow the original run-level accounting convention; QTM/controller cost was not separately itemized in the archived logs. On full M ULTI CHALLENGE , Qwen2.5 72B (67/245) and GPT-4o (64/245) outperform MARS (58/245). Qwen’s full-set recorded cost is also slightly lower ($3.1665 versus $3.2504). On the focused subset, MARS reaches 44/137 versus 45/137 for Qwen at lower recorded cost. Per-axis, MARS remains close on I NFERENCE 
+
+MEMORY (33/102 versus 36/102) and is higher on R ELIABLE VERSION EDITING (11/35 versus 9/35), while larger gaps remain on the other two axes (Appendix D.4). This supports using the subset as a mechanism-focused view of state recovery and local revision rather than a replacement for the full aggregate. MARS’s full-set pass rate is 0.2367 with a scenario-bootstrap 95% interval of [0.1837, 0.2898]. Across eight randomized chunk orders of the same fixed 30-scenario subset, with a freshly initialized bandit for each replay, the diagnostic pass rate averages 18.3% with a sample standard deviation of 3.6 percentage points (4/30–7/30); Appendix B.7 gives the construction and per-order results. 
+
+## 5.3 REAL MEM Diagnostic Ablations 
+
+We run diagnostic ablations on a fixed three-persona R EAL MEM evaluation slice (473 turns), with matched top-10 retrieval and the same model pool.   
+
+> Variant QA
+
+↑ Mem Rec. ↑ NDCG@10 ↑ Gen.-Ctrl. ($) ↓                            
+
+> Full MARS 0.7444 0.6804 0.5974 5.643 Embed. semantic 0.7231 0.6429 0.5162 5.911 No state/header 0.7099 0.6397 0.5162 6.338 Recent-only 0.6279 0.1070 0.2299 5.638 No-QTM semantic 0.7387 0.6287 0.5162 4.570
+> No-QTM recent 0.6244 0.1118 0.2299 4.918 No update †0.4221 0.6882 0.5983 0.439
+
+Table 3: R EAL MEM diagnostic ablations (473 turns; λcost = 0.5). Bold marks the best online variant. †No-update freezes the untuned cold-start router. Full metrics: Appendix E. Full MARS has the highest QA among online variants. Under the matched top-10 budget, embedding-only semantic retrieval lowers QA from 0.7444 to 0.7231 and Mem Recall from 0.6804 to 0.6429, while recent-only memory reduces Mem Recall to 0.1070. Conversely, the no-update row retains strong retrieval metrics but drops QA to 0.4221. These diagnostics support complementary roles for state-guided memory construction and online adaptation. 
+
+## 5.4 QTM Prompt and Controller Sensitivity 
+
+We probe local sensitivity of the QTM interface under two types of controlled variation on the same 150 frozen session snapshots from seven R EAL MEM evaluation personas. With Qwen2.5-7B-Instruct fixed, we 9compare the original prompt with a semantics-preserving paraphrase and an instruction-reordered variant. We then keep the original prompt and schema fixed and replace the QTM controller with Mistral-7B-Instruct-v0.3 (Mistral AI, 2024). Across all comparisons, the session history, memory pool, retrieval policy, and deterministic decoding are held fixed. We measure agreement of the effective MATCH /NEW_TOPIC decision and Jaccard overlap of the pre-packing retrieved memory-source IDs.           
+
+> Controlled variation Action agr. ↑Retrieval Jaccard ↑
+> Prompt paraphrase 90.0% 0.920 Instruction reordering 96.0% 0.973 Mistral-7B controller 82.7% 0.875
+
+Table 4: QTM interface-sensitivity probe over 150 fixed session snapshots. Prompt variants use the default Qwen2.5-7B-Instruct controller; the controller-swap row uses the original prompt/schema with Mistral-7B-Instruct-v0.3. Each row is compared with the Qwen2.5-7B-Instruct original-prompt reference. The prompt perturbations preserve most effective thread-boundary decisions and retrieved memory sources; on the 60 inputs with active thread history—where a NEW_TOPIC decision can trigger archival—agreement rises to 95.0%/98.3% and retrieval Jaccard to 0.984/1.000 for paraphrasing/reordering, respectively. Under controller substitution, the effective action agrees on 124/150 inputs (82.7%) with retrieval Jaccard 0.875; on the same 60 active-history inputs, agreement is 53/60 (88.3%) and retrieval Jaccard is 0.960. Together, these probes provide complementary evidence that the key thread-boundary and retrieval decisions remain largely preserved under the tested prompt changes and one same-scale controller substitution. Appendices E.5–E.6 provide detailed diagnostics. 
+
+## 5.5 Cross-Regime Analysis 
+
+Static Qwen2.5 72B leads on full M ULTI CHALLENGE , while full-context Qwen2.5-72B and Mixtral exceed their context limits on 1,344/1,415 R EAL MEM queries. This contrast suggests a greater role for selective memory exposure under long-history pressure; strong static models remain effective in bounded contexts. 
+
+# 6 Conclusion 
+
+We introduced MARS, which coordinates a fixed state-conditioned memory policy and an online model router through a shared session-state interface. It achieves a strong quality–memory–cost trade-off on REAL MEM and remains competitive on the mechanism-focused M ULTI CHALLENGE subset, while trailing the two strongest static systems on the full aggregate. 10 References 
+
+Yasin Abbasi-Yadkori, Dávid Pál, and Csaba Szepesvári. 2011. Improved algorithms for linear stochastic bandits. In Advances in Neural Information Processing Systems 24 .Yushi Bai, Xin Lv, Jiajie Zhang, Hongchang Lyu, Jiankai Tang, Zhidian Huang, Zhengxiao Du, Xiao Liu, Aohan Zeng, Lei Hou, Yuxiao Dong, Jie Tang, and Juanzi Li. 2023. LongBench: A bilingual, multitask benchmark for long context understanding. arXiv preprint arXiv:2308.14508 .Haonan Bian, Zhiyuan Yao, Sen Hu, Zishan Xu, Shaolei Zhang, Yifu Guo, Ziliang Yang, Xueran Han, Huacan Wang, and Ronghao Chen. 2026. Realmem: Benchmarking llms in real-world memory-driven interaction. 
+
+arXiv preprint arXiv:2601.06966 .Lingjiao Chen, Matei Zaharia, and James Zou. 2023. Frugalgpt: How to use large language models while reducing cost and improving performance. arXiv preprint arXiv:2305.05176 .Prateek Chhikara, Dev Khant, Saket Aryan, Taranjeet Singh, and Deshraj Yadav. 2025. Mem0: Building production-ready ai agents with scalable long-term memory. arXiv preprint arXiv:2504.19413 .Wei Chu, Lihong Li, Lev Reyzin, and Robert E. Schapire. 2011. Contextual bandits with linear payoff functions. In Proceedings of the Fourteenth International Conference on Artificial Intelligence and Statistics ,volume 15 of Proceedings of Machine Learning Research , pages 208–214. PMLR. Dujian Ding, Ankur Mallick, Chi Wang, Robert Sim, Subhabrata Mukherjee, Victor Ruhle, Laks V. S. Lak-shmanan, and Ahmed Hassan Awadallah. 2024. Hybrid LLM: Cost-efficient and quality-aware query routing. arXiv preprint arXiv:2404.14618 .Qitian Jason Hu, Jacob Bieker, Xiuyu Li, Nan Jiang, Benjamin Keigwin, Gaurav Ranganath, Kurt Keutzer, and Shriyash Kaustubh Upadhyay. 2024. Routerbench: A benchmark for multi-LLM routing system. arXiv preprint arXiv:2403.12031 .Albert Q. Jiang, Alexandre Sablayrolles, Antoine Roux, Arthur Mensch, Blanche Savary, Chris Bamford, Devendra Singh Chaplot, Diego de las Casas, Emma Bou Hanna, Florian Bressand, Gianna Lengyel, Guil-laume Bour, Guillaume Lample, Lélio Renard Lavaud, Lucile Saulnier, Marie-Anne Lachaux, Pierre Stock, Sandeep Subramanian, Sophia Yang, and 7 others. 2024. Mixtral of experts. arXiv preprint arXiv:2401.04088 .Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio Petroni, Vladimir Karpukhin, Naman Goyal, Heinrich Küttler, Mike Lewis, Wen-tau Yih, Tim Rocktäschel, Sebastian Riedel, and Douwe Kiela. 2020. Retrieval-augmented generation for knowledge-intensive NLP tasks. In Advances in Neural Information Processing Systems , volume 33, pages 9459–9474. Lihong Li, Wei Chu, John Langford, and Robert E. Schapire. 2010. A contextual-bandit approach to personal-ized news article recommendation. In Proceedings of the 19th International Conference on World Wide Web ,WWW ’10, pages 661–670. Association for Computing Machinery. Nelson F. Liu, Kevin Lin, John Hewitt, Ashwin Paranjape, Michele Bevilacqua, Fabio Petroni, and Percy Liang. 2024. Lost in the middle: How language models use long contexts. Transactions of the Association for Computational Linguistics , 12:157–173. Adyasha Maharana, Dong-Ho Lee, Sergey Tulyakov, Mohit Bansal, Francesco Barbieri, and Yuwei Fang. 2024. Evaluating very long-term conversational memory of LLM agents. In Proceedings of the 62nd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 13851–13870, Bangkok, Thailand. Association for Computational Linguistics. Meta. 2024. Llama 3.2 model card. Accessed October 9, 2026. Mistral AI. 2024. Model card for Mistral-7B-Instruct-v0.3. Accessed October 9, 2026. 11 Quang H. Nguyen, Duy C. Hoang, Juliette Decugis, Saurav Manchanda, Nitesh V. Chawla, and Khoa D. Doan. 2024. Metallm: A high-performant and cost-efficient dynamic framework for wrapping llms. arXiv preprint arXiv:2407.10834 .Isaac Ong, Amjad Almahairi, Vincent Wu, Wei-Lin Chiang, Tianhao Wu, Joseph E. Gonzalez, M. Waleed Kadous, and Ion Stoica. 2024. Routellm: Learning to route llms with preference data. arXiv preprint arXiv:2406.18665 .OpenAI. 2024a. GPT-4o mini: advancing cost-efficient intelligence. Accessed October 9, 2026. OpenAI. 2024b. Hello GPT-4o. Accessed October 9, 2026. Charles Packer, Sarah Wooders, Kevin Lin, Vivian Fang, Shishir G. Patil, Ion Stoica, and Joseph E. Gonzalez. 2023. MemGPT: Towards LLMs as operating systems. arXiv preprint arXiv:2310.08560 .Pranoy Panda, Raghav Magazine, Chaitanya Devaguptapu, Sho Takemori, and Vishal Sharma. 2025. Adap-tive llm routing under budget constraints. arXiv preprint arXiv:2508.21141 .Joon Sung Park, Joseph C. O’Brien, Carrie J. Cai, Meredith Ringel Morris, Percy Liang, and Michael S. Bernstein. 2023. Generative agents: Interactive simulacra of human behavior. In Proceedings of the 36th Annual ACM Symposium on User Interface Software and Technology , UIST ’23. Association for Computing Machinery. Manhin Poon, XiangXiang Dai, Xutong Liu, Fang Kong, John C. S. Lui, and Jinhang Zuo. 2025. Online multi-llm selection via contextual bandits under unstructured context evolution. arXiv preprint arXiv:2506.17670 .Tal Shnitzer, Anthony Ou, Mírian Silva, Kate Soule, Yuekai Sun, Justin Solomon, Neil Thompson, and Mikhail Yurochkin. 2023. Large language model routing with benchmark datasets. arXiv preprint arXiv:2309.15789 .Ved Sirdeshmukh, Kaustubh Deshpande, Johannes Mols, Lifeng Jin, Ed-Yeremai Cardona, Dean Lee, Jeremy Kritz, Willow Primack, Summer Yue, and Chen Xing. 2025. Multichallenge: A realistic multi-turn conversation evaluation benchmark challenging to frontier LLMs. arXiv preprint arXiv:2501.17399 .Xiaqiang Tang, Qiang Gao, Jian Li, Nan Du, Qi Li, and Sihong Xie. 2024. MBA-RAG: a bandit approach for adaptive retrieval-augmented generation through question complexity. arXiv preprint arXiv:2412.01572 .Xinyuan Wang, Yanchi Liu, Wei Cheng, Xujiang Zhao, Zhengzhang Chen, Wenchao Yu, Yanjie Fu, and Haifeng Chen. 2025. Mixllm: Dynamic routing in mixed large language models. arXiv preprint arXiv:2502.18482 .Wang Wei, Tiankai Yang, Hongjie Chen, Yue Zhao, Franck Dernoncourt, Ryan A. Rossi, and Hoda El-dardiry. 2025. Learning to route LLMs from bandit feedback: One policy, many trade-offs. Preprint ,arXiv:2510.07429. Shitao Xiao, Zheng Liu, Peitian Zhang, Niklas Muennighoff, Defu Lian, and Jian-Yun Nie. 2024. C-Pack: Packed resources for general Chinese embeddings. In Proceedings of the 47th International ACM SIGIR Conference on Research and Development in Information Retrieval , pages 641–649. Association for Computing Machinery. Wujiang Xu, Zujie Liang, Kai Mei, Hang Gao, Juntao Tan, and Yongfeng Zhang. 2025. A-mem: Agentic memory for llm agents. arXiv preprint arXiv:2502.12110 .An Yang, Baosong Yang, Beichen Zhang, Binyuan Hui, Bo Zheng, Bowen Yu, Chengyuan Li, Dayiheng Liu, Fei Huang, Haoran Wei, Huan Lin, Jian Yang, Jianhong Tu, Jianwei Zhang, Jianxin Yang, Jiaxi Yang, Jingren Zhou, Junyang Lin, Kai Dang, and 22 others. 2024. Qwen2.5 technical report. arXiv preprint arXiv:2412.15115 .12 A Appendix Overview 
+
+This appendix provides implementation details, benchmark construction, full result tables, and diagnostic analyses for MARS. Appendix B specifies the QTM state interface, memory-view construction, router fea-tures, turn-level reward, and cost accounting. Appendix C describes the R EAL MEM and M ULTI CHALLENGE 
+
+protocols, including metric normalization and the chunked-context construction used for M ULTI CHALLENGE .Appendix D reports full system matrices. Appendix E reports the three-persona R EAL MEM component abla-tions and cost-weight sensitivity, together with QTM prompt- and controller-sensitivity probes. Appendix F provides anonymized qualitative examples and routing-behavior diagnostics from fixed evaluation outputs. Appendix G discusses deployment feedback and reproducibility information. 
+
+# B Implementation Details 
+
+The main text formulates MARS as coordinating memory exposure and model routing through shared state. Its QTM prompt, schema, guardrails, and state-to-memory mapping are fixed; only the router updates online. 
+
+Optimization scope. In the evaluated implementation, the QTM schema, guardrails, and state-to-memory policy are fixed before evaluation, while the LinUCB router adapts online. Coordination is realized through the shared session state and the turn-dependent memory view induced by that state. 
+
+## B.1 QTM Schema and State Representation 
+
+The Query and Topic Manager (QTM) maps the current turn into a structured session state. In our imple-mentation, QTM is instantiated with qwen/qwen-2.5-7b-instruct . We use this smaller instruction model because QTM does not generate final answers; it produces a compact control state used by both the memory policy and the online router. The schema describes task state rather than topic identity. Omitting raw topic labels directs the router toward state-level patterns, such as the model utility associated with memory-heavy revision, temporal recall, or final synthesis. Table 5 summarizes the fields used by the current implementation. 13 Field Allowed values / representation Memory Router Role in the decision interface 
+
+action MATCH , NEW_TOPIC yes yes Segments the turn as continuation of the active thread or a topic switch. 
+
+query_type STATIC , DYNAMIC , TEMPORAL ,
+
+PROACTIVE 
+
+yes yes Distinguishes self-contained, evolving, temporal, and proactive turns. 
+
+phase EXPLORE , CONSTRAIN , REVISE ,
+
+SYNTHESIZE , VERIFY 
+
+yes yes Encodes interaction phase for memory exposure and model selection. 
+
+taxonomy.* need_memory , memory_span ,ambiguity, and risk metadata yes yes Records decision-relevant memory and ambiguity state without raw topic identity. 
+
+retrieval_scope LOCAL , GLOBAL yes yes Selects active-thread evidence or broader historical retrieval. 
+
+top_k_hint 3, 5, 8 yes yes Gives the memory constructor a retrieval-budget hint. 
+
+prefer_recent 0, 1 yes yes Biases memory construction toward recent history when relevant. 
+
+lens_recommendation 0 or 3 yes yes Controls minimal or full memory exposure. 
+
+lens_confidence , lens_ reason 
+
+confidence and short reason yes optional Provides a traceable rationale for the selected memory lens. 
+
+qtm_llm_called , qtm_usage logged diagnostics no no Used for cost tracing and QTM-overhead accounting. 
+
+Table 5: QTM state schema used in the R EAL MEM implementation. The main-text abstract fields map to this concrete schema: for example, memory need is represented primarily through taxonomy.need_memory ;memory view is represented through lens_recommendation , retrieval_scope , and top_k_hint .14 QTM structured output shape used in R EAL MEM mode. Inputs: ACTIVE CONTEXT , USER INPUT , and SYSTEM RULES . The QTM emits controller state only and does not generate the final answer. 
+
+Required JSON fields: 
+
+action : MATCH or NEW_TOPIC query_type : STATIC , DYNAMIC , TEMPORAL , or PROACTIVE phase : EXPLORE , CONSTRAIN , REVISE , SYNTHESIZE , or VERIFY taxonomy : memory and risk metadata, including need_memory , memory_span , and ambi-guity 
+
+lens_recommendation : 0 or 3top_k_hint : 3, 5, or 8prefer_recent : 0 or 1retrieval_scope : LOCAL or GLOBAL lens_confidence : confidence score for the selected lens 
+
+lens_reason : concise reason for the selected lens 
+
+Anonymized example output: 
+
+> {"action": "MATCH", "query_type": "DYNAMIC", "phase": "REVISE", "taxonomy": { "need_memory": 1, "memory_span": "ACTIVE_THREAD", "ambiguity": "LOW" }, "lens_recommendation": 3, "top_k_hint": 5, "prefer_recent": 1, "retrieval_scope": "LOCAL", "lens_confidence": 0.82, "lens_reason": "Revision of the active artifact." }
+
+Implementation note: invalid fields are clamped during post-processing, and revision-like continuation turns are conservatively mapped to MATCH with memory enabled. 
+
+Figure 3: QTM structured output contract used by the R EAL MEM -mode implementation, with an anonymized example output. 15 B.2 QTM Prompt Template 
+
+The QTM prompt asks the controller to infer decision-relevant session state without generating a final answer. In R EAL MEM mode, the prompt has three input blocks: PREVIOUS ACTIVE CONTEXT , NEW USER INPUT ,and SYSTEM RULES . It requires strict JSON output matching Table 5. Controller outputs are post-processed using the fixed schema and conservative continuation rules. Invalid fields are clamped to allowed values, and parsing failures use conservative fallback state choices, including continuation with memory enabled for revision-like turns.               
+
+> QTM prompt excerpt used in R EAL MEM mode. Role instruction: You are a lightweight QTM for RealMem-style long-term multi-session interactions. Decide whether the new turn continues the active thread or starts a new topic. Classify query type and phase. Return JSON only.
+> Inputs provided to QTM:
+> •PREVIOUS ACTIVE CONTEXT : active-thread state and recent relevant context. •NEW USER INPUT : the current user query. •SYSTEM RULES : allowed values and conservative memory/split rules.
+> Required output: strict JSON with action ,query_type ,phase ,taxonomy ,lens_recommendation ,top_k_hint ,
+> prefer_recent , and retrieval_scope . Allowed values are those listed in Table 5.
+> Failure / ambiguity rule: represent uncertainty through conservative schema choices rather than inventing hidden state; when revision or finalization evidence is present, prefer continuation with memory enabled unless the turn clearly starts a new topic.
+
+Figure 4: Compact QTM prompt excerpt used by the implementation. 
+
+## B.3 Memory Construction and Prompt Assembly 
+
+Given the QTM state, MARS first derives memory-view controls mt = ψmem (zt) and then constructs a pre-packing candidate view from active-thread state, recent turns, and retrieved historical memory: ˜ct = Select mt
+
+
+
+sactive  
+
+> t
+
+, hrecent  
+
+> t
+
+, rhist 
+
+> t
+
+
+
+. (12) Here mt controls which blocks are included, how much historical evidence is retrieved, and their ordering in the candidate view. Model-specific packing is performed after routing. This implements the distinction between access and exposure: a large memory store may be available, but only the decision-relevant memory view should be placed in the generator prompt. After the bandit selects at, the candidate view ˜ ct is packed into ct(at) using that model’s context window, output reservation, and safety margin. The final generator prompt has four ordered blocks: SYSTEM RULES ,
+
+MEMORY GUIDANCE , MEMORY , and USER QUERY . The guidance contains the QTM-derived state header but omits internal controller metadata. The total input budget is 
+
+Bin (at) = Wctx (at) − Rout (at) − Msafe (at), (13) where Wctx is the model context window, Rout the reserved output budget, and Msafe a safety margin. The memory blocks are clipped to fit the input budget together with the system rules, guidance, and query. Token lengths are estimated using the release implementation’s model-specific budget rules rather than computed exactly with each model’s tokenizer. A safety fallback to another model triggers fresh packing of the candidate view under the fallback model’s budget. Both benchmark runners follow this candidate-view, routing, and model-specific packing sequence. 16 QTM condition Active state Recent turns Historical retrieval Intended behavior 
+
+taxonomy.need_ memory=0 or lens_ recommendation=0 
+
+omitted or minimal optional short window none Avoid unnecessary context expansion for self-contained turns. 
+
+action=MATCH ,
+
+retrieval_scope=LOCAL 
+
+included included none or active-thread artifacts Preserve the active thread for continuation, local edit, or verification turns. 
+
+phase=REVISE or 
+
+phase=VERIFY 
+
+included included optional local evidence Support revision and verification without drifting from the current artifact. 
+
+retrieval_ scope=GLOBAL 
+
+optional active summary short recency window ranked global candidates Recover cross-session evidence for temporal or resumed-topic queries. 
+
+prefer_recent=1 included if active recency-biased recent candidates prioritized Bias memory construction toward recent history when recency is decision-relevant. 
+
+lens_recommendation=3 
+
+or top_k_hint=8 
+
+included included expanded ranked evidence Provide a richer memory view for synthesis, finalization, or high-difficulty turns. 
+
+Table 6: Memory-view construction policy. QTM emits top-k hints in {3,5,8} for the main MARS policy. The three-persona ablation slice uses a matched top-10 historical retrieval budget across the main memory-construction variants to control exposure budget. 
+
+Generator prompt assembly used by MARS. 1. SYSTEM RULES : global assistant and task constraints. 
+
+2. MEMORY GUIDANCE : QTM-derived memory guidance, including continuation/topic-shift state, query type, phase, retrieval scope, recency preference, and lens recommendation. Internal controller scores and router uncertainty terms are not exposed. 
+
+3. MEMORY : ranked candidate memory blocks, packed and clipped after model selection using the selected model’s budget. 
+
+4. USER QUERY : the current user request. 
+
+Figure 5: Generator prompt assembly used by MARS. 
+
+## B.4 Online Router Features and Update 
+
+The online router receives a feature vector 
+
+xt = ϕ(zt, ˜ ct, qt), (14) where ϕ encodes QTM fields, memory-view indicators, retrieval-scope signals, interaction phase, turn depth, and pre-packing candidate-load statistics. Features are extracted before selecting the generator and do not use the final model-specific packed context. We do not include raw topic identity as a categorical feature. We instantiate the online router with a LinUCB-style contextual bandit: 
+
+at = arg max 
+
+> a∈A
+
+
+
+ˆθ⊤ 
+
+> a
+
+xt + α
+
+q
+
+x⊤ 
+
+> t
+
+A−1 
+
+> a
+
+xt
+
+
+
+. (15) The router is updated using the turn-level reward: 
+
+πt+1 = Update (πt, xt, at, ˆ rt). (16) LinUCB is used because it supports lightweight online updates over structured features. Other contextual bandit policies could be substituted without changing the MARS interface. 17 Feature group Examples Encoding Purpose QTM categorical state topic relation, query type, memory need, retrieval scope, memory view, interaction phase one-hot / categorical Main session-state signal for model selection. Memory-load features candidate memory blocks, retrieved-history flag, estimated candidate-token count normalized numeric Estimates the load of the pre-packing candidate view. Session-position features turn depth, recent revision flag, finalization flag numeric / binary Distinguishes early continuation from later synthesis or verification. Retrieval features retrieval scope, number of candidates, retrieval score summaries numeric / categorical Indicates whether the response depends on recovered evidence. Cost features model-specific cost enters through reward rather than direct decision-time subtraction reward-side scalar Lets the router learn quality–cost utility from observed outcomes. 
+
+Table 7: Router feature groups. The implementation uses structured state and pre-packing candidate statistics rather than raw topic identifiers. 
+
+Hyperparameter / setting Final value Candidate model pool A Main R EAL MEM runs: Llama-3.2-3B, Mixtral-8x7B, Qwen-72B, GPT-4o; three-persona ablation pool: Llama3B, Qwen2.5-72B, GPT-4o. Feature dimension 30 LinUCB exploration coefficient 
+
+α
+
+0.8 Regularization / initialization per-arm Aa = λreg I with λreg = 1.0 and ba = 0Feature normalization categorical one-hot plus normalized numeric features, including retrieval-budget, similarity, retrieval-count, and binary state flags Warm-start policy cold-start online policy for MARS; the no-update ablation freezes this cold-start policy without online updates Reward cost weight λcost = 0.002 in the main R EAL MEM full-slice router run; λcost = 0.5 in the three-persona R EAL MEM ablation 
+
+Table 8: Router hyperparameters and settings. The main R EAL MEM run and the three-persona ablation use different cost weights, candidate pools, and retrieval budgets. They are separate experimental configurations rather than a single hyperparameter sweep. All component-ablation variants use λcost = 0.5, so their comparisons remain within the diagnostic configuration. 
+
+## B.5 Turn-Level Judge and Reward 
+
+During online adaptation, MARS uses a turn-level judge to estimate local reward for the selected model response. In our experiments, this online feedback judge is implemented with GPT-4o-mini and is used only to update the routing policy; it is not used for benchmark reporting. The turn-level judge receives the current query, final packed memory context ct(at), QTM state, generated answer, and non-final current-turn diagnostics when available. It does not receive future turns, final labels, gold final answers, or benchmark-level pass decisions. This separation prevents online updates from using information that would be unavailable at decision time. 18 Reward aggregation. The six rubric scores in Table 9 are normalized by dividing by 5. Benchmark-specific mappings combine these scores with coverage signals and failure indicators into three components: memory use Mt, answer correctness At, and answer quality Qt.Both benchmarks use ˆut = clip  0.45 Mt + 0.40 At
+
++ 0.15 Qt − Pt, 0, 1 ,ˆrt = ˆut − λCgen  
+
+> t
+
+(at, ct(at)) .(17) Here ˆ ut = Jturn (yt, qt, zt, ct(at)) is the pre-cost utility defined in the main text. The weights 0.45, 0.40, and 0.15 apply to the three composite components, not directly to the six raw rubric scores. For R EAL MEM , Mt averages retrieval coverage, normalized state alignment, and normalized routing ade-quacy. The answer component At averages normalized helpfulness, normalized state alignment, and one minus the hallucination flag. The quality component Qt averages normalized intermediate-product and final-integration scores, using the intermediate-product score alone on non-final steps. For M ULTI CHAL -
+
+> LENGE
+
+, the memory component additionally includes normalized revision application; coverage is set to 1 when explicit memory supervision is unavailable. 
+
+Failure penalties. With binary flags ordered as topic drift, restart, hallucination, and severe missing history, 
+
+Pt is their weighted sum with coefficients (0.10, 0.06, 0.12, 0.12 ) for R EAL MEM and (0.10, 0.12, 0.10, 0.10 ) for MULTI CHALLENGE . The routing reward subtracts only the selected generator’s cost; QTM charges remain part of the reported API cost. The released implementation will include the prompts, benchmark-specific component mappings, and reward-processing configurations used in the experiments.                  
+
+> Judge output Definition Range Scoring focus
+> answer_helpfulness Helpfulness and directness of the candidate answer for the current query. 0–5 helpfulness
+> state_alignment Consistency with active topic, session state, constraints, and memory context. 0–5 fidelity diagnostic
+> revision_application Whether revision instructions are applied without restarting, overwriting, or drifting. 0–5 revision diagnostic
+> intermediate_product Quality of intermediate artifacts or state updates when the turn is not final. 0–5 intermediate quality
+> routing_adequacy Whether the selected model is adequate for the state and context. 0–5 routing diagnostic
+> final_integration Whether the response integrates prior state and evidence into the final answer. 0–5 fidelity diagnostic Hard-failure flags Topic drift, restart instead of revision, hallucinated context use, or severe missing-history use. 0/1 penalty
+
+Table 9: Turn-level judge outputs. Normalized rubric scores, coverage signals, and failure indicators form the three composite components in Eq. 17, weighted by 0.45, 0.40, and 0.15. A benchmark-specific failure penalty is applied before clipping; generation cost is then subtracted. 19 Turn-level judge prompt excerpt. Inputs: 
+
+• Current query, injected memory context, and candidate answer. • Optional non-final current-turn diagnostics and optional router metadata; no gold final answers or benchmark pass labels. • Deterministic diagnostic signals, such as retrieval/context coverage and intermediate-state signals. • Mode note: synthetic , realmem , or mc_router .
+
+Scoring instruction: act as a strict but calibrated evaluator for step-level routing and memory use. Score dimensions A–F on a 0–5 scale, set hard-failure flags, and use deterministic auto-signals as evidence unless contradicted by the text. 
+
+Required output: JSON only, including six scores, hard-failure flags, bounded reward information, and confidence values. 
+
+Figure 6: Compact turn-level judge prompt excerpt used for online feedback. 
+
+## B.6 Cost Accounting 
+
+For R EAL MEM , the main-table API cost is 
+
+Cgen +ctrl = ∑
+
+> t
+
+(Cgen  
+
+> t
+
++ Cctrl  
+
+> t
+
+). (18) Online feedback and final benchmark evaluators are excluded from this main-table view. Local memory operations have no external API charge in our setup, but their compute, storage, latency, and engineering costs are unpriced. The online reward subtracts only generator cost because the router chooses the generator. On R EAL MEM , generation-controller API costs are $26.6480 for MARS, $184.3967 for full-context GPT-4o, and $20.2875 for A-MEM+MetaLLM. The MARS/GPT-4o cost ratio is 14.5%. The feedback-inclusive totals in Section 5.1 are estimated from logged online-judge input-token counts and conservatively estimated output usage, priced at $0.15 and $0.60 per million tokens, respectively. This adds approximately $5.88 for MARS and $3.20 for A-MEM+MetaLLM, giving approximately $32.53 and $23.49. These estimates exclude final evaluators and local compute. For M ULTI CHALLENGE , costs follow the original run-level recording convention, without a separate QTM/controller breakdown. 
+
+Component Role / model Input price Output price QTM/controller qwen/qwen-2.5-7b-instruct $0.04 / 1M tokens $0.10 / 1M tokens Turn-level judge GPT-4o-mini online feedback judge $0.15 / 1M tokens $0.60 / 1M tokens Final R EAL MEM 
+
+evaluator GPT-4o final benchmark judge where required excluded from both views excluded Final MULTI CHALLENGE 
+
+evaluator GPT-4o path-aware final judge excluded from both views excluded Generators candidate pool A Llama3B: $0.05; Mixtral: $0.20; Qwen72B: $0.35; GPT-4o: $2.50 / 1M tokens Llama3B: $0.10; Mixtral: $0.20; Qwen72B: $0.40; GPT-4o: $10.00 / 1M tokens Memory search/add MEM 0/A-MEM where applicable no external embedding API; local compute unpriced same 
+
+Table 10: Cost-accounting components and the unit prices used for the reported runs. Prices are per 1M tokens where applicable. 20 B.7 Uncertainty and Interaction-Order Diagnostics 
+
+Empirical bootstrap resampling over the 10 R EAL MEM personas gives 95% intervals of [0.7183, 0.7641] for QA, [0.6571, 0.7024] for Mem Recall, and [$2.4004, $2.9394] for per-persona generation-controller cost. The corresponding persona-macro centers are 0.7406, 0.6794, and $2.6648, matching the aggregation used in the main table. As an aggregation check, direct query-weighted MARS values are 0.7404 QA over 1,411 scored queries and 0.6815 Mem Recall over 1,393 scored queries; full-context GPT-4o obtains 0.7529 and 0.1655, respectively, over 1,414 scored queries. The substantive comparison is unchanged. Scenario-level empirical bootstrap gives a full-M ULTI CHALLENGE pass rate of 0.2367 with a 95% interval of [0.1837, 0.2898] and a focused-subset rate of 0.3212 with a 95% interval of [0.2409, 0.4015], conditional on the evaluated order. In R EAL MEM , each persona has an independently initialized router. Reordering personas therefore does not alter their router updates, while within-persona chronology defines the causal history and is preserved. The bootstrap intervals quantify sample variation across personas or scenarios, conditional on the evaluated histories and ordering. For a separate interaction-order diagnostic, we replay the same fixed 30-scenario M ULTI CHALLENGE subset under eight randomized chunk orders while holding the evaluated cases and all non-order configurations fixed. The original scenario sequence is partitioned into ten chunks of three scenarios; each seed shuffles only the chunk order, with within-chunk order preserved. Each replay starts from a freshly initialized bandit in a separate process, and online updates are confined to that replay. We retain the main M ULTI CHALLENGE 
+
+routing configuration, including chunk size 3, chunk-level memory scope, Qwen2.5-7B as QTM, λcost = 0.002, the same four-model router pool, and unchanged router features and decoding settings. To keep the order comparison internally consistent, all eight replays are evaluated with the same fixed GPT-4o-mini path-aware evaluator. The primary M ULTI CHALLENGE benchmark results use the GPT-4o final evaluator described in Appendix C.4.                     
+
+> Seed Final pass Pass rate 13 5/30 16.7% 29 4/30 13.3% 47 7/30 23.3% 61 6/30 20.0% 79 7/30 23.3% 97 5/30 16.7% 113 5/30 16.7% 131 5/30 16.7% Order mean 5.5/30 18.3%
+
+Table 11: Interaction-order diagnostic on the same fixed set of 30 M ULTI CHALLENGE scenarios across eight randomized chunk orders. The sample standard deviation of the order-level pass rates is 3.6 percentage points. Across the eight sampled orders, pass counts range from 4/30 to 7/30, with a mean pass rate of 18.3% and a sample standard deviation of 3.6 percentage points. This diagnostic characterizes variation across the tested processing orders rather than absolute benchmark performance. 
+
+# C Benchmark Details 
+
+## C.1 REAL MEM Protocol and Metric Normalization 
+
+REAL MEM evaluates long-term memory-driven interaction (Bian et al., 2026). We use the evaluation pool of 10 personas and 1,415 queries and report normalized QA, Mem Recall, Recall@20, NDCG@20, and API cost. Main-table quality and memory metrics are macro-averaged over the 10 personas; Section B.7 reports direct query-weighted aggregates and their scored coverage separately. 21 The original R EAL MEM QA judge score is reported on a 0–3 scale. Following the normalized metric used in the main text, we report QA norm = QA raw 
+
+3 . (19) All R EAL MEM QA values in Appendix D.1 use this normalized score, so they align with Table 1 in the main text. Mem Recall is the R EAL MEM memory judge score. Recall@20 and NDCG@20 measure retrieval coverage and ranking quality. Recall@20 and NDCG@20 are taken directly from the official retrieval evaluator, without redefining the metrics for full-context baselines. They assess the retrieval output scored by that pipeline; the full-context label describes the generator input and does not imply a retrieval score of one. Fixed generators paired with the same retrieval output therefore share retrieval scores even when their QA differs. 
+
+## C.2 MULTI CHALLENGE Conversion and Axes 
+
+Of the 273 official M ULTI CHALLENGE scenarios, we reserved 28 (approximately 10%) for QTM prompt development and preliminary testing and excluded them from the reported evaluation split. The remaining 245 scenarios, comprising 1,480 turns, form the evaluation split; the split identifiers will be released with the implementation. We convert each scenario into a session-level memory-routing trajectory: intermediate turns provide the path over which systems must maintain state. The final verification turn uses the scenario’s official binary rubric question as the last user query. Under the supplied pass criterion, a trajectory satisfying the required memory and constraints supports the expected answer YES . This question originates from the official evaluation rubric; placing it in the assistant’s input trajectory is part of our conversion. In the converted evaluation format, intermediate turns are marked as eval_type=0 ; the final official rubric question is marked as eval_type=1 with its supplied PASS_CRITERIA ; exactly one eval_type=1 appears per scenario and it is always the final turn. The benchmark contains four disjoint axes: • I NFERENCE MEMORY : 102 scenarios. • I NSTRUCTION RETENTION : 62 scenarios. • S ELF COHERENCE : 46 scenarios. • R ELIABLE VERSION EDITING : 35 scenarios. The main text reports the full 245-scenario aggregate first, then analyzes I NFERENCE MEMORY and R ELIABLE 
+
+VERSION EDITING (137 scenarios) as a mechanism-focused subset. The per-axis table is in Appendix D.4. 
+
+## C.3 Chunked Context Construction 
+
+The current M ULTI CHALLENGE construction uses chunk size 3. A chunk bundles several session trajectories into a longer context block, creating topic interference. The system must identify the active trajectory, select relevant evidence, and ignore distractor sessions in the same chunk. The construction procedure is: 1. Group scenarios into chunks of size 3. 2. For each chunk, concatenate the trajectories into a shared context block. 3. Mark one scenario trajectory as the active trajectory for the current query. 4. Present the system with the chunked context and the active final-turn request. 5. Evaluate whether the final answer follows the active trajectory rather than distractor trajectories. This setting stresses both retrieval selectivity and model capacity because the correct response requires maintaining the active state under structured interference. 22 C.4 Final Evaluation Judges 
+
+For R EAL MEM , we use the official retrieval and generation evaluation pipeline. The final reporting protocol uses GPT-4o as the generation/memory judge model where required, with retrieval-memory helpfulness evaluated using top-k = 5 evidence. This final evaluator is used only for benchmark reporting and is distinct from the step-level feedback path used for online routing updates. For M ULTI CHALLENGE , we use a path-aware final judge following the benchmark’s evaluation style. The judge first considers the trajectory through turns 1 to tmax − 1: whether the system maintained the correct topic memory, preserved constraints, and produced intermediate responses that support the final answer. It then evaluates the final turn at tmax by asking whether the maintained memory supports the response and whether the response itself is correct. A scenario is counted as passed under strict joint logic: the continuity/path verdict, final-answer judge verdict, and parseable model final-token answer must all satisfy the supplied pass criterion, with YES as the expected answer to the final official rubric question.    
+
+> Path-aware M ULTI CHALLENGE final judge protocol. Inputs:
+> • Full trajectory through turns 1 to tmax
+
+− 1. • The scenario’s official binary rubric question, used as the final user request at tmax with “Please answer with only YES or NO.” • System final answer. • Scenario-specific PASS_CRITERIA or expected behavior.    
+
+> Strict joint pass logic: a scenario passes only when the judge accepts memory-continuity/path consistency, accepts final-answer correctness, and the model’s final-token answer is parseable and matches the expected YES
+> under the supplied pass criterion.
+> Evaluator setting: GPT-4o with deterministic judge decoding, temperature 0, and a short max-token budget.
+
+Figure 7: Path-aware M ULTI CHALLENGE final judging protocol used for the fixed evaluation matrix. 
+
+# D Full Results 
+
+This section reports the full benchmark matrices. The three-persona component ablations are presented separately in Appendix E. 
+
+## D.1 REAL MEM Full Matrix 
+
+Table 12 reports the full matrix. Context-limit failures are identified from provider error payloads: 1,344 Qwen2.5-72B queries, 1,344 Mixtral queries, and 1,247 Llama3B queries. Affected queries receive zero score and zero recorded cost. 23 Memory Setting Model / Router Gen.-Ctrl. ($) ↓ Norm. QA ↑ Mem Rec. ↑ R@20 ↑ NDCG@20 ↑
+
+MARS 26.6480 0.7406 0.6794 0.8015 0.6168 
+
+Full context GPT-4o 184.3967 0.7540 0.1640 0.5188 0.3216 Full context META LLM 180.0189 0.7331 0.1603 0.5188 0.3216 Full context Qwen2.5 72B † 0.4737 0.0422 0.2041 0.5188 0.3216 Full context Mixtral † 0.2970 0.0336 0.1577 0.5188 0.3216 Full context Llama3B † 0.2911 0.0214 0.1605 0.5188 0.3216 MEM 0 GPT-4o 41.3834 0.6909 0.5997 0.6305 0.5388 MEM 0 META LLM 24.3499 0.6652 0.6048 0.6305 0.5388 MEM 0 Qwen2.5 72B 3.8325 0.5137 0.5961 0.6305 0.5388 MEM 0 Mixtral 3.5789 0.5675 0.6035 0.6305 0.5388 MEM 0 Llama3B 0.9383 0.2689 0.6059 0.6305 0.5388 A-MEM GPT-4o 43.1311 0.7172 0.6479 0.6817 0.5846 A-MEM META LLM 20.2875 0.7044 0.6471 0.6817 0.5846 A-MEM Qwen2.5 72B 3.5106 0.4612 0.6447 0.6817 0.5846 A-MEM Mixtral 3.7563 0.5796 0.6445 0.6817 0.5846 A-MEM Llama3B 1.0175 0.2891 0.6475 0.6817 0.5846 
+
+Table 12: Full R EAL MEM matrix. Quality and memory metrics are persona-macro averages; cost records generation and controller API calls. †Context-limit failures affect 1,344/1,415 Qwen queries, 1,344/1,415 Mixtral queries, and 1,247/1,415 Llama3B queries, so scores conflate executability and response quality. 
+
+## D.2 MULTI CHALLENGE Full Aggregate 
+
+Memory Setting Model / Router Pass Rate ↑ Pass ↑ Recorded Cost ($) ↓ Cost/Pass ($) ↓
+
+MARS 0.2367 58/245 3.2504 0.0560 Full context Qwen2.5 72B 0.2735 67/245 3.1665 0.0473 Full context GPT-4o 0.2612 64/245 15.3491 0.2398 MEM 0 Mixtral 0.2327 57/245 0.7712 0.0135 MEM 0 GPT-4o 0.2286 56/245 13.9769 0.2496 MEM 0 META LLM 0.2122 52/245 4.7825 0.0920 Full context META LLM 0.2082 51/245 6.4945 0.1273 Full context Mixtral 0.1918 47/245 1.2327 0.0262 MEM 0 Qwen2.5 72B 0.1918 47/245 2.5946 0.0552 A-MEM META LLM 0.1837 45/245 4.7664 0.1059 A-MEM GPT-4o 0.1796 44/245 11.3333 0.2576 A-MEM Qwen2.5 72B 0.1796 44/245 1.4152 0.0322 A-MEM Mixtral 0.1673 41/245 0.7823 0.0191 Full context Llama3B 0.0776 19/245 0.6086 0.0320 MEM 0 Llama3B 0.0694 17/245 0.5448 0.0320 A-MEM Llama3B 0.0571 14/245 0.2617 0.0187 
+
+Table 13: M ULTI CHALLENGE full aggregate over 245 scenarios, the primary benchmark view. Costs follow the original run-level accounting convention; QTM/controller cost was not separately itemized in the archived logs. 
+
+## D.3 MULTI CHALLENGE Mechanism-Focused Subset 
+
+Table 14 reports all 16 systems on the mechanism-focused subset. It supplements rather than replaces the full aggregate. 24 Memory Setting Model / Router Pass Rate ↑ Pass ↑ Recorded Cost ($) ↓ Cost/Pass ($) ↓
+
+MARS 0.3212 44/137 1.5670 0.0356 Full context Qwen2.5 72B 0.3285 45/137 1.8528 0.0412 MEM 0 Mixtral 0.2847 39/137 0.4620 0.0118 Full context GPT-4o 0.2628 36/137 9.1044 0.2529 Full context Mixtral 0.2555 35/137 0.7534 0.0215 MEM 0 GPT-4o 0.2555 35/137 8.4375 0.2411 MEM 0 META LLM 0.2555 35/137 2.8092 0.0803 MEM 0 Qwen2.5 72B 0.2409 33/137 1.5597 0.0473 Full context META LLM 0.2263 31/137 3.6814 0.1188 A-MEM GPT-4o 0.2044 28/137 6.8631 0.2451 A-MEM META LLM 0.1898 26/137 2.7960 0.1075 A-MEM Mixtral 0.1898 26/137 0.4675 0.0180 A-MEM Qwen2.5 72B 0.1752 24/137 0.8436 0.0352 Full context Llama3B 0.1022 14/137 0.3271 0.0234 MEM 0 Llama3B 0.0803 11/137 0.3173 0.0288 A-MEM Llama3B 0.0511 7/137 0.1434 0.0205 
+
+Table 14: M ULTI CHALLENGE mechanism-focused subset over I NFERENCE MEMORY and R ELIABLE VERSION 
+
+EDITING ; not the primary leaderboard. Costs follow the original run-level accounting convention, without a separate historical QTM/controller itemization. 
+
+## D.4 MULTI CHALLENGE Per-Axis Breakdown 
+
+Table 15 reports the category-level breakdown needed to contextualize the target subset and reduce ambiguity about axis-level behavior. 
+
+Memory Setting Model / Router Inf. Mem. Instr. Ret. Self Coh. Version Edit Total /102 /62 /46 /35 /245 
+
+MARS 33 8 6 11 58 Full context Qwen2.5 72B 36 14 8 9 67 
+
+Full context GPT-4o 28 18 10 8 64 Full context META LLM 26 12 8 5 51 Full context Mixtral 28 6 6 7 47 Full context Llama3B 10 5 0 4 19 MEM 0 GPT-4o 27 11 10 8 56 MEM 0 META LLM 27 9 8 8 52 MEM 0 Qwen2.5 72B 25 8 6 8 47 MEM 0 Mixtral 31 9 9 8 57 MEM 0 Llama3B 10 4 2 1 17 A-MEM GPT-4o 25 11 5 3 44 A-MEM META LLM 23 13 6 3 45 A-MEM Qwen2.5 72B 22 12 8 2 44 A-MEM Mixtral 22 7 8 4 41 A-MEM Llama3B 6 5 2 1 14 
+
+Table 15: M ULTI CHALLENGE per-axis pass-count breakdown. Bold and underline mark best and second-best pass counts within each axis. 25 E Ablations and Sensitivity Analysis 
+
+This section provides component-level evidence for the mechanisms used by MARS. The main benchmark tables compare complete systems on the full evaluation slices; the analyses below examine QTM-guided memory construction, QTM-derived prompt state, no-QTM routing, recency-only memory selection, online updates, cost weighting, and local QTM prompt sensitivity. The main component ablations use a three-persona subset of the R EAL MEM evaluation pool, while the prompt-sensitivity probe uses frozen snapshots from seven evaluation personas. The main result aggregates all 10 personas and 1,415 queries. The diagnostic samples are drawn from this evaluation pool. 
+
+## E.1 REAL MEM Three-Persona Ablation Setup 
+
+Table 16 summarizes the ablation setting. The three personas are randomly sampled with seed 28. All main memory-construction variants use a matched top-10 retrieval budget so that differences are not explained by exposing more historical memory. The component ablation slice uses λcost = 0.5 for all variants in Table 18. This differs from the main full-slice R EAL MEM run because the ablation is designed as a controlled within-slice diagnostic with stronger cost pressure; the resulting scores are compared only within the ablation slice.            
+
+> Setting Value Evaluation subset Three personas from the 10-persona evaluation pool Persona sampling random sample with seed 28 Personas Ethan_Hunt ,Kenta_Tanaka ,Sarah_Miller
+> Evaluated turns 473 Historical retrieval budget top-10 Model pool Llama3B, Qwen2.5 72B, GPT-4o Reward cost weight for component ablations λcost
+
+= 0.5 Generation temperature 0.0 Provider fallback enabled Generation error rate 0.0 for all variants 
+
+Table 16: R EAL MEM three-persona ablation setup. The slice is used to test component behavior under a controlled retrieval budget. 
+
+Metrics. We report the official R EAL MEM evaluation metrics on the ablation slice. Official QA is produced on the original 0–3 scale and normalized as QA norm = QA raw /3, matching the main text. Mem Recall and Mem Helpful are official memory-evaluation metrics. Recall@10 all and NDCG@10 measure retrieval coverage and ranking quality on the ablation slice. Total cost includes generator and QTM/controller calls where applicable, following the cost convention in Appendix B.6. MemFail is the percentage of evaluated turns with memory-related hard-failure flags from the turn-level diagnostic judge. The L/Q/G column reports the percentage of turns routed to Llama3B, Qwen2.5 72B, and GPT-4o, respectively. 
+
+## E.2 Variant Definitions 
+
+Table 17 defines the evaluated component variants. The ablations are organized by dependency: QTM-guided context construction, QTM state/header exposure in the generator prompt, QTM-based router features, recency-only memory selection, and online updates. The no-update variant keeps the QTM-guided memory view but freezes the router at initialization. We treat this as a diagnostic stress test of online adaptation rather than as an optimized static-router baseline. 26 Variant Ablated dependency Purpose Full MARS ( mars_full ) none Full memory-aware routing system. Embedding-only semantic (mars_embedctx_bm )Replace QTM-guided memory construction with raw-query semantic top-10 retrieval Tests whether QTM-guided context improves over embedding-only memory. No QTM state/header (mars_semctx_noactive )Start from embedding-only semantic retrieval and remove the QTM state/header from the generator prompt Isolates prompt-state exposure relative to the embedding-only variant; its retrieval policy is unchanged. Recent-only memory (mars_recentctx_bm )Replace QTM/semantic retrieval with recent-only top-10 memory Tests whether recency alone is sufficient. No-QTM semantic ( mars_ noqtm_semctx )Disable QTM; use semantic memory and query-embedding router features Stress-tests the framework without QTM state. No-QTM recent ( mars_ noqtm_recentctx )Disable QTM; use recent-only memory and query-embedding router features Tests the weakest no-QTM recency-based setting. No online update ( mars_ full_no_update )Keep QTM-guided memory construction but freeze the cold-start router Diagnoses adaptation from this initialization. 
+
+Table 17: Ablation variants on the three-persona R EAL MEM evaluation slice. All variants use deterministic generation and the same model pool; historical retrieval uses a matched top-10 budget unless otherwise noted. 
+
+## E.3 Official Evaluation Results 
+
+Table 18 reports the official R EAL MEM evaluation metrics and diagnostic routing statistics for the component ablation variants. Full MARS obtains the strongest overall profile among the online ablation variants: it has the highest normalized QA, the strongest Mem Recall, and the best retrieval metrics under the matched top-10 budget. The no-QTM semantic variant is close in QA, showing that semantic retrieval is a strong baseline, but it has lower memory scores than full MARS. The recent-only variants degrade sharply on memory and retrieval metrics, indicating that simple recency is not a reliable long-session memory strategy in this setting. The no-update diagnostic has high memory and retrieval metrics because it retains QTM-guided context construction. However, its QA is much lower: freezing the cold-start router leaves the policy concentrated on the cheapest model, which preserves retrieval quality but substantially reduces answer quality. This row should therefore be interpreted as a cold-start online-adaptation diagnostic, not as a tuned static-router baseline.                                                                                 
+
+> Variant QA raw ↑QA ↑Mem Rec. ↑Mem Help. ↑R@10 ↑NDCG@10 ↑Cost ↓MemFail ↓L/Q/G % Full MARS 2.2333 0.7444 0.6804 1.6967 0.6744 0.5974 5.643 6.34 9.5/61.7/28.8 Embedding-only semantic 2.1692 0.7231 0.6429 1.6461 0.6026 0.5162 5.911 9.30 9.1/58.6/32.3 No QTM state/header 2.1298 0.7099 0.6397 1.6575 0.6026 0.5162 6.338 10.15 9.1/55.6/35.3 Recent-only memory 1.8837 0.6279 0.1070 0.2410 0.2981 0.2299 5.638 27.27 8.0/61.1/30.9 No-QTM semantic 2.2162 0.7387 0.6287 1.6174 0.6026 0.5162 4.570 10.99 3.0/75.9/21.1 No-QTM recent 1.8732 0.6244 0.1118 0.2347 0.2981 0.2299 4.918 34.67 8.0/66.6/25.4 No online update †1.2664 0.4221 0.6882 1.7098 0.6744 0.5983 0.439 18.60 99.6/0.0/0.4
+
+Table 18: Official R EAL MEM evaluation results on the three-persona ablation slice, with diagnostic failure and routing statistics. QA is official raw QA divided by 3; cost is generation-controller API cost in USD. Bold marks the best online component variant. †The no-update row is a frozen-router diagnostic, excluded from best-online markings. 
+
+Interpretation. The ablations support three conservative conclusions. First, QTM-guided memory con-struction provides the strongest quality–memory operating point among the main memory-construction variants under a matched top-10 retrieval budget. Full MARS improves over embedding-only semantic retrieval in QA, Mem Recall, Mem Helpful, Recall@10, NDCG@10, and MemFail. Second, semantic retrieval 27 is a strong baseline: the no-QTM semantic variant approaches full MARS in normalized QA, but its lower Mem Recall and Mem Helpful scores indicate weaker memory reliability. Third, recency-only memory selection is insufficient for R EAL MEM -style long-session use, as both recent-only variants collapse on Mem Recall, Mem Helpful, Recall@10, and NDCG@10. The no-update result further shows that good memory construction alone is insufficient when the frozen router selects an underpowered generator. The no-QTM semantic variant is cheaper and remains competitive in QA, while the no-update diagnostic is much cheaper but has substantially lower QA. These variants occupy different points on the quality– memory–cost trade-off. 
+
+## E.4 Cost-Weight Sensitivity 
+
+Table 19 reports a cost-weight sensitivity analysis over the same three-persona ablation slice. These rows keep the full MARS architecture and vary only the cost coefficient in the online reward. We report the three additional settings, λcost ∈ { 0, 0.25, 1.0 }; the main component-ablation setting uses λcost = 0.5 and is reported in Table 18. The results show that the cost coefficient shifts the quality–memory–cost operating point rather than producing a uniformly dominant setting. Removing the cost penalty slightly improves Mem Recall but increases cost and does not improve QA over the main setting. Stronger cost pressure reduces cost while maintaining comparable retrieval scores. We therefore treat λcost as a deployment knob rather than as a universally optimal scalar.                                            
+
+> Variant QA ↑Mem Rec. ↑R@10 ↑NDCG@10 ↑Cost ↓MemFail ↓L/Q/G % Full MARS, λ=00.7329 0.6870 0.6702 0.5952 5.964 8.25 7.8/60.7/31.5 Full MARS, λ=0.25 0.7209 0.6832 0.6702 0.5933 5.508 8.25 10.4/61.7/27.9 Full MARS, λ=1.0 0.7225 0.6859 0.6765 0.5999 5.329 6.55 9.9/63.8/26.2
+
+Table 19: Cost-weight sensitivity on the same three-persona R EAL MEM ablation slice. These rows keep the full MARS architecture and vary only the reward cost coefficient. The main component-ablation setting uses 
+
+λcost = 0.5 and is reported in Table 18. 
+
+## E.5 QTM Prompt Sensitivity 
+
+We additionally test the local stability of the QTM interface under two controlled prompt changes using 150 frozen turn snapshots from seven R EAL MEM evaluation personas. For each snapshot, the user query, active context, recent history, system rules, historical memory pool, and embeddings from 
+
+BAAI/bge-small-en-v1.5 (Xiao et al., 2024) are fixed. We compare the original QTM prompt with (i) a paraphrase that preserves the decision definitions and JSON schema and (ii) an instruction-reordered variant that reverses the five Important semantics items while leaving the remaining text unchanged. All variants use Qwen2.5-7B-Instruct with deterministic decoding. This is a controller-level diagnostic rather than an end-to-end rerun of the main benchmark. We report two quantities with direct downstream effects. Action agreement is the fraction of inputs whose effective MATCH /NEW_TOPIC decision is unchanged after the same production parser and deterministic release logic. Retrieval-source Jaccard is computed per input over the selected historical memory-chunk IDs (up to 
+
+k = 20 before final prompt-budget packing) and then averaged; double-empty pairs receive 1 and one-sided empty pairs receive 0. The original prompt is a reference, not a gold annotation, so disagreement is not an error rate. The full-sample results show high local agreement under both tested changes, with still higher agreement on the 60 active-history inputs. We additionally report repeat-run, parsing, and candidate-pool checks. On a preselected 30-input repeat set, same-template reruns yield 96.67%/0.9667 action agreement/Jaccard for the original prompt and 100%/1.000 for each variant. These repeated runs provide a descriptive reference for within-template variability. All 450 primary calls complete without request errors, production parsing failures, or conservative action fallbacks; three invalid auxiliary query_type values under instruction 28 Prompt variant All 150 inputs 60 with active history Action agr. ↑ Mean Jaccard ↑ Action agr. ↑ Mean Jaccard ↑        
+
+> Paraphrase 90.0% 0.920 95.0% 0.984 Instruction reordering 96.0% 0.973 98.3% 1.000
+
+Table 20: QTM prompt-sensitivity results. The active-history slice is post hoc and includes inputs where 
+
+NEW_TOPIC can trigger archival. reordering are mapped to the standard STATIC default. Effective-action agreement remains close to raw-action agreement (90.0% versus 88.7% for paraphrasing and 96.0% for reordering), while auxiliary schema fields are not perfectly invariant. High retrieval overlap also persists with larger candidate pools. Historical pools range from 2 to 224 chunks (median 94.5); among the 118 inputs with at least 2 k = 40 candidates, mean Jaccard is 0.916 for paraphrasing and 0.975 for instruction reordering. The original prompt produces 127 MATCH and 23 NEW_TOPIC decisions; paraphrasing changes 15 NEW_TOPIC decisions to MATCH and none in the opposite direction, while reordering changes five in the former direction and one in the latter. Because the original prompt is not ground truth, these transitions limit claims about subclass invariance but do not establish a quality degradation. Overall, the probe supports a narrow conclusion: under the tested paraphrase and instruction reordering, QTM largely preserves the effective thread-boundary decision and retrieved memory sources. It does not establish invariance of the complete structured state, accumulated online trajectories, or end-to-end answer quality. 
+
+## E.6 QTM Controller Substitution 
+
+We complement the prompt perturbations with a same-scale controller substitution on the same 150 frozen, stratified reconstructed snapshots. The default Qwen2.5-7B-Instruct controller is replaced by Mistral-7B-Instruct-v0.3 while the original QTM prompt and schema, session histories, historical memory pools, BGE embeddings, production parser, deterministic release logic, and retrieval policy are held fixed. The comparison therefore isolates the controller model within this frozen-snapshot diagnostic; it does not regenerate assistant answers or rerun the online routing trajectory. We use the same two downstream quantities as in Appendix E.5: the effective MATCH /NEW_TOPIC decision and Jaccard overlap of the pre-packing top-20 historical memory-source IDs. All controller outputs used in this probe are parseable JSON, and the runs complete without request errors, runtime errors, or parser fallback.                 
+
+> Metric All 150 inputs 60 with active history Action agreement 124/150 (82.7%) 53/60 (88.3%) Wilson 95% interval 75.8–87.9% 77.8–94.2% Mean retrieval Jaccard 0.875 0.960 Median retrieval Jaccard 1.000 1.000 Identical retrieval set 115/150 (76.7%) 52/60 (86.7%) Jaccard ≥0.9 125/150 (83.3%) 55/60 (91.7%)
+
+Table 21: QTM controller-substitution diagnostic. Mistral-7B-Instruct-v0.3 is compared with the Qwen2.5-7B-Instruct original-prompt reference on the same fixed snapshots. The active-history slice is the same 60-input slice used in Table 20. The two controllers agree on most effective thread-boundary decisions, and the induced retrieval-source sets overlap strongly. The agreement is higher on inputs with active thread history, where a NEW_TOPIC decision can change archival behavior: action agreement reaches 88.3%, mean Jaccard reaches 0.960, and 86.7% of retrieval sets are identical. These results provide controller-substitution evidence at the decision-interface level for one alternative 7B controller, complementing the prompt-sensitivity probe above. 29 F Qualitative and Behavioral Analysis 
+
+## F.1 Context and Memory Failure Cases 
+
+This section provides qualitative examples showing how systems fail under long histories, topic interference, or version-state pressure. The goal is to make the mechanism behind the aggregate metrics visible. The examples below are anonymized from fixed M ULTI CHALLENGE final evaluation outputs where MARS passes and multiple fixed full-context baselines fail. 
+
+Query / setting Required memory Baseline pattern MARS pattern Error type Present-tense continuation constraint Preserve a previously imposed grammar/style rule across turns. Several full-context baselines lose the active rule. Maintains the constraint and returns a passing final verdict. Instruction retention School memory recall under distractors Recall that a schoolyard feature was located near a sanitation hazard. Baselines deny the specific detail or lose path continuity. Recovers the relevant detail and answers consistently. Inference memory Three-paragraph revision limit Preserve a local document-format constraint while editing a later version. Baselines drift on the paragraph-count requirement. Keeps the active artifact state and satisfies the editing constraint. Reliable version editing 
+
+Table 22: Representative anonymized M ULTI CHALLENGE patterns summarized from fixed final-evaluation outputs. They are illustrative rather than additional quantitative evidence. 
+
+## F.2 Static-Configuration Error Examples on R EAL MEM 
+
+The following paired examples illustrate missing, ignored, or stale memory but do not establish cause. Aggregate cheap full-context scores are dominated by the overflows in Table 12, so they are not clean evidence of inferior model reasoning. 
+
+Failure case Relevant memory evidence Static-system behavior MARS behavior Diagnosis Travel-plan follow-up after frustration July travel windows, five adult travelers, and comfort-focused flight constraints. Gives generic or conflicting travel guidance. Recovers the travel constraints and responds in the correct planning frame. Relevant-memory miss Broken workout-video link A recurring 9 PM back-care routine and selected exercise playlist. Gives generic troubleshooting or ignores the routine context. Uses the routine and exercise context to provide a targeted next step. Context ignored Story-development continuation The “Golden Hook” is locked in and the next component is character development. Pivots to a generic plot-structure step. Continues from the locked story state and focuses on the intended component. Version-state drift 
+
+Table 23: Representative anonymized R EAL MEM static-configuration error patterns; diagnoses are illustrative and descriptive, not causal. 
+
+## F.3 Routing Behavior by Session State 
+
+This diagnostic summarizes whether the router’s behavior changes with QTM state. We summarize model choice and turn cost by realized retrieval scope, interaction phase, and memory-token exposure. Memory-30 scope slices use retrieval_scope ; phase slices use qtm_phase . Cheap models group Llama-3.2-3B and Mixtral-8x7B; the mid model is Qwen-72B; the strong model is GPT-4o. High context difficulty is the top third of turns by mem_tokens . These slices are descriptive diagnostics rather than causal routing rules: model choice depends on the full feature vector and online reward history, so a single QTM field such as retrieval_ scope need not monotonically increase strong-model usage.                         
+
+> QTM state slice Cheap model % Mid model % Strong model % Avg. cost
+> retrieval_scope=LOCAL 12.9 62.9 24.3 0.0199
+> retrieval_scope=GLOBAL 16.6 65.6 17.8 0.0155
+> qtm_phase=REVISE 7.6 68.4 24.0 0.0202
+> qtm_phase=SYNTHESIZE/VERIFY 22.1 51.6 26.2 0.0207 High context difficulty 14.4 62.9 22.7 0.0206
+
+Table 24: Routing-behavior diagnostic over 1,415 R EAL MEM turns. Percentages are within each slice; average cost includes generator and QTM/controller cost when logged. 
+
+# G Deployment Feedback and Reproducibility 
+
+## G.1 Replacing Turn-Level Judges with Deployment Feedback 
+
+The experiments use a turn-level LLM judge to provide scalar feedback for online routing. This choice makes benchmark evaluation reproducible, but the MARS interface does not require the reward to come from an LLM judge. The online router only requires a scalar reward associated with the current state, selected model, response, and cost. In a deployed assistant, this reward could be replaced or supplemented by human or task-derived feedback. Examples include explicit user ratings, edit acceptance, task completion signals, human preference compar-isons, workflow success checks, or organization-specific quality audits. Over repeated interactions, such feedback could train a routing policy that reflects user-specific or domain-specific preferences. For example, one user may prefer cheaper models unless quality drops sharply, while another may prefer stronger models for revision or finalization tasks. This interface allows the routing policy to incorporate application-specific feedback without changing the shared-state memory construction and model-selection pipeline. 
+
+## G.2 Reproducibility Checklist 
+
+Table 25 summarizes the experimental setup. Following submission, we will release an implementation package with code, configurations, prompt templates, and evaluation scripts to support reproduction. 
+
+Artifact license and intended use. Our release is intended to support reproduction of the reported ex-periments. It will include code, prompt templates, configurations, and evaluation scripts, but it will not redistribute benchmark data or private intermediate logs. Users should obtain R EAL MEM and M ULTI -CHALLENGE from their original sources and follow their respective licenses and terms. We will release our implementation artifacts under the Apache License 2.0. 31 Item Reproducibility information Code and configs An implementation package will be released with system configurations, prompt templates, and evaluation scripts. REAL MEM split REAL MEM evaluation pool with 10 personas and 1,415 queries; QA is normalized as official raw QA divided by 3. MULTI CHALLENGE split Converted M ULTI CHALLENGE split with 245 scenarios and 1,480 turns; chunk size 3; target subset consists of I NFERENCE MEMORY and R ELIABLE VERSION EDITING .Ablation slice Three-persona R EAL MEM evaluation slice with 473 turns (472 valid QA evaluations for the full variant); personas sampled with seed 28; matched top-10 historical retrieval budget. Candidate model pools Main R EAL MEM runs use the configured MARS candidate pool reported in Appendix B.4; ablations use Llama3B, Qwen2.5 72B, and GPT-4o. QTM and router settings Main QTM uses qwen/qwen-2.5-7b-instruct ; its prompt, schema, guardrails, and state-to-memory mapping are fixed. The controller-swap diagnostic additionally evaluates Mistral-7B-Instruct-v0.3 with the same original prompt/schema. Only the router updates online in the main system. Feedback and evaluators GPT-4o-mini supplies online routing feedback; primary benchmark final evaluators are described in Appendix C.4. The interaction-order diagnostic also uses a fixed GPT-4o-mini path-aware evaluator across all replays. Reward and cost Reward aggregation is specified in Appendix B.5; rubric dimensions appear in Table 9. Main R EAL MEM uses λcost = 0.002; component ablations use λcost = 0.5. Cost accounting follows Appendix B.6. Cost reporting Main R EAL MEM tables include generator and controller API costs (Appendix B.6); historical M ULTI CHALLENGE costs use the original run-level convention. Final evaluators and local compute are excluded. 
+
+Table 25: Reproducibility checklist. The release package will provide the implementation, configurations, prompt templates, and evaluation scripts. 32
