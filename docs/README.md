@@ -48,7 +48,7 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-19</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-20</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
     <strong class="dpr-home-dashboard-count">共 35 篇</strong>
@@ -58,7 +58,7 @@
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-19 20:15:10 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-20 19:29:01 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-19 日报已出炉：35 篇推荐分为 15 篇精读、20 篇速读，聚焦智能体协作、科研与行为模拟。</p>
-<p>最值得关注的是 CLI 智能体的人机协作评估《RealCLI》（10.0/10），以及实验物理中的智能体科研原则与技术（9.0/10）。</p>
-<p>建议先读这两篇的摘要，把握协作评估与科研应用，再按兴趣速读城市出行模拟、用户表征或声誉演化方向的论文（均为 8.0/10）。</p>
+<p>2026-10-20 论文日报已出炉：共整理 35 篇，精读 15 篇、速读 20 篇，重点关注大模型行为与智能体安全。</p>
+<p>最值得看的是大模型的受众指向性与迎合行为（10.0/10），以及多模态移动智能体在跨模态一致性注入下的安全评估（9.0/10）。</p>
+<p>建议先读这两篇的摘要，再按兴趣浏览 AI 对话记忆审计或用户价值引导方向的速读论文（均为 8.0/10）。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -83,9 +83,9 @@
     <strong class="dpr-home-dashboard-count">15 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="RealCLI: Toward a Unified Evaluation of Human-Agent Collaboration for CLI Agents">RealCLI: Toward a Unified Evaluation of Human-Agent Collaboration for CLI Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="Principles and Techniques for Agentic Research in Experimental Physics">Principles and Techniques for Agentic Research in Experimental Physics</span></li><li><span class="dpr-home-dashboard-paper-title" title="Task-Centric Multimodal Learning for Cognitive Impairment Detection">Task-Centric Multimodal Learning for Cognitive Impairment Detection</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="No Matter Who You Are: Addressivity and Sycophancy in Large Language Models">No Matter Who You Are: Addressivity and Sycophancy in Large Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="MobileInject: Evaluating Reasoning-to-Action Security of MLLM-Based Mobile Agents under Cross-Modal Consistency Injection">MobileInject: Evaluating Reasoning-to-Action Security of MLLM-Based Mobile Agents under Cross-Modal Consistency Injection</span></li><li><span class="dpr-home-dashboard-paper-title" title="Analyzing Repetition and Interference Effects in Memory-Constrained User Simulators">Analyzing Repetition and Interference Effects in Memory-Constrained User Simulators</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>8</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>4</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -96,9 +96,9 @@
     <strong class="dpr-home-dashboard-count">20 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Towards Adaptive and Real-Survey-Aligned Simulated Urban Mobility Behaviour of Generative Agents">Towards Adaptive and Real-Survey-Aligned Simulated Urban Mobility Behaviour of Generative Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="Learning User Representations to Improve Simulation Fidelity">Learning User Representations to Improve Simulation Fidelity</span></li><li><span class="dpr-home-dashboard-paper-title" title="Gossip Agents: Reputation through Opinion Dynamics over Evolving Networks">Gossip Agents: Reputation through Opinion Dynamics over Evolving Networks</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Immersive Focus+Context Techniques to Assist in Interpretation of High Density Forest Point Clouds">Immersive Focus+Context Techniques to Assist in Interpretation of High Density Forest Point Clouds</span></li><li><span class="dpr-home-dashboard-paper-title" title="An Interactive GraphRAG Workspace for Reifying, Auditing, and Steering Conversational AI Memories">An Interactive GraphRAG Workspace for Reifying, Auditing, and Steering Conversational AI Memories</span></li><li><span class="dpr-home-dashboard-paper-title" title="VISTA: Steering LLMs with Latent User Values Inferred from a Few Survey Answers">VISTA: Steering LLMs with Latent User Values Inferred from a Few Survey Answers</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>7</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>3</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>6</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span></div>
 </section>
 </div>
 
