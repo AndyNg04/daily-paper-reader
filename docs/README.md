@@ -48,7 +48,7 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-20</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-21</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
     <strong class="dpr-home-dashboard-count">共 35 篇</strong>
@@ -58,7 +58,7 @@
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-20 19:29:01 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-21 19:13:52 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-20 论文日报已出炉：共整理 35 篇，精读 15 篇、速读 20 篇，重点关注大模型行为与智能体安全。</p>
-<p>最值得看的是大模型的受众指向性与迎合行为（10.0/10），以及多模态移动智能体在跨模态一致性注入下的安全评估（9.0/10）。</p>
-<p>建议先读这两篇的摘要，再按兴趣浏览 AI 对话记忆审计或用户价值引导方向的速读论文（均为 8.0/10）。</p>
+<p>10 月 21 日论文日报已完成：共梳理 35 篇，精读 15 篇、速读 20 篇，聚焦协作智能体、政策对齐与人机交互。</p>
+<p>最值得关注的是长时程协作智能体的训练环境合成，以及基于匿名群体反馈的可引导多元政策对齐，两篇推荐精读均获 9.0/10。</p>
+<p>建议先按兴趣选读一篇高分精读，再搭配共享自主交互或大模型个性化约束评估的速读，了解 AI 如何更好地与人协作、适应不同需求。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -83,9 +83,9 @@
     <strong class="dpr-home-dashboard-count">15 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="No Matter Who You Are: Addressivity and Sycophancy in Large Language Models">No Matter Who You Are: Addressivity and Sycophancy in Large Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="MobileInject: Evaluating Reasoning-to-Action Security of MLLM-Based Mobile Agents under Cross-Modal Consistency Injection">MobileInject: Evaluating Reasoning-to-Action Security of MLLM-Based Mobile Agents under Cross-Modal Consistency Injection</span></li><li><span class="dpr-home-dashboard-paper-title" title="Analyzing Repetition and Interference Effects in Memory-Constrained User Simulators">Analyzing Repetition and Interference Effects in Memory-Constrained User Simulators</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="CoworkEnv: Synthesizing Training Environments for Long-Horizon Cowork Agents">CoworkEnv: Synthesizing Training Environments for Long-Horizon Cowork Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="Steerable Pluralistic Policy Alignment from Anonymized Crowd Feedback">Steerable Pluralistic Policy Alignment from Anonymized Crowd Feedback</span></li><li><span class="dpr-home-dashboard-paper-title" title="Act on Your Behalf, Beyond Your Authorization: Benchmarking LLM Agent Authorization Alignment">Act on Your Behalf, Beyond Your Authorization: Benchmarking LLM Agent Authorization Alignment</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>4</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>5</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>4</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -96,9 +96,9 @@
     <strong class="dpr-home-dashboard-count">20 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Immersive Focus+Context Techniques to Assist in Interpretation of High Density Forest Point Clouds">Immersive Focus+Context Techniques to Assist in Interpretation of High Density Forest Point Clouds</span></li><li><span class="dpr-home-dashboard-paper-title" title="An Interactive GraphRAG Workspace for Reifying, Auditing, and Steering Conversational AI Memories">An Interactive GraphRAG Workspace for Reifying, Auditing, and Steering Conversational AI Memories</span></li><li><span class="dpr-home-dashboard-paper-title" title="VISTA: Steering LLMs with Latent User Values Inferred from a Few Survey Answers">VISTA: Steering LLMs with Latent User Values Inferred from a Few Survey Answers</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="From Proposal to Execution: Modeling Interaction Semantics in Shared Autonomy">From Proposal to Execution: Modeling Interaction Semantics in Shared Autonomy</span></li><li><span class="dpr-home-dashboard-paper-title" title="AI-Mediated Employee Voice and Performance: Disentangling Informational and Affective Pathways">AI-Mediated Employee Voice and Performance: Disentangling Informational and Affective Pathways</span></li><li><span class="dpr-home-dashboard-paper-title" title="Neither Over- nor Under-Constrained: Evaluating LLM Personalization under a Constraint Qualification Audit">Neither Over- nor Under-Constrained: Evaluating LLM Personalization under a Constraint Qualification Audit</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>6</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>9</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>7</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
 </section>
 </div>
 
