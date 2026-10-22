@@ -1,0 +1,1992 @@
+CoopUQ: Robust Multi-Robot Social Navigation via
+Uncertainty-Aware Cooperative Forecasting
+Zehao Wang1
+Jianpeng Yao2
+Yuping Wang3
+Yiping Li4
+Jiaqi Li5
+Zhixu Li2
+Kanghoon Lee6
+Jinfeng Wang2
+Cong Liu2
+Zhaowei Tan2
+Jinkyoo Park6
+Jiachen Li1∗
+1Georgia Institute of Technology
+2University of California, Riverside
+3University of Michigan, Ann Arbor
+4University of Georgia
+5New York University
+6KAIST
+Abstract: Reinforcement learning enables mobile robots to make fast and scal-
+able navigation decisions in constrained human-shared environments. However,
+directly extending single-robot approaches to multi-robot settings often fails to
+ensure safety and efficiency, especially under occlusions and out-of-distribution
+(OOD) scenarios, where individual robots may overlook potential risks or make
+inaccurate predictions. Leveraging cooperation effectively for both prediction and
+navigation remains a major challenge. We propose CoopUQ, a multi-robot social
+navigation framework that bridges uncertainty-aware cooperative occupancy fore-
+casting and robust decision making. CoopUQ predicts future occupancy grid maps
+through cross-robot spatiotemporal feature fusion and further leverages forecasts
+and their uncertainty to guide policy via constrained multi-agent reinforcement
+learning, where the cost penalizes navigation through regions predicted to be oc-
+cupied or highly uncertain. This design enables the policy to adapt its risk sensitiv-
+ity under distribution shifts. Experimental results across multiple Unity3D-based
+simulation environments with both in-distribution and OOD settings, including
+diverse layouts, pedestrian densities, and rushing behavior, demonstrate improved
+prediction performance and safety over representative baselines. Real-robot ex-
+periments further demonstrate its robustness across various scenes. Our code and
+videos are available at https://coopuq.github.io/.
+Keywords: Social Navigation, Multi-Robot Systems, Occupancy Forecasting
+1
+Introduction
+Safely navigating among humans is fundamental to deploying mobile robots in real-world shared
+spaces such as hospitals, offices, and warehouses [1, 2, 3, 4]. Multiple robots may operate simul-
+taneously in these constrained spaces while pedestrians move unpredictably through narrow corri-
+dors, blind corners, and cluttered layouts. Navigation decisions are shaped by both static geometry
+and dynamic human motion. Reinforcement learning (RL) and multi-agent reinforcement learn-
+ing (MARL) support reward-driven policy learning and preference-based refinement [5, 6], provide
+fast decision-making, and have shown promising performance in multi-robot socially-aware navi-
+gation [7, 8, 9, 10, 11, 12, 13, 14, 15]. Previous studies have shown that prediction-aware policies
+can help robots shape their decisions on future human motion [16, 17, 18, 19, 20]. While trajectory
+prediction is widely used to represent pedestrian futures, it often focuses on dynamic agents alone
+and does not model the surrounding static geometry that is crucial in constrained spaces. Occupancy
+grid maps (OGMs) [21, 22] provide a more unified representation, encoding static obstacles, free
+∗Corresponding author: jiachen li@gatech.edu
+10th Conference on Robot Learning (CoRL 2026), Austin, Texas, USA.
+arXiv:2610.26852v1  [cs.RO]  19 Oct 2026
+
+
+Cooperative Occupancy 
+Forecasting
+Lobby-A
+Corridor-A
+Lobby-B
+Corridor-B
+Risky behavior from failing to 
+forecast humans behind walls
+Safer behavior with sharing in 
+dynamic constrained spaces
+Without 
+Cooperation
+With 
+Cooperation
+Cross-Robot 
+Fusion
+Robust under 
+OOD Scenarios
+Risk-aware 
+Multi-robot Policy
+Denser Crowds
+Unseen Layouts
+Rushing Human
+Actor
+Critic
+Reward
+Cost
+…
+Early detour 
+and avoid
+Cluttered Env. 
+with Crowds
+Human Change 
+Direction
+Human in 
+Occlusion
+Figure 1: The single-agent approach relies only on the robot’s own observations and misses an
+incoming pedestrian behind the obstacle. In contrast, CoopUQ fuses shared information, anticipates
+dynamic motions under uncertainty, and plans a safe trajectory. Closed-loop experiments in Unity-
+3D simulation demonstrate robustness in OOD scenarios, and the learned policy transfers directly
+to various real-world environments, achieving safe navigation across diverse crowds and layouts.
+space, and human motion within the same spatial structure. This makes OGMs suitable for social
+navigation in cluttered and partially observable environments.
+However, forecasting future occupancy remains challenging in environments with evolving pedes-
+trian intentions, diverse motion patterns, denser crowds, and unseen occlusion-heavy regions.
+Learning-based policies often degrade under such out-of-distribution (OOD) scenarios, since dis-
+tribution shifts can introduce prediction errors and severely mislead planning. This challenge is pro-
+nounced when multiple robots operate in constrained environments shared with pedestrians, where
+each individual robot may overlook risks caused by occlusions or inaccurate predictions. Therefore,
+effective cooperation among robots is essential to ensure safety, efficiency, and human comfort.
+Moreover, to ensure robust and adaptive navigation, robots need not only to predict future states
+but also to estimate the uncertainty of predictions. Such uncertainty indicates when a prediction is
+reliable and when the policy should adapt its behavior. For instance, as shown in Figure 1, a robot
+may get stuck in a confined area due to static obstacles or fail to detect pedestrians hidden behind
+a wall when turning a corner. In contrast, cooperative multi-robot systems can coordinate planning
+and exchange information to improve task execution and situational awareness [23, 24, 25]. By shar-
+ing spatiotemporal features when a nearby robot detects a pedestrian in an occluded region, robots
+can make more informed and proactive decisions, improving safety, efficiency, and human comfort
+under challenging distribution shifts.
+To this end, we propose CoopUQ, a multi-robot social navigation framework. CoopUQ forecasts fu-
+ture OGMs and estimates uncertainty maps by modeling the stochasticity of future occupancy over
+cross-robot spatiotemporal features, improving prediction quality over raw-LiDAR or prediction-
+level fusion. Beyond using uncertainty as an extra observation, we employ constrained multi-agent
+reinforcement learning (CMARL) [26] to explicitly guide risk-aware control, allowing robots to
+avoid ambiguous regions under distribution shifts while maintaining efficiency in well-observed ar-
+eas. Our main contributions are three-fold. First, CoopUQ leverages uncertainty as a bridge between
+stochastic cooperative forecasting and robust decision making. Second, we design a deviation-
+guided cross-robot fusion module that adaptively aggregates complementary features in regions af-
+fected by occlusions or cross-robot disagreement. Third, we introduce a risk-aware safety cost in
+CMARL to explicitly guide the navigation policy. Extensive Unity3D simulations and real-robot ex-
+periments demonstrate safer and more robust navigation across in-distribution and OOD scenarios.
+2
+
+
+2
+Related Work
+Social Robot Navigation. Mobile robots that navigate in spaces shared with humans should adhere
+to social norms [27, 4, 28, 29, 30, 31]. Social navigation is often modeled as a Partially Observable
+Markov Decision Process, where agents act based on incomplete local observations [27]. A key
+challenge is modeling partial and uncertain observations in real-world environments [32]. Many
+prior works focus on predicting trajectories of dynamic obstacles, modeling pedestrians as sim-
+ple position-radius tuples. These rule-based or learning-based methods perform well in simulation
+[16, 17, 10, 7, 8, 9, 33], but often assume full visibility in open spaces and overlook static obstacles,
+limiting their applicability in occluded or cluttered environments. In contrast, we adopt OGM fore-
+casting with uncertainties as a holistic spatiotemporal representation and aggregate complementary
+observations through multi-robot cooperation, enabling safer decisions in constrained environments.
+Occupancy Grid Map (OGM) Forecasting. Predicting the future environment remains challeng-
+ing due to its inherent stochasticity and uncertainty. OGM is an effective spatial representation
+that unifies both static and dynamic obstacles. Since OGMs can be treated as images, multi-step
+forecasting is often formulated as a video prediction problem [34, 35, 36, 37, 38]. Recent stud-
+ies use OGMs to model dynamic human crowds [39, 40]. However, individual OGM forecasting
+remains challenging in constrained environments, where occlusions can lead to incomplete or less
+accurate predictions. In contrast, cooperative forecasting allows multiple robots to fuse spatiotem-
+poral features and produce uncertainty-aware predictions, constructing more reliable guidance for
+downstream navigation.
+Cooperative Perception and Prediction. Cooperative perception and prediction are crucial for
+addressing partial observability and perceptual limitations, particularly in environments with oc-
+clusions [41]. By sharing sensor data, intermediate features, or predictions, multiple agents can
+construct a more comprehensive scene understanding, enhancing detection and motion prediction
+in occlusion scenarios [42, 43, 44, 45]. In this work, we bridge cooperative occupancy forecasting
+with uncertainty-aware planning for multi-robot social navigation, allowing robots to leverage pre-
+dictions and their corresponding uncertainties to make more robust decisions under occlusion and
+distribution shifts.
+3
+Method
+3.1
+Problem Formulation
+We consider the problem of navigating N mobile robots in an environment with static obstacles (e.g.,
+walls, bookshelves) and dynamic obstacles (e.g., pedestrians, other robots). Each robot is assigned
+a goal location, and our objective is to learn a multi-robot navigation policy that enables all robots
+to reach their goals safely and efficiently. Formally, we formulate multi-robot social navigation as
+a constrained Markov game [26], defined by the tuple ⟨I, S, O, A, T , R, C, ρ0, γ⟩. The agent set
+I = {1, . . . , N} represents the robots. The state space S includes states of robots, dynamic, and
+static obstacles. The joint observation space is O = ×i∈IOi, where Oi is the local observation
+space of robot i. The joint action space is A = ×i∈IAi, where each action ai
+t ∈R2 represents the
+desired 2D velocity of robot i at time t. The transition function T governs the state evolution, with
+each robot tracking its desired velocity through a controller. R and C denote the reward and cost
+functions, which aggregate individual rewards and costs, respectively. Finally, ρ0 is the initial state
+distribution and γ ∈[0, 1) is the discount factor. We optimize a shared policy πθ that maximizes the
+expected cumulative reward while keeping the cumulative cost below a specified limit ϵ:
+max
+πθ
+JR(πθ) = Eπθ
+" T
+X
+t=0
+γtR(st, at)
+#
+,
+s.t.
+JC(πθ) = Eπθ
+" T
+X
+t=0
+γtC(st, at)
+#
+≤ϵ,
+(1)
+where at = (a1
+t, . . . , aN
+t ), ai
+t ∼πθ(· | oi
+t), and oi
+t ∈Oi denotes the observation of robot i at time t.
+3
+
+
+Constrained MARL
+Uncertainty-Aware Cooperative Occupancy Forecasting
+Ego-motion
+Sampling
+LiDAR
+LiDAR
+ConvLSTM
+Recurrent State Encoder
+Reward 
+Critic
+Cost         
+Critic
+Local 
+Actor
+Graph Attention 
+Network
+𝐳= 𝝁+ 𝝈⊙𝝃,  
+𝝃∼𝒩𝟎, 𝐈
+Past OGMs
+Past OGMs
+Predicted OGMs
+Intrusion
+Uncertainty 
+Zone
+Dynamic Motion
+Uncertainty Map
+Predicted OGMs
+Uncertainty Map
+Goal
+MLP
+Ego 
+State
+Prediction and
+Uncertainty 
+Map
+Encoder
+Cross-Robot Spatiotemporal Fusion
+Encoder
+VAE 
+Safe action 
+under occlusion
+Sampling
+VAE 
+Ego-motion
+Robot States
+Robot States
+Fused Spatiotemporal 
+Feature
+Fused Spatiotemporal 
+Feature
+Cross-Agent 
+Spatial Attention
+Multi-Head
+Self-Attention
+FFN
+Figure 2: The overall architecture of the CoopUQ for multi-robot social navigation.
+3.2
+Method Overview
+Figure 2 provides an overview of the proposed framework. We first encode each robot’s LiDAR
+sequence into spatiotemporal features and employ cross-robot fusion to generate multi-step OGM
+forecasts and uncertainty estimates, providing a holistic and risk-aware view of the future scene. We
+then augment the policy observation with the predicted OGMs and uncertainty maps, and guide safe
+and efficient multi-robot social navigation via constrained MARL.
+3.3
+Uncertainty-Aware Cooperative OGM Forecasting
+All robots are equipped with a 2D LiDAR sensor. Let yi
+t denote the LiDAR measurement of robot
+i at time t, and let pi
+t = [pxi
+t , pyi
+t ] denote its position. We convert LiDAR scans into local OGMs
+using ray-tracing-based occupancy mapping. LiDAR-derived local OGMs are inherently limited by
+occlusions and partial observations. A single robot may fail to observe pedestrians behind walls
+or obstacles, and LiDAR often captures only robot-facing surfaces, making it difficult to infer the
+complete object extent and shape. These limitations can lead to incomplete future forecasts and
+situational awareness, and may degrade downstream planning. To address these challenges, we
+propose a cooperative OGM predictor that leverages shared information from multiple robots to
+forecast a more holistic future occupancy representation. Since each robot performs forecasting
+in its own local frame, the prediction size remains independent of the global environment size.
+Given the past τ LiDAR observations y1:N
+t−τ:t and robot positions p1:N
+t−τ:t, the cooperative forecasting
+model predicts the h-step OGM sequence mi
+t+1:t+h ∈[0, 1]h×mx×my for each robot i. We use
+ℓ∈{1, . . . , h} to index future prediction steps.
+Deviation-guided Cross-Robot Spatiotemporal Fusion. Each robot converts its scan history into
+local OGMs and uses its pose history for ego-motion compensation. The compensated OGM his-
+tory is then encoded by a ConvLSTM encoder into a spatiotemporal feature Fi
+t. For ego robot
+i, features from neighboring robot k are aligned to the ego frame according to the relative pose:
+ˆFk→i
+t
+= ΓF (Fk
+t , pi
+t, pk
+t ), where ΓF (·) denotes the learnable spatial transformation. Instead of ap-
+plying plain fusion uniformly over all regions, we compute the spatial disagreement between the ego
+feature and aligned neighboring features, where a large deviation suggests complementary or incon-
+sistent observations caused by occlusion or dynamic agents. This cue is converted into a learnable
+gate Gi
+t to guide cross-agent spatial attention: Fi
+cross = Attncross(Fi
+t, {ˆFk→i
+t
+}k̸=i; Gi
+t). The gate
+encourages peer aggregation in uncertain or inconsistent regions while preserving reliable ego fea-
+tures in well-observed areas. Finally, we apply window-based MHSA to model spatial dependencies
+in the fused feature and an FFN for channel-wise refinement: Fi
+fuse = FFN(MHSA(Fi
+cross)).
+Stochastic Forecasting and Uncertainty Map Estimation. Following the stochastic prediction
+design [40, 46], we adopt a variational autoencoder (VAE) to model the future occupancy distri-
+4
+
+
+bution rather than predicting a deterministic map. Given the fused feature Fi
+fuse, which encodes
+the cross-robot predictive representation of future occupancy from past observations, the encoder
+parameterizes a latent distribution as a diagonal Gaussian with mean µ and standard deviation σ,
+regularized toward a standard Gaussian prior. Latent variables are sampled via the reparameteri-
+zation trick and decoded into future occupancy probabilities, capturing the stochasticity of future
+occupancy induced by dynamic pedestrians and ambiguous motion. To preserve sharp static geom-
+etry while modeling uncertain dynamic regions, we introduce a skip-connected decoder that passes
+the current OGM directly to the decoding stage. We further sample a separate latent variable for
+each future step and decode all h future OGMs non-autoregressively, avoiding error accumulation
+and cost from recursive prediction. To estimate prediction uncertainty, we draw M samples from
+the model to obtain M candidate future OGM sequences. Their pixel-wise average forms the pre-
+dicted OGM sequence mi
+t+1:t+h, while the uncertainty map ui
+t+1:t+h is computed using pixel-wise
+normalized Shannon entropy over the sampled OGMs. Larger uncertainty values often occur near
+dynamic pedestrians, occluded regions, or ambiguous future motion.
+Early and Late Fusion. We also consider two alternative fusion strategies for comparison. In the
+early fusion setting, robots share their LiDAR scans with neighboring robots within the communica-
+tion range. For each ego robot, the scans received from neighboring robots are transformed into the
+ego frame using relative poses. The ego robot then removes self-hits, converts the aggregated scans
+into local OGMs, and performs future occupancy forecasting based on the fused sensor input. This
+strategy preserves low-level geometric information but is more sensitive to communication delay or
+localization noise. In the late fusion setting, each robot first predicts future OGMs independently
+using its own observations. The predicted OGMs are then shared with neighboring robots, trans-
+formed into the ego frame, and aggregated at the prediction level. This strategy may lose useful
+intermediate features and can dilute safety-critical predictions.
+3.4
+Constrained MARL with Forecasting and Uncertainty
+The observation of robot i is defined as oi
+t = [xi
+t, mi
+t:t+h, ui
+t:t+h, ri
+t] ∈Oi, where xi
+t = [pi
+t, gi
+t]
+is the ego state including position and goal. mi
+t:t+h contains the current OGM and the predicted
+future OGMs. ui
+t:t+h contains a zero map at the current step, and the uncertainty maps from future
+predictions. Finally, ri
+t denotes neighboring robot states. We encode [mi
+t:t+h, ui
+t:t+h] with a Con-
+vLSTM to reason over uncertainty-aware predictions, encode xi
+t with an MLP, and process ri
+t with
+a graph attention network to model robot-robot interactions. The resulting features are concatenated
+and passed through a GRU for recurrent policy learning. Beyond using predictions as additional ob-
+servation channels, CoopUQ leverages the predicted OGM and uncertainty map to explicitly guide
+risk-aware decision making. We adopt constrained MARL so that the policy learns to maximize task
+reward while satisfying a safety-cost constraint. The cost is designed to penalize navigation through
+regions that are predicted to be occupied or highly uncertain.
+For robot i, we define two local regions around the robot: a safety region Bi
+occ for the predicted
+OGM and a risk region Bi
+unc for the uncertainty map. A cost is incurred if any cell in the predicted
+OGM within Bi
+occ exceeds a threshold ϕocc, or if any cell in the uncertainty map within Bi
+unc exceeds
+an uncertainty threshold ϕunc. The per-robot cost is defined as:
+Ci(st, at) = ∆t ·
+h
+max
+ℓ∈{0,...,h}
+(x,y)∈Bi
+occ
+λoccI
+ mi
+t+ℓ(x, y) > ϕocc
+
+wd(x, y)
++
+max
+ℓ∈{0,...,h}
+(x,y)∈Bi
+unc
+λuncI
+ ui
+t+ℓ(x, y) > ϕunc
+
+wd(x, y)
+i
+,
+(2)
+where ℓ= 0 includes the current step, I(·) is the indicator function, λocc and λunc are weighting
+factors, and wd(x, y) is a distance-based cell weight with respect to the ego robot. The final cost
+is scaled by the control duration ∆t. The occupancy term discourages the robot from entering
+regions likely to be occupied, while the uncertainty term encourages caution in regions where future
+5
+
+
+occupancy is unreliable. This allows the policy to adapt its risk sensitivity under distribution shifts
+and occlusions, while avoiding unnecessary conservatism in well-observed static regions.
+The individual reward for robot i is defined as follows: the robot receives +10 if it reaches the goal,
+i.e., dtarget < Dgoal, −10 for collision with static obstacles, −15 for collision with other robots, −20
+for collision with humans, and otherwise receives a dense progress reward rdis. Here, dtarget is the
+Euclidean distance to the goal and Dgoal = 0.5 m is the goal radius. The dense progress reward is
+defined as rdis = ∆d · f + rtime, where ∆d = dt
+target −dt+1
+target, f = 5 is the progress scaling factor,
+and rtime = −0.1 is the time penalty. A positive ∆d indicates progress toward the goal.
+We optimize the shared policy using MAPPO-Lagrangian. Following the constrained objective in
+Eq. 1, we transform the constrained optimization into the following Lagrangian objective:
+max
+πθ min
+η≥0 L(πθ, η) = JR(πθ) −η
+ JC(πθ) −ϵ
+
+,
+(3)
+where η is the Lagrange multiplier and ϵ is the cost limit. We use two separate critics to estimate
+reward and cost values, respectively. This formulation enables the policy to trade off goal-reaching
+efficiency and safety under prediction uncertainty.
+4
+Experiments
+4.1
+Simulation Environment and Dataset
+We build a Unity3D-based multi-robot social navigation simulator with static obstacles, dynamic
+pedestrians, and multiple robots. Pedestrians are simulated using Unity NavMesh with randomized
+goals and speeds. For training, three robots navigate in three layouts with 5–10 pedestrians; for
+in-distribution testing, we use the same layouts with 7–10 pedestrians. OOD evaluation includes
+unseen layouts, denser crowds with 12–15 pedestrians, and faster pedestrians with speeds up to
+2 m/s. We report results with three robots in Table 2 and evaluate scalability to five and ten robots
+in App. A.2. For OGM forecasting, we collect LiDAR and pose data at 5 Hz from the simulator and
+generate 64 × 64 OGMs with 0.1 m resolution. The history window is set to τ = 5. The dataset
+contains 361,152 training and 30,498 testing samples from multi-robot, multi-pedestrian scenarios.
+4.2
+Evaluation Metrics and Baselines
+Cooperative Forecasting. We evaluate future OGM forecasting over the next 5 steps using metrics
+from the video forecasting literature [47]. WMSE measures weighted pixel-wise prediction errors,
+SSIM reflects the structural consistency of the predicted scene geometry, and IoU measures the
+overlap between predicted and ground-truth occupied regions. We compare SOGMP++ [40], where
+each robot forecasts OGMs without cooperation, against three cooperation strategies: early fusion,
+late fusion, and our spatiotemporal (middle) fusion. We further compare performance with clean,
+200 ms delay, and random localization (Loc.) noise during communication. Details in App. B.2.
+Social Navigation. We evaluate social navigation using metrics, including success rate (SR), colli-
+sion rate (CR), timeout rate (TR), average navigation time (NT), and path length (PL). We report av-
+erage acceleration (AA), intrusion time ratio (ITR), and social distance during intrusions (SD) [16].
+AA measures trajectory smoothness, while ITR and SD evaluate social awareness around pedestri-
+ans. We compare against NavMesh, ORCA [48] for reciprocal collision avoidance, SAMARL [10]
+for learned multi-robot coordination, SCOPE [22] for non-cooperative prediction-aware navigation,
+and HEIGHT [49] for heterogeneous interaction modeling. We augment SAMARL with locally
+perceived static obstacles and extend HEIGHT to include neighboring robots without peer shar-
+ing. For ablation, we compare Prediction, which uses predicted OGMs without uncertainty, and
+CMARL, which uses predicted OGMs and uncertainty maps with MAPPO-Lagrangian constraints,
+under different cooperation modes.
+6
+
+
+Table 1: Comparison of OGM forecasting under different cooperation settings.
+Methods
+Cooperation
+Horizon
+SSIM ↑
+WMSE ↓
+IoU ↑
+Clean
+200ms Delay Loc. Noise
+Clean
+200ms Delay Loc. Noise
+Clean
+200ms Delay Loc. Noise
+SOGMP++ [40]
+No
+1
+0.75±0.00
+–
+–
+0.16±0.00
+–
+–
+0.60±0.01
+–
+–
+5
+0.71±0.00
+–
+–
+0.19±0.00
+–
+–
+0.57±0.01
+–
+–
+Ours
+Early Fusion
+1
+0.86±0.00
+0.79±0.01
+0.74±0.01
+0.07±0.00
+0.13±0.01
+0.15±0.01
+0.73±0.01
+0.65±0.01
+0.58±0.02
+5
+0.80±0.00
+0.74±0.01
+0.68±0.02
+0.12±0.00
+0.15±0.01
+0.20±0.01
+0.68±0.01
+0.60±0.02
+0.53±0.02
+Late Fusion
+1
+0.81±0.01
+0.78±0.01
+0.76±0.01
+0.12±0.00
+0.13±0.01
+0.15±0.01
+0.63±0.01
+0.61±0.02
+0.59±0.02
+5
+0.76±0.01
+0.74±0.01
+0.71±0.02
+0.14±0.01
+0.15±0.01
+0.17±0.01
+0.60±0.01
+0.58±0.02
+0.56±0.02
+Middle Fusion
+1
+0.90±0.00
+0.88±0.01
+0.84±0.01
+0.05±0.00
+0.06±0.01
+0.08±0.01
+0.77±0.01
+0.74±0.01
+0.68±0.01
+5
+0.86±0.00
+0.84±0.01
+0.80±0.01
+0.09±0.00
+0.10±0.01
+0.12±0.01
+0.72±0.01
+0.72±0.02
+0.64±0.02
+Table 2: In-distribution navigation performance with three robots.
+Methods
+Coop.
+SR↑
+CR↓
+TR↓
+NT↓
+PL↓
+AA↓
+ITR (%)↓
+SD↑
+Obstacle
+Human
+Robots
+NavMesh
+No
+0.39±0.05
+0.00±0.00
+0.41±0.06
+0.19±0.04
+0.00±0.00
+12.20±0.53
+13.89±0.62
+0.10±0.05
+12.93±1.79
+0.29±0.03
+ORCA [48]
+0.47±0.04
+0.17±0.02
+0.23±0.03
+0.06±0.01
+0.06±0.02
+10.04±0.42
+9.30±0.35
+0.10±0.02
+7.63±0.48
+0.36±0.03
+SAMARL [10]
+0.65±0.03
+0.10±0.02
+0.12±0.02
+0.05±0.01
+0.07±0.02
+12.98±0.46
+14.99±0.38
+0.18±0.03
+6.60±0.42
+0.37±0.03
+SCOPE [22]
+0.67±0.03
+0.10±0.02
+0.11±0.01
+0.03±0.01
+0.09±0.02
+13.39±0.65
+15.67±0.20
+0.18±0.02
+5.56±0.39
+0.38±0.04
+HEIGHT [49]
+0.70±0.03
+0.07±0.01
+0.13±0.02
+0.03±0.01
+0.06±0.01
+12.43±0.40
+13.80±0.32
+0.14±0.02
+4.08±0.31
+0.37±0.03
+Prediction
+0.71±0.01
+0.12±0.02
+0.13±0.01
+0.02±0.00
+0.01±0.00
+14.36±0.38
+16.94±0.26
+0.14±0.02
+5.78±0.27
+0.34±0.03
+CMARL
+0.75±0.02
+0.10±0.02
+0.10±0.03
+0.01±0.00
+0.04±0.02
+10.82±0.18
+13.74±0.16
+0.12±0.00
+4.17±0.26
+0.39±0.02
+Prediction
+Late
+0.78±0.03
+0.08±0.02
+0.10±0.02
+0.01±0.01
+0.02±0.02
+9.89±0.18
+12.23±0.33
+0.13±0.07
+3.96±0.19
+0.40±0.01
+CMARL
+0.81±0.03
+0.07±0.02
+0.09±0.02
+0.01±0.01
+0.01±0.02
+10.93±0.16
+13.27±0.36
+0.12±0.05
+3.37±0.16
+0.42±0.02
+Prediction
+Early
+0.77±0.02
+0.11±0.01
+0.06±0.02
+0.01±0.01
+0.05±0.02
+9.94±0.19
+12.55±0.33
+0.14±0.06
+2.68±0.36
+0.43±0.01
+CMARL
+0.82±0.02
+0.07±0.01
+0.05±0.01
+0.00±0.01
+0.06±0.02
+11.55±0.36
+14.30±0.47
+0.12±0.05
+2.37±0.19
+0.43±0.01
+Prediction
+Middle
+0.84±0.02
+0.06±0.01
+0.05±0.01
+0.01±0.01
+0.04±0.02
+10.46±0.09
+12.08±0.29
+0.11±0.03
+2.17±0.26
+0.42±0.01
+CMARL
+0.90±0.03
+0.03±0.01
+0.03±0.01
+0.00±0.00
+0.03±0.01
+9.80±0.15
+11.98±0.29
+0.13±0.05
+2.07±0.19
+0.45±0.03
+4.3
+Quantitative Results
+Cooperative Forecasting.
+Table 1 reports the mean and standard deviation over three test
+seeds. Under clean inputs, SOGMP++ performs worst across horizons, showing the limitation
+of individual-only forecasting under partial observability. All fusion strategies improve prediction
+quality by incorporating complementary views, with early fusion outperforming late fusion by rea-
+soning over a more complete context before prediction. CoopUQ (middle fusion) achieves the best
+across all metrics by preserving richer spatiotemporal context. At the 5-step horizon, it improves
+SSIM from 0.71 to 0.86 and IoU from 0.57 to 0.72 over SOGMP++, yielding relative gains of 21.1%
+and 26.3%. Under a 200 ms delay at the same 5-step horizon, it shows mild degradation, with a 2.3%
+SSIM drop and unchanged IoU, compared with larger drops for early and late fusion. Under local-
+ization noise, it retains the highest SSIM, with a 7.0% drop versus 15.0% and 6.6% for early and
+late fusion, as the learnable spatial transformation mitigates small misalignments. Overall, CoopUQ
+improves forecasting performance and remains robust.
+In-distribution Navigation. Table 2 summarizes in-distribution navigation performance with three
+robots. NavMesh avoids static obstacles with privileged map access, but suffers the lowest SR and
+high human/robot collision rates in dense dynamic crowds. SCOPE [22] improves over NavMesh
+but is limited by single-robot prediction. ORCA suffers from frequent human and obstacle colli-
+sions, while SAMARL and HEIGHT improve SR but remain limited by local observations. ORCA
+attains the shortest paths, whereas CoopUQ achieves the highest SR, lowest human CR and ITR,
+shortest NT, and largest SD. This contrast highlights the importance of considering navigation effi-
+ciency together with success and safety. Cooperative forecasting consistently improves navigation
+performance. Middle fusion achieves the strongest prediction-only result, reaching 0.84 SR and
+reducing human collision rate to 0.05, indicating that spatiotemporal fusion better preserves cross-
+robot context. Adding uncertainty-aware CMARL further improves safety. Without cooperation, SR
+increases from 0.71 to 0.75, and the human collision rate drops from 0.13 to 0.10. Lower ITR and
+higher SD further suggest that uncertainty maps help the policy avoid ambiguous high-risk regions
+while maintaining efficient motion. Overall, CoopUQ improves SR from 0.75 to 0.90 and reduces
+the human collision rate from 0.10 to 0.03 compared with non-cooperative CMARL. These results
+show that uncertainty-aware cooperative forecasting and risk-aware control jointly improve safety,
+efficiency, and social compliance in constrained dynamic environments.
+7
+
+
+No cooperation
+Late
+Early
+Middle
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+0.42
+0.5
+0.4
+0.58
+0.56
+0.38
+0.58
+0.27
+0.63
+0.29
+0.6
+0.31
+0.65
+0.29
+0.68
+0.3
+0.75
+0.22
+0.69
+0.26
+0.77
+0.2
+0.72
+0.25
+0.82
+0.15
+(a)
+No cooperation
+Late
+Early
+Middle
+0.38
+0.54
+0.33
+0.65
+0.49
+0.44
+0.52
+0.37
+0.58
+0.37
+0.55
+0.39
+0.57
+0.35
+0.66
+0.31
+0.73
+0.23
+0.66
+0.3
+0.74
+0.22
+0.7
+0.27
+0.8
+0.17
+(b)
+No cooperation
+Late
+Early
+Middle
+0.43
+0.5
+0.38
+0.6
+0.54
+0.41
+0.58
+0.35
+0.6
+0.32
+0.6
+0.35
+0.63
+0.3
+0.65
+0.27
+0.77
+0.21
+0.66
+0.26
+0.77
+0.2
+0.69
+0.24
+0.84
+0.13
+(c)
+NavMesh (SR)
+ORCA (SR)
+SAMARL (SR)
+SCOPE (SR)
+HEIGHT (SR)
+Prediction (SR)
+CMARL (SR)
+All (CR)
+All (TR)
+Figure 3: OOD test results in (a) unseen layouts, (b) denser crowds, and (c) rushing pedestrians.
+a)
+b)
+c)
+d)
+t
+t+2
+t+6
+t
+t+4
+t+13
+Collision
+after
+Failed
+Succeeded
+Avoidance
+Collision
+Avoidance
+Escaped
+Predict movement
+High uncertainty
+Cost constraint
+Figure 4: (a) Prediction w/o cooperation: The red robot reacts only after the human fully emerges
+into its view, resulting in a sharp brake and collision. (b) Prediction w/ cooperation: The red robot
+decelerates and changes direction earlier to avoid a collision. (c) Key frames of navigation w/o and
+w/ cooperation. (d) Prediction and uncertainty map from ours at step t. The red ego robot proactively
+avoids entering high-uncertainty areas due to cost constraints, thus preventing potential collisions.
+OOD Navigation. Fig. 3 shows the OOD navigation results. All learning-based methods degrade
+under distribution shifts, while CoopUQ achieves the highest SR across unseen layouts, denser
+crowds, and faster pedestrian motion. In unseen layouts, CoopUQ maintains the highest SR, indi-
+cating improved transferability from cooperative forecasting. Under increased pedestrian density,
+SCOPE drops by 22.4% in SR, whereas CoopUQ drops by only 11.1%. In the rushing-pedestrian
+setting, CoopUQ shows an SR drop of 6.7%, suggesting better robustness to sudden human motion.
+The widening performance gap shows that CoopUQ improves reliability in unfamiliar environments
+or unpredictable human behaviors, where forecasting becomes challenging.
+4.4
+Qualitative Results
+Cooperative Forecasting.
+Figure 4 (a) and (b) compare the predicted OGMs of SCOPE and
+CoopUQ in a scenario where three robots navigate through human crowds and diverse obstacle ge-
+ometries. As the red ego robot approaches a wall corner with limited visibility, a pedestrian emerges
+from behind the corner and crosses its path. SCOPE reacts only after the pedestrian becomes fully
+visible, leading to a collision. In contrast, CoopUQ leverages shared spatiotemporal features from
+neighboring robots to recover occluded regions and predict more complete scene geometry and dy-
+namic occupancy, enabling the ego robot to detect the risk earlier and proactively avoid the collision.
+Social Navigation.
+Figure 4(c) and (d) compare SCOPE and CoopUQ in a constrained scene
+with dense, randomly moving pedestrians. SCOPE reacts late to pedestrians and obstacles, brakes
+abruptly, and can become trapped due to limited field of view and inaccurate obstacle estimation. In
+contrast, CoopUQ leverages shared spatiotemporal features to better forecast obstacle geometry and
+pedestrian motion, enabling earlier deceleration and proactive direction changes. Its uncertainty map
+highlights ambiguous regions around pedestrians, allowing the constrained policy to avoid high-risk
+areas before collisions become imminent. Overall, uncertainty-aware cooperative forecasting and
+constrained control lead to safer, more efficient, and socially compliant navigation.
+8
+
+
+4.5
+Real Robot Experiments
+We deploy our method on two ROSMASTER X3 robots. Each uses an Ultra-Wideband (UWB)
+for localization, with measurements fused via a Kalman filter. Robots connect to a laptop with an
+NVIDIA RTX 3070 GPU for inference. The policy is trained in Unity simulation with holonomic
+dynamics and deployed to the robot without fine-tuning. We test in four everyday environments
+with one to three humans walking around. CoopUQ achieves an average SR of 0.94 across 48 trials.
+SCOPE obtains an average SR of 0.58, as it reacts only after pedestrians become fully visible in
+occluded scenarios, leading to collisions. Detailed quantitative results are provided in App. A.1.
+5
+Limitations and Future Work
+This work focuses on homogeneous 2D LiDAR-equipped robots and short-horizon occupancy fore-
+casting. This may limit CoopUQ under heterogeneous sensing or scenarios requiring longer-term
+human intent reasoning. Future work will explore heterogeneous robot teams with richer sensor
+modalities. The uncertainty map also does not explicitly capture semantic information. Incorpo-
+rating semantic occupancy from LiDAR is a promising direction. Finally, while we evaluate OOD
+performance under unseen layouts, denser crowds, and faster pedestrian motion, real-world distri-
+bution shifts are broader. Future work will test more diverse environments and pedestrian behaviors.
+6
+Conclusion
+We introduce CoopUQ, a multi-robot social navigation framework that bridges uncertainty-aware
+cooperative forecasting with robust decision making. CoopUQ uses cross-robot spatiotemporal fu-
+sion to produce accurate occupancy forecasts and incorporates prediction uncertainty into a con-
+strained MARL policy. This enables robots to avoid ambiguous high-risk regions while maintain-
+ing efficiency in well-observed areas. Extensive Unity3D simulations and real-world experiments
+demonstrate improved safety, efficiency, and robustness across in-distribution and OOD scenarios.
+References
+[1] T. Kruse, A. K. Pandey, R. Alami, and A. Kirsch. Human-aware robot navigation: A survey.
+Robotics and Autonomous Systems, 61(12):1726–1743, 2013.
+[2] J. Rios-Martinez, A. Spalanzani, and C. Laugier. From proxemics theory to socially-aware
+navigation: A survey. International Journal of Social Robotics, 7:137–153, 2015.
+[3] C. Mavrogiannis, F. Baldini, A. Wang, D. Zhao, P. Trautman, A. Steinfeld, and J. Oh. Core
+challenges of social robot navigation: A survey. ACM Transactions on Human-Robot Interac-
+tion, 12(3):1–39, 2023.
+[4] C. Chen, S. Hu, P. Nikdel, G. Mori, and M. Savva. Relational graph learning for crowd navi-
+gation. In 2020 IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS),
+pages 10007–10013, 2020.
+[5] Z. Zhao, C. Hua, F. Berto, Z. Ma, K. Lee, J. Li, and J. Park. EvoNav: Evolutionary reward func-
+tion design for robot navigation with large language models. arXiv preprint arXiv:2605.11859,
+2026.
+[6] H. Kim, K. Lee, J. Park, J. Li, and J. Park. Human implicit preference-based policy fine-tuning
+for multi-agent reinforcement learning in USV swarm. In IEEE/RSJ International Conference
+on Intelligent Robots and Systems (IROS), pages 18653–18659, 2025.
+[7] Y. F. Chen, M. Liu, M. Everett, and J. P. How. Decentralized non-communicating multiagent
+collision avoidance with deep reinforcement learning. In 2017 IEEE International Conference
+on Robotics and Automation (ICRA), pages 285–292, 2017.
+9
+
+
+[8] R. Han, S. Chen, and Q. Hao. Cooperative multi-robot navigation in dynamic environment
+with deep reinforcement learning. In 2020 IEEE International Conference on Robotics and
+Automation (ICRA), pages 448–454, 2020.
+[9] P. Long, T. Fan, X. Liao, W. Liu, H. Zhang, and J. Pan. Towards optimally decentralized
+multi-robot collision avoidance via deep reinforcement learning. In 2018 IEEE International
+Conference on Robotics and Automation (ICRA), pages 6252–6259, 2018.
+[10] W. Wang, L. Mao, R. Wang, and B.-C. Min. Multi-robot cooperative socially-aware navigation
+using multi-agent reinforcement learning. In 2024 IEEE International Conference on Robotics
+and Automation (ICRA), pages 12353–12360, 2024.
+[11] Y. F. Chen, M. Everett, M. Liu, and J. P. How. Socially aware motion planning with deep
+reinforcement learning. In 2017 IEEE/RSJ International Conference on Intelligent Robots and
+Systems (IROS), pages 1343–1350, 2017.
+[12] M. Everett, Y. F. Chen, and J. P. How. Motion planning among dynamic, decision-making
+agents with deep reinforcement learning. In 2018 IEEE/RSJ International Conference on In-
+telligent Robots and Systems (IROS), 2018.
+[13] C. Chen, Y. Liu, S. Kreiss, and A. Alahi. Crowd-robot interaction: Crowd-aware robot navi-
+gation with attention-based deep reinforcement learning. In 2019 International Conference on
+Robotics and Automation (ICRA), 2019.
+[14] C. P´erez-D’Arpino, C. Liu, P. Goebel, R. Mart´ın-Mart´ın, and S. Savarese. Robot navigation in
+constrained pedestrian environments using reinforcement learning. In 2021 IEEE International
+Conference on Robotics and Automation (ICRA), pages 1140–1146, 2021.
+[15] Z. Xie and P. Dames. DRL-VO: Learning to navigate through crowded dynamic scenes using
+velocity obstacles. IEEE Transactions on Robotics, 39(4):2700–2719, 2023.
+[16] S. Liu, P. Chang, Z. Huang, N. Chakraborty, K. Hong, W. Liang, D. L. McPherson, J. Geng, and
+K. Driggs-Campbell. Intention aware robot crowd navigation with attention-based interaction
+graph. In 2023 IEEE International Conference on Robotics and Automation (ICRA), pages
+12015–12021, 2023.
+[17] J. Li, C. Hua, J. Yao, H. Ma, J. Park, V. Dax, and M. J. Kochenderfer. Multi-agent dynamic
+relational reasoning for social robot navigation. arXiv preprint arXiv:2401.12275, 2024.
+[18] L. Bruckschen, K. Bungert, N. Dengler, and M. Bennewitz. Human-aware robot navigation
+by long-term movement prediction. In 2020 IEEE/RSJ International Conference on Intelligent
+Robots and Systems (IROS), pages 11032–11037, 2020.
+[19] A. Wang, C. Mavrogiannis, and A. Steinfeld. Group-based motion prediction for navigation in
+crowded environments. In Proceedings of the 5th Conference on Robot Learning, volume 164
+of Proceedings of Machine Learning Research, pages 871–882. PMLR, 2022.
+[20] S. Poddar, C. Mavrogiannis, and S. S. Srinivasa.
+From crowd motion prediction to robot
+navigation in crowds. In 2023 IEEE/RSJ International Conference on Intelligent Robots and
+Systems (IROS), 2023.
+[21] M. Schreiber, V. Belagiannis, C. Gl¨aser, and K. Dietmayer. A multi-task recurrent neural
+network for end-to-end dynamic occupancy grid mapping. In 2022 IEEE Intelligent Vehicles
+Symposium (IV), pages 315–322. IEEE, 2022.
+[22] Z. Xie and P. Dames.
+SCOPE: Stochastic cartographic occupancy prediction engine for
+uncertainty-aware dynamic navigation. IEEE Transactions on Robotics, 41:4139–4158, 2025.
+10
+
+
+[23] P. Gupta, S. Bae, J. Li, and D. Isele. Scale-Plan: Scalable language-enabled task planning for
+heterogeneous multi-robot teams. In IEEE/RSJ International Conference on Intelligent Robots
+and Systems (IROS), 2026.
+[24] K. Lee, H. Kim, J. Li, and J. Park. Priority-aware multi-robot coverage path planning. IEEE
+Robotics and Automation Letters, 11(3):3534–3541, 2026.
+[25] X. Zhang, Z. Wang, Z. Li, J. Yao, and J. Li. CommCP: Efficient multi-agent coordination via
+LLM-based communication with conformal prediction. In IEEE International Conference on
+Robotics and Automation (ICRA), 2026.
+[26] S. Gu, J. Grudzien Kuba, Y. Chen, Y. Du, L. Yang, A. Knoll, and Y. Yang. Safe multi-agent
+reinforcement learning for multi-robot control. Artificial Intelligence, 319:103905, 2023.
+[27] R. Mirsky, X. Xiao, J. Hart, and P. Stone. Conflict avoidance in social navigation: A survey.
+ACM Transactions on Human-Robot Interaction, 13(1):1–36, 2024.
+[28] W. Zhu and M. Hayashibe. Learn to navigate in dynamic environments with normalized Li-
+DAR scans. In 2024 IEEE International Conference on Robotics and Automation, pages 7568–
+7575. IEEE, 2024.
+[29] J. Van den Berg, M. Lin, and D. Manocha. Reciprocal velocity obstacles for real-time multi-
+agent navigation. In 2008 IEEE International Conference on Robotics and Automation, pages
+1928–1935. IEEE, 2008.
+[30] R. Chandra, V. Zinage, E. Bakolas, P. Stone, and J. Biswas. Deadlock-free, safe, and decen-
+tralized multi-robot navigation in social mini-games via discrete-time control barrier functions.
+Autonomous Robots, 49(2):12, 2025.
+[31] F. C. Pouria, Z. Huang, A. Yammanuru, S. Liu, and K. Driggs-Campbell. Topology-guided
+ORCA: Smooth multi-agent motion planning in constrained environments.
+arXiv preprint
+arXiv:2407.16771, 2024.
+[32] H. Jiang, Y. Chaudhary, Y. Wang, Z. Wang, R. Sharma, M. Mehta, Y. Zhou, L. Sun, Z. Fan,
+Z. Tu, and J. Li.
+NavTrust: Benchmarking trustworthiness for embodied navigation.
+In
+IEEE/RSJ International Conference on Intelligent Robots and Systems (IROS), 2026.
+[33] E. Escudie, L. Matignon, and J. Saraydaryan. Attention graph for multi-robot social navigation
+with deep reinforcement learning. In Proceedings of the 23rd International Conference on
+Autonomous Agents and Multiagent Systems (AAMAS), pages 2252–2254, 2024.
+[34] N. Mohajerin and M. Rohani. Multi-step prediction of occupancy grid maps with recurrent
+neural networks. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 10592–10600, 2019.
+[35] S. Hoermann, M. Bach, and K. Dietmayer. Dynamic occupancy grid prediction for urban
+autonomous driving: A deep learning approach with fully automatic labeling. In 2018 IEEE
+International Conference on Robotics and Automation (ICRA), pages 2056–2063. IEEE, 2018.
+[36] M. Toyungyernsub, E. Yel, J. Li, and M. J. Kochenderfer. Dynamics-aware spatiotemporal
+occupancy prediction in urban environments. In 2022 IEEE/RSJ International Conference on
+Intelligent Robots and Systems (IROS), pages 10836–10841. IEEE, 2022.
+[37] B. Lange, M. Itkina, J. Li, and M. Kochenderfer.
+Self-supervised multi-future occupancy
+forecasting for autonomous driving. In Proceedings of Robotics: Science and Systems, 2025.
+[38] M. Toyungyernsub, E. Yel, J. Li, and M. J. Kochenderfer. Predicting future spatiotemporal oc-
+cupancy grids with semantics for autonomous driving. In IEEE Intelligent Vehicles Symposium
+(IV), pages 2855–2861, 2024.
+11
+
+
+[39] D. Dugas, J. Nieto, R. Siegwart, and J. J. Chung. NavRep: Unsupervised representations for
+reinforcement learning of robot navigation in dynamic human environments. In 2021 IEEE
+International Conference on Robotics and Automation (ICRA), pages 7829–7835, 2021.
+[40] Z. Xie and P. Dames. Stochastic occupancy grid map prediction in dynamic scenes. In Pro-
+ceedings of The 7th Conference on Robot Learning, volume 229 of Proceedings of Machine
+Learning Research, pages 1686–1705. PMLR, 2023.
+[41] K. Lee, M. M. Sato, J. Yang, S. Lee, S. Lee, J. Li, K.-J. Yoon, J. Park, K. H. Law, and Y. Yoon.
+Cooperative informative sensing for monitoring dynamic indoor environments via multi-agent
+reinforcement learning. arXiv preprint arXiv:2604.23179, 2026.
+[42] R. Xu, Z. Tu, H. Xiang, W. Shao, B. Zhou, and J. Ma. CoBEVT: Cooperative bird’s eye view
+semantic segmentation with sparse transformers. In Proceedings of The 6th Conference on
+Robot Learning, volume 205 of Proceedings of Machine Learning Research, pages 989–1000.
+PMLR, 2023.
+[43] Z. Wang, Y. Wang, Z. Wu, H. Ma, Z. Li, H. Qiu, and J. Li. CMP: Cooperative motion prediction
+with multi-agent communication. IEEE Robotics and Automation Letters, 10(4):3876–3883,
+2025.
+[44] X. Gao, R. Xu, J. Li, Z. Wang, Z. Fan, and Z. Tu. STAMP: Scalable task- and model-agnostic
+collaborative perception. In International Conference on Learning Representations (ICLR),
+2025.
+[45] J. Li, X. Liu, B. Li, R. Xu, J. Li, H. Yu, and Z. Tu. CoMamba: Real-time cooperative perception
+unlocked with state-space models. In IEEE/RSJ International Conference on Intelligent Robots
+and Systems (IROS), pages 16993–17000, 2025.
+[46] D. P. Kingma and M. Welling. Auto-encoding variational Bayes. In International Conference
+on Learning Representations (ICLR), 2014.
+[47] M. Toyungyernsub, M. Itkina, R. Senanayake, and M. J. Kochenderfer. Double-prong convlstm
+for spatiotemporal occupancy prediction in dynamic environments. In 2021 IEEE International
+Conference on Robotics and Automation (ICRA), pages 13931–13937, 2021.
+[48] J. van den Berg, S. J. Guy, M. Lin, and D. Manocha. Reciprocal n-body collision avoidance. In
+Robotics Research, volume 70 of Springer Tracts in Advanced Robotics, pages 3–19. Springer,
+2011.
+[49] S. Liu, H. Xia, F. C. Pouria, K. Hong, N. Chakraborty, Z. Hu, J. Biswas, and K. Driggs-
+Campbell.
+HEIGHT: Heterogeneous interaction graph transformer for robot navigation in
+crowded and constrained environments. IEEE Transactions on Automation Science and Engi-
+neering, 23:1211–1230, 2026.
+12
+
+
+Appendix
+A
+Additional Experimental Results
+A.1
+Real Robot Experiments
+Lobby-A
+Lobby-B
+Corridor-A
+Corridor-B
+Figure 5: We evaluate CoopUQ in four indoor environments with one to three pedestrians walking
+in the scene. In total, 48 trials are conducted (4 per environment and pedestrian count). Across all
+runs, CoopUQ achieves an average success rate of 0.94. The success rate with one, two, and three
+pedestrians is 1.0, 0.94, and 0.88, respectively.
+Moving 
+towards goal
+t = 0 s
+Early 
+detour for
+human
+t = 2 s
+t = 3 s
+Avoidance
+t = 4 s
+Keep moving
+Figure 6: The upper orange robot navigates toward its goal while detouring early to avoid colliding
+with a pedestrian emerging from occlusion. The demo is available in supplementary videos.
+We develop a modularized ROS 2 system consisting of prediction and decision making nodes. The
+robot is equipped with a 2D LiDAR (RPLIDAR-A1) operating at a scanning frequency of approxi-
+mately 6 Hz. The prediction node converts raw LiDAR measurements into occupancy grid maps and
+performs online occupancy forecasting using the same model architecture, parameters, and weights
+13
+
+
+as those employed during training in simulator without any additional training in the real world. The
+decision making node receives the predicted OGMs from the prediction node and computes action
+commands in the form of planar velocity (vx, vy). These commands are executed using the onboard
+controller integrated into the ROSMASTER X3 platform by publishing to the /cmd vel topic.
+Table 3: Real-world navigation performance across different environments and pedestrian densities.
+Results are averaged over 4 trials for each environment and pedestrian setting.
+Method
+Environment
+Pedestrians Count
+1
+2
+3
+Success ↑Collision ↓Timeout Success ↑Collision ↓Timeout Success ↑Collision ↓Timeout
+SCOPE [22]
+Lobby-A
+1.00
+0.00
+0.00
+0.75
+0.25
+0.00
+0.50
+0.25
+0.25
+Lobby-B
+0.75
+0.00
+0.25
+0.50
+0.25
+0.25
+0.25
+0.50
+0.25
+Corridor-A
+0.75
+0.25
+0.00
+0.50
+0.50
+0.00
+0.25
+0.50
+0.25
+Corridor-B
+0.75
+0.25
+0.00
+0.50
+0.50
+0.00
+0.50
+0.50
+0.00
+CoopUQ
+Lobby-A
+1.00
+0.00
+0.00
+1.00
+0.00
+0.00
+1.00
+0.00
+0.00
+Lobby-B
+1.00
+0.00
+0.00
+1.00
+0.00
+0.00
+0.75
+0.00
+0.25
+Corridor-A
+1.00
+0.00
+0.00
+0.75
+0.00
+0.25
+0.75
+0.25
+0.00
+Corridor-B
+1.00
+0.00
+0.00
+1.00
+0.00
+0.00
+1.00
+0.00
+0.00
+Average
+SCOPE
+0.81
+0.13
+0.06
+0.56
+0.38
+0.06
+0.38
+0.44
+0.19
+CoopUQ
+1.00
+0.00
+0.00
+0.94
+0.00
+0.06
+0.88
+0.06
+0.06
+As shown in Figure 5 and Figure 6, we further enhance the real-world experiments to four dis-
+tinct everyday environments with pedestrian density variations. The corridor environment has more
+limited free space, and the lobby environment has obstacles with more diverse shapes. For each en-
+vironment, experiments are conducted with one, two, and three pedestrians walking in the scene, and
+each configuration is repeated four times, resulting in a total of 48 trials. During each experiment,
+each of the two ROSMASTER X3 robots navigates toward a predetermined target. In most cases,
+each robot’s goal is set to the initial position of the other robot. Pedestrians were not instructed to
+avoid the robots. Detailed real-world quantitative results are summarized in Table 3. Across all runs,
+CoopUQ achieves an average success rate of 0.94, exhibiting smooth trajectories and early detouring
+behaviors under occlusion. The success rate with one, two, and three pedestrians is 1.0, 0.94, and
+0.88, respectively. SCOPE obtains an average success rate of 0.58, as it reacts only after pedestrians
+become fully visible in occluded scenarios, often leading to collisions. We observe that collisions
+mainly occur in narrow corridor scenarios with higher pedestrian density, where the available free
+space is highly constrained. When pedestrians surround the robot and block the feasible space, the
+robot may collide with nearby walls. Timeout cases are primarily attributed to conservative behav-
+iors, in which the robot slows down or goes back and forth to maintain safety when the surroundings
+have cluttered obstacles (e.g., tables, sofas, and chairs) and pedestrians are continuously walking
+near the robot. These observations suggest several directions for future work. First, incorporating
+a stop-and-wait strategy could help reduce collisions in highly constrained environments. Second,
+adopting risk modulation under prolonged stalling, or integrating longer-horizon pedestrian intent
+prediction, may further improve navigation efficiency under denser spaces.
+A.2
+Scalability across Robot Team Sizes
+Table 4 extends the three-robot evaluation in Table 2 to five and ten robots without retraining.
+CoopUQ maintains a local OGM for each robot and aggregates features from nearby teammates,
+allowing cooperative forecasting to accommodate changing local neighborhoods as the team size
+grows. It retains the highest SR and the lowest human CR, robot CR, and ITR at both team sizes,
+demonstrating effective transfer to larger teams. The increased navigation times and path lengths re-
+flect additional local avoidance maneuvers needed as more robots share the same space. Meanwhile,
+lower SD indicates tighter pedestrian clearance in these more crowded settings.
+14
+
+
+Table 4: Navigation performance with three, five and ten robots. Values are reported as ID/OOD.
+Three-robot OOD results are averaged equally over the three scenarios. All learned policies are
+trained with three robots and evaluated zero-shot with five and ten robots.
+Robots
+Method
+SR↑
+CR↓
+TR↓
+NT↓
+PL↓
+AA↓
+ITR (%)↓
+SD↑
+Obstacle
+Human
+Robots
+Three
+ORCA [48]
+0.47/0.37
+0.17/0.15
+0.23/0.38
+0.06/0.08
+0.06/0.02
+10.04/10.54
+9.30/11.12
+0.10/0.11
+7.63/11.80
+0.36/0.34
+SAMARL [10]
+0.65/0.53
+0.10/0.14
+0.12/0.21
+0.05/0.06
+0.07/0.06
+12.98/13.45
+14.99/15.57
+0.18/0.20
+6.60/10.43
+0.37/0.34
+SCOPE [22]
+0.67/0.56
+0.10/0.10
+0.11/0.18
+0.03/0.05
+0.09/0.11
+13.39/14.79
+15.67/16.92
+0.18/0.21
+5.56/7.56
+0.38/0.36
+HEIGHT [49]
+0.70/0.60
+0.07/0.08
+0.13/0.19
+0.03/0.05
+0.06/0.07
+12.43/13.49
+13.80/14.11
+0.14/0.15
+4.08/8.02
+0.37/0.36
+CoopUQ
+0.90/0.82
+0.03/0.04
+0.03/0.10
+0.00/0.01
+0.03/0.03
+9.80/10.88
+11.98/13.82
+0.13/0.17
+2.07/4.47
+0.45/0.43
+Five
+ORCA [48]
+0.44/0.34
+0.18/0.13
+0.20/0.37
+0.12/0.14
+0.05/0.02
+9.97/10.73
+9.36/11.26
+0.10/0.10
+7.04/11.14
+0.37/0.34
+SAMARL [10]
+0.62/0.51
+0.11/0.14
+0.10/0.18
+0.08/0.11
+0.08/0.06
+13.07/13.62
+15.21/15.89
+0.18/0.20
+6.03/9.26
+0.36/0.34
+SCOPE [22]
+0.66/0.56
+0.10/0.11
+0.12/0.18
+0.06/0.06
+0.07/0.09
+13.35/14.80
+15.88/16.89
+0.18/0.21
+6.31/7.01
+0.38/0.36
+HEIGHT [49]
+0.70/0.61
+0.08/0.09
+0.13/0.18
+0.04/0.06
+0.04/0.05
+12.78/13.40
+14.38/14.05
+0.15/0.15
+3.90/7.09
+0.37/0.36
+CoopUQ
+0.88/0.81
+0.03/0.05
+0.05/0.10
+0.01/0.01
+0.02/0.02
+10.62/11.71
+12.62/14.86
+0.13/0.17
+2.26/4.42
+0.44/0.42
+Ten
+ORCA [48]
+0.38/0.30
+0.14/0.12
+0.20/0.34
+0.24/0.24
+0.03/0.01
+9.99/10.26
+9.21/10.86
+0.10/0.11
+7.03/10.72
+0.34/0.33
+SAMARL [10]
+0.53/0.44
+0.11/0.14
+0.07/0.17
+0.21/0.20
+0.07/0.06
+13.85/13.77
+16.00/16.03
+0.19/0.21
+5.84/9.47
+0.37/0.34
+SCOPE [22]
+0.62/0.52
+0.12/0.11
+0.12/0.20
+0.10/0.11
+0.04/0.06
+13.75/14.22
+16.49/16.38
+0.18/0.21
+7.60/7.92
+0.37/0.36
+HEIGHT [49]
+0.57/0.56
+0.14/0.14
+0.19/0.19
+0.08/0.08
+0.01/0.03
+12.78/13.57
+14.61/14.37
+0.15/0.16
+5.48/7.08
+0.36/0.36
+CoopUQ
+0.84/0.78
+0.04/0.06
+0.05/0.10
+0.02/0.02
+0.04/0.03
+12.85/13.55
+16.16/17.16
+0.16/0.18
+2.95/4.62
+0.42/0.40
+A.3
+Effectiveness of Deviation-guided Cross-Robot Spatiotemporal Fusion
+Table 5: Ablation study on deviation-guided cross-robot spatiotemporal fusion for OGM forecasting.
+1-step
+5-step
+Method
+SSIM ↑
+WMSE ↓
+IoU ↑
+SSIM ↑
+WMSE ↓
+IoU ↑
+No Cooperation
+0.75 ± 0.00
+0.16 ± 0.00
+0.60 ± 0.01
+0.71 ± 0.00
+0.19 ± 0.00
+0.57 ± 0.01
+Early Fusion
+0.86 ± 0.00
+0.07 ± 0.00
+0.73 ± 0.01
+0.80 ± 0.00
+0.12 ± 0.00
+0.68 ± 0.01
+Late Fusion
+0.81 ± 0.01
+0.12 ± 0.00
+0.63 ± 0.01
+0.76 ± 0.01
+0.14 ± 0.01
+0.60 ± 0.01
+Middle Fusion w/o Deviation-guided
+0.87 ± 0.01
+0.08 ± 0.01
+0.74 ± 0.01
+0.83 ± 0.01
+0.11 ± 0.01
+0.71 ± 0.01
+Middle Fusion w/ Deviation-guided
+0.90 ± 0.00
+0.05 ± 0.00
+0.77 ± 0.01
+0.86 ± 0.00
+0.09 ± 0.00
+0.72 ± 0.01
+Table 5 isolates the effect of the deviation gate within middle fusion. Compared with plain middle
+fusion, which fuses aligned neighboring features uniformly, the deviation-guided fusion consistently
+improves all metrics at both horizons. Absolute improvements in WMSE and IoU are larger at
+the 1-step horizon, while SSIM improves by 0.03 at both horizons. At the 5-step horizon, SSIM
+increases from 0.83 to 0.86, WMSE decreases from 0.11 to 0.09, and IoU increases from 0.71 to
+0.72. These results show that spatial deviation is an effective cue for identifying regions where
+cross-robot information is useful. By strengthening aggregation in occluded or inconsistent areas
+while preserving reliable ego features, the deviation gate produces more accurate forecasts.
+A.4
+Effectiveness of CMARL
+Figure 7: Training reward comparison with
+and without CMARL. The CMARL policy
+achieves faster convergence and higher final
+rewards, indicating that cost constraints do
+not merely improve safety but also facilitate
+efficient policy learning.
+Table 6 compares three ways of using uncertainty
+across cooperation strategies. Prediction uses only
+predicted OGMs, while Prediction & Uncertainty
+further adds uncertainty maps as observations with-
+out explicit constraints. This yields only marginal
+gains, suggesting that uncertainty is difficult to ex-
+ploit from task rewards alone. In contrast, CMARL
+further constrains safety cost based on predicted
+occupancy and uncertainty for MAPPO-Lagrangian
+optimization, leading to the best performance. The
+lower ITR and higher SD further show that CMARL
+guides robots away from ambiguous regions while
+avoiding predicted occupied areas. Figure 7 shows
+that CMARL converges faster and reaches higher fi-
+nal rewards, indicating improved training efficiency.
+15
+
+
+Table 6: Ablation study on CMARL under in-distribution navigation.
+Cooperation
+Policy
+SR ↑
+Obstacle CR ↓
+Human CR ↓
+Robots CR ↓
+TR ↓
+ITR (%) ↓
+SD ↑
+No Cooperation
+Prediction
+0.71 ± 0.01
+0.12 ± 0.02
+0.13 ± 0.01
+0.02 ± 0.00
+0.01 ± 0.00
+5.78 ± 0.27
+0.34 ± 0.03
+Prediction & Uncertainty
+0.72 ± 0.01
+0.11 ± 0.02
+0.12 ± 0.01
+0.02 ± 0.01
+0.03 ± 0.00
+5.26 ± 0.37
+0.35 ± 0.01
+CMARL
+0.75 ± 0.02
+0.10 ± 0.02
+0.10 ± 0.03
+0.01 ± 0.00
+0.04 ± 0.02
+4.17 ± 0.26
+0.39 ± 0.02
+Late Fusion
+Prediction
+0.78 ± 0.03
+0.08 ± 0.02
+0.10 ± 0.02
+0.01 ± 0.01
+0.02 ± 0.02
+3.96 ± 0.19
+0.40 ± 0.01
+Prediction & Uncertainty
+0.79 ± 0.03
+0.08 ± 0.01
+0.09 ± 0.02
+0.01 ± 0.01
+0.02 ± 0.03
+3.86 ± 0.29
+0.40 ± 0.02
+CMARL
+0.81 ± 0.03
+0.07 ± 0.02
+0.09 ± 0.02
+0.01 ± 0.01
+0.01 ± 0.02
+3.37 ± 0.16
+0.42 ± 0.02
+Early Fusion
+Prediction
+0.77 ± 0.02
+0.11 ± 0.01
+0.06 ± 0.02
+0.01 ± 0.01
+0.05 ± 0.02
+2.68 ± 0.36
+0.43 ± 0.01
+Prediction & Uncertainty
+0.79 ± 0.02
+0.10 ± 0.02
+0.05 ± 0.02
+0.01 ± 0.02
+0.05 ± 0.01
+2.56 ± 0.36
+0.43 ± 0.01
+CMARL
+0.82 ± 0.02
+0.07 ± 0.01
+0.05 ± 0.01
+0.00 ± 0.01
+0.06 ± 0.02
+2.37 ± 0.19
+0.43 ± 0.01
+Middle Fusion
+Prediction
+0.84 ± 0.02
+0.06 ± 0.01
+0.05 ± 0.01
+0.01 ± 0.01
+0.04 ± 0.02
+2.17 ± 0.26
+0.42 ± 0.01
+Prediction & Uncertainty
+0.86 ± 0.02
+0.05 ± 0.01
+0.04 ± 0.01
+0.01 ± 0.01
+0.04 ± 0.02
+2.20 ± 0.16
+0.43 ± 0.01
+CMARL
+0.90 ± 0.03
+0.03 ± 0.01
+0.03 ± 0.01
+0.00 ± 0.00
+0.03 ± 0.01
+2.07 ± 0.19
+0.45 ± 0.03
+A.5
+Cost Limit
+Table 7 shows the trade-off controlled by the cost limit ϵ. A larger cost limit allows more efficient
+behavior, resulting in shorter navigation time and path length, but also higher collision rates and
+lower social distance. Reducing ϵ encourages safer navigation, with ϵ = 0.10 achieving the best SR,
+joint-lowest human CR, lowest ITR, and highest SD. Although it slightly increases NT and PL, this
+setting provides the best overall balance between safety and efficiency.
+Table 7: Ablation study on the cost limit ϵ in MAPPO-Lagrangian. A smaller cost limit encourages
+socially compliant behavior, while a higher cost limit allows more efficient goal-reaching behavior.
+Cost Limit ϵ
+SR ↑
+Obstacle CR ↓
+Human CR ↓
+Robots CR ↓
+TR ↓
+NT ↓
+PL ↓
+AA ↓
+ITR (%) ↓
+SD ↑
+0.20
+0.87 ± 0.03
+0.05 ± 0.02
+0.04 ± 0.01
+0.01 ± 0.01
+0.02 ± 0.01
+9.37 ± 0.35
+11.35 ± 0.17
+0.13 ± 0.03
+2.19 ± 0.31
+0.43 ± 0.03
+0.15
+0.89 ± 0.03
+0.04 ± 0.01
+0.03 ± 0.01
+0.00 ± 0.01
+0.02 ± 0.01
+9.46 ± 0.26
+11.56 ± 0.19
+0.13 ± 0.04
+2.15 ± 0.23
+0.43 ± 0.03
+0.10
+0.90 ± 0.03
+0.03 ± 0.01
+0.03 ± 0.01
+0.00 ± 0.00
+0.03 ± 0.01
+9.80 ± 0.15
+11.98 ± 0.29
+0.13 ± 0.05
+2.07 ± 0.19
+0.45 ± 0.03
+B
+Experimental Setup
+B.1
+Environment
+Figure 8: BEV Layouts.
+The
+Unity3D
+simulator
+supports
+multiple
+robots, dynamic human agents, and diverse
+static obstacles. Static environments are gen-
+erated by randomly placing convex polygons
+to represent non-navigable regions.
+Human
+agents navigate using Unity’s built-in NavMesh
+system, which distinguishes walkable and non-
+walkable areas according to the obstacle layout.
+This enables pedestrians to move realistically in
+cluttered environments. Pedestrian maximum
+speeds are randomized between 0.8 m/s and
+1.5 m/s during regular simulation, and their
+radii are sampled between 0.3 m and 0.4 m.
+Each pedestrian randomly changes its goal ev-
+ery 3 to 5 seconds, increasing the stochasticity of crowd motion. Robots are modeled as invisible to
+humans following [16], so robots are responsible for avoiding collisions. Each robot has a simulated
+2D LiDAR sensor with a sensing range of 7 m, radius 0.2 m, and maximum speed 1.0 m/s.
+During policy training, three robots are initialized at randomized positions and assigned randomized
+goals in arenas populated with 5–10 pedestrians. As shown in Figure 8, the training environments
+consist of three layouts with different static obstacle configurations, with sizes ranging from 10 m ×
+10 m to 15 m×15 m. Three additional layouts are reserved for OOD evaluation. The in-distribution
+setting uses the same three layouts as training with 7–10 pedestrians. The OOD settings include
+unseen layouts, denser crowds with 12–15 pedestrians, and faster pedestrian motion with maximum
+speeds up to 2 m/s.
+16
+
+
+For the offline forecasting dataset, LiDAR scans and robot poses are collected at 5 Hz. Occupancy
+grids are generated with a resolution of 0.1 m per cell and size 64×64. The history window is set to
+τ = 5. The dataset is collected from scenarios with three robots and 5–10 pedestrians across three
+environments, resulting in 361,152 training samples and 30,498 testing samples.
+B.2
+Evaluation Metrics
+We evaluate CoopUQ from two perspectives: occupancy forecasting quality and downstream navi-
+gation performance. For navigation, SR, CR, TR, and ITR use all evaluated robot episodes, whereas
+NT and PL use only successful episodes. AA averages episode-level values over episodes with at
+least three time steps. SD pools danger steps across all episodes.
+Structural Similarity Index Measure (SSIM). Let mi
+t+ℓdenote the predicted occupancy grid map
+(OGM) of robot i for future step t + ℓ, and let ˆmi
+t+ℓdenote the corresponding ground-truth OGM.
+SSIM evaluates the structural consistency between the predicted and ground-truth maps:
+SSIM(mi
+t+ℓ, ˆmi
+t+ℓ) =
+(2µmµ ˆ
+m + c1)(2σm ˆ
+m + c2)
+(µ2m + µ2
+ˆ
+m + c1)(σ2m + σ2
+ˆ
+m + c2),
+(4)
+where µm and µ ˆ
+m denote the mean occupancy values, σ2
+m and σ2
+ˆ
+m denote the variances, and σm ˆ
+m
+denotes the covariance between the predicted and ground-truth. The constants c1 and c2 are small
+positive stabilizing terms. SSIM emphasizes spatial structure and obstacle geometry, making it
+suitable for evaluating whether the predicted OGM preserves the layout of occupied and free regions.
+Weighted Mean Squared Error (WMSE). WMSE measures the weighted pixel-wise squared error
+between the predicted OGM mi
+t+ℓand the ground-truth OGM ˆmi
+t+ℓ:
+WMSE(mi
+t+ℓ, ˆmi
+t+ℓ) =
+P|Ω|
+g=1 wg
+
+mi
+t+ℓ,g −ˆmi
+t+ℓ,g
+2
+P|Ω|
+g=1 wg
+,
+(5)
+where Ωdenotes the set of grid cells, mi
+t+ℓ,g and ˆmi
+t+ℓ,g are the predicted and ground-truth occu-
+pancy values at grid cell g, respectively, and wg is the weight assigned to cell g. We compute wg
+using median frequency balancing to compensate for the class imbalance between occupied and free
+cells. Since occupied cells are usually sparse in OGMs, WMSE penalizes errors in occupied regions
+more heavily than standard MSE, making it more suitable for evaluating safety-critical occupancy
+prediction accuracy.
+Success Rate (SR). SR measures the ratio of successful robot episodes to all evaluated robot
+episodes. Let E denote the set of all evaluated robot episodes. Each episode contributes one ter-
+minal outcome: success, collision with a static obstacle, human, or robot, or timeout. An episode
+is considered successful if the robot reaches its goal within the time limit Tmax = 40 s without
+collision.
+Collision Rate (CR). Each CR is the fraction of all evaluated robot episodes terminated by a colli-
+sion of the corresponding type: static obstacle, human, or robot.
+Timeout Rate (TR). TR is the fraction of all evaluated robot episodes that reach the time limit
+without success or collision.
+Navigation Time (NT). NT measures the average time required for the robot to reach the goal,
+computed only over successful episodes.
+Path Length (PL). Let Esucc ⊆E denote the successful robot episodes. PL measures their average
+traveled distance:
+PL =
+1
+|Esucc|
+X
+e∈Esucc
+Le
+X
+t=1
+pr
+e,t −pr
+e,t−1
+
+2 ,
+(6)
+where pr
+e,t denotes the robot position at time step t in episode e, and Le denotes the episode length
+in time steps.
+17
+
+
+Average Acceleration (AA). AA measures trajectory smoothness. We compute a mean acceleration
+for each episode with at least three time steps, then average these episode-level values with equal
+weight.
+Intrusion Time Ratio (ITR). ITR measures how often the robot enters regions occupied by the
+ground-truth future positions of humans. Let Ddanger
+e,t
+indicate whether the robot intrudes into a
+ground-truth future human-occupied region at time step t in episode e. ITR is defined as
+ITR = 1
+|E|
+X
+e∈E
+ PLe
+t=1 Ddanger
+e,t
+Le
+!
+× 100%.
+(7)
+A lower ITR indicates that the robot more effectively avoids high-risk regions induced by future
+human motion.
+Social Distance (SD). SD measures the average minimum distance between the robot and nearby
+humans at danger steps. Let T danger
+e
+denote the set of time steps in episode e where a danger event
+occurs. For each danger step, we compute the minimum distance between the robot and all humans:
+dmin
+e,t = min
+j∈He,t
+pr
+e,t −phj
+e,t
+
+2 ,
+(8)
+where pr
+e,t is the robot position, phj
+e,t is the position of human j, and He,t denotes the set of humans
+at time step t. The final SD is computed as
+SD =
+P
+e∈E
+P
+t∈T danger
+e
+dmin
+e,t
+P
+e∈E |T danger
+e
+|
+.
+(9)
+A higher SD indicates that the robot maintains a larger safety margin from humans when entering
+potentially risky regions.
+C
+Implementation Details
+For cooperative navigation, we train a recurrent MAPPO policy with a Lagrangian cost constraint
+using three robots per simulation environment. The actor and critics use a three-layer MLP with
+64 hidden units per layer, followed by a one-layer GRU. All networks are optimized by Adam with
+a learning rate of 5 × 10−4, linearly decayed to zero. We use discount factor γ = 0.99 and GAE
+parameter λ = 0.95. Each PPO update uses 5 epochs, 2 mini-batches, and a recurrent data chunk
+length of 20. The PPO clipping coefficient is 0.2 and the entropy coefficient is 0.01. The value loss
+coefficient is 0.5, the Huber loss threshold is 10, and the maximum gradient norm is 0.5. We train
+with 8 parallel rollout threads for 106 steps.
+C.1
+Constrained Policy
+The cost limit is set to 0.1, with additional ablations using limits of 0.15 and 0.2. The policy advan-
+tage is modified as
+Amix = A −ηAcost
+1 + η
+,
+(10)
+where A is the reward advantage, Acost is the cost advantage, and η is the Lagrange multiplier. The
+multiplier learning rate is 0.003, the initial value is 0.1, and η is clipped to [0, 5]. The safety cost is
+computed from the predicted occupancy and normalized uncertainty within a local comfort region
+of radius rsafe = 5 grid cells, used for both Bi
+occ and Bi
+unc. We set the occupancy threshold ϕocc =
+0.5, the normalized uncertainty threshold ϕunc = 0.3, and the weighting factors λocc = 0.5 and
+λunc = 0.5. Each violating cell incurs a distance-based penalty wd(x, y) = max(0, rsafe −d(x, y)),
+so that threats closer to the ego robot are penalized more heavily. The resulting cost is scaled by the
+control interval ∆t = 0.2 s. This encourages the policy to avoid regions that are likely occupied or
+unreliable under stochastic forecasting.
+18
+
+
+C.2
+Stochastic OGM Forecasting
+All forecasting models across fusion strategies use an OGM size of 64 × 64 with a resolution of
+0.1 m per cell, a history length τ = 5, and a prediction horizon h = 5. LiDAR and pose sequences
+are sampled at 5 Hz, so the horizon covers the next one second. We draw M = 8 stochastic samples
+from the decoder. The cooperative OGM forecasting is trained with a reconstruction term and a KL
+regularization term:
+LVAE = Lrec + βLKL,
+(11)
+where Lrec measures the difference between the predicted future OGMs and the ground-truth OGMs,
+and LKL regularizes the learned latent distribution toward a standard Gaussian prior. We use a binary
+occupancy reconstruction loss:
+Lrec = −1
+h|Ω|
+h
+X
+ℓ=1
+X
+g∈Ω
+
+ˆmi
+t+ℓ,g log mi
+t+ℓ,g + (1 −ˆmi
+t+ℓ,g) log(1 −mi
+t+ℓ,g)
+
+,
+(12)
+where mi
+t+ℓ,g and ˆmi
+t+ℓ,g denote the predicted and ground-truth occupancy values at grid cell g,
+respectively. The KL term is defined as
+LKL = DKL
+ qϕ(zi
+t+1:t+h | Fi
+fuse) ∥N(0, I)
+
+.
+(13)
+The coefficient β balances reconstruction accuracy and latent-space regularization. We set β = 0.01.
+The model is trained for 20 epochs using Adam with a learning rate of 10−4 and weight decay 10−3.
+19
