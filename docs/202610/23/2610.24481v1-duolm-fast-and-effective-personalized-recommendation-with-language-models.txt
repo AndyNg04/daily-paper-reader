@@ -1,0 +1,862 @@
+Title: DuoLM: Fast and Effective Personalized Recommendation with Language Models
+
+URL Source: https://arxiv.org/pdf/2610.24481v1
+
+Published Time: Tue, 20 Oct 2026 00:39:23 GMT
+
+Number of Pages: 19
+
+Markdown Content:
+# DuoLM: Fast and Effective Personalized Recommendation with Language Models 
+
+Jiang Wu 1* Yutong Song 2* Hongbo Wang 3 Guanghe Cao 3 Jeff Liang 4
+
+> 1
+
+Independent Researcher 2University of California, Irvine 
+
+> 3
+
+Google DeepMind 4Oracle 
+
+Abstract 
+
+Language models can make personalized rec-ommendations from rich item content, user history, and feedback. However, evaluating many candidates with full-text inputs incurs substantial online computation and limits serv-ing throughput. We introduce DuoLM, a framework for fast and effective personalized recommendation that integrates a compact rec-ommendation model with an efficient serving runtime. An encoder LLM learns compact item representations for offline reuse, while a personalized ranker LLM combines them with user history and feedback for recommenda-tion. We train both models end to end with recommendation supervision and teacher dis-tillation. The runtime further accelerates in-ference through virtual token IDs for embed-ding access, shared history computation, and CUDA Graph replay. Benchmark results show that our framework achieves recommendation quality comparable to that of the expert teacher model. On a single H100, it delivers approx-imately 26,400 candidate scores per second, about 60 × the throughput of the teacher served with vLLM and automatic prefix caching. 
+
+1 Introduction  
+
+> “Nature is an endless combination and repetition of a very few laws. She hums the old well-known air through innumerable variations.”
+> – Ralph Waldo Emerson, History
+
+From personalized shopping to content discov-ery, language models use item content, user his-tories, and feedback to assess which items best match individual preferences (Chen et al., 2024; Ning et al., 2024; Bao et al., 2023). Each rec-ommendation request typically involves multiple candidates, while the system must sustain a con-tinuous stream of requests within a given com-putational budget. The practical value of lan-guage models for recommendation therefore de-
+
+> *Equal contribution.
+
+pends on both recommendation quality and serv-ing efficiency. Despite advances in language-model-based per-sonalized recommendation, efficient online serv-ing remains challenging. We identify two primary challenges. 
+
+First, it remains difficult to substantially re-duce online computation without compromising recommendation quality. Traditional ID-based two-tower recommenders score items efficiently, but models trained solely on interactions do not di-rectly incorporate textual semantics or pretrained world knowledge. This reliance on interaction data limits generalization to long-tail and cold-start items (Hou et al., 2022; Li et al., 2023; Kim et al., 2024). Full-text cross-encoders use item de-scriptions together with user history and feedback, but the resulting candidate representations depend on the user context and cannot be directly reused across users. Compressing item text can reduce online computation (Ge et al., 2024; Cheng et al., 2024; Louis et al., 2025), yet may discard details that matter to particular users. The challenge is to obtain compact, reusable item representations that still support high-quality personalized judgments. 
+
+Second, a reduction in model computation does not automatically translate into faster end-to-end request processing. Inference engines such as vLLM (Kwon et al., 2023) improve latency and throughput via batching and prefix caching, but re-dundant work can remain in how a recommenda-tion service prepares and submits its workload. A single recommendation request typically evaluates multiple candidates against the same user history. If candidates are submitted separately, the service may repeatedly construct and transmit the same history inputs and incur separate scheduling over-head for each candidate. Prefix caching can reuse history KV states (Juravsky et al., 2024), but does not per se eliminate these repeated operations. As model execution becomes faster, these overheads 1arXiv:2610.24481v1 [cs.IR] 17 Oct 2026 can limit end-to-end recommendation throughput. To address these challenges, we introduce DuoLM, a framework that integrates representa-tion learning and efficient inference for personal-ized recommendation (Figure 1). The core idea is to learn reusable item representations and per-sonalization together, enabling offline item en-coding. Runtime optimizations translate the re-sulting computational savings into faster serv-ing. 
+
+On the model side, an encoder LLM compresses each item’s text into a single hidden-state vector, which replaces its text tokens in a personalized ranker LLM. The ranker receives a candidate vec-tor with individual history-item vectors and their associated textual feedback. Each candidate at-tends to these history entries to produce personal-ized score. We co-train the encoder and ranker end to end with recommendation labels and distillation from a frozen full-text teacher (Hinton et al., 2015). Cross-entropy encourages selection of the observed target, while KL divergence encourages the compact model to match the teacher’s prefer-ence distribution over the same candidates. After training, we precompute item representations of-fline and run only the ranker online. 
+
+On the runtime side , we introduce a series of coordinated optimizations tailored to this model architecture. First, virtual token IDs (VIDs) ref-erence a GPU-resident table of precomputed item embeddings shared by history and candidate items. The runtime resolves these IDs into continuous in-put embeddings for the ranker. Requests therefore carry item IDs and user feedback instead of full item vectors. In our rating benchmark, VIDs re-duce average request payloads by over 90% com-pared with full-vector transmission. We build a novel multi-item scoring (MIS) 
+
+path on SGLang (Zheng et al., 2024) to score multiple candidates in one request. The run-time constructs and prefills the user history once, then shares its prefix KV cache across candidate branches. A tree-structured attention mask allows each candidate to attend only to the shared history and its own branch, preserving independent scor-ing. We further adapt the MIS scoring path to seg-mented prefill CUDA Graphs . These graphs capture GPU operations and their dependencies. The runtime replays the captured graphs to reduce CPU scheduling and kernel launch overhead. Experiments on Amazon Books and Video Games show: (i) Our model outperforms the ex-pert teacher model on Books recommendation (NDCG@10: 0.5586 vs. 0.5440), with compa-rable performance on Video Games (0.5298 vs. 0.5313) and Books rating prediction. (ii) On a sin-gle H100, recommendation throughput reaches up to 60 .1× and 109 .9× that of the teacher served by vLLM and SGLang, respectively. Our contri-butions can be summarized as follows: 1. We introduce DuoLM, a framework that learns compact, reusable, efficient representations for personalized recommendation. 2. We develop an efficient serving runtime that reuses item representations across users and his-tory computation across candidates. 3. We demonstrate substantial throughput gains with recommendation quality comparable to that of the expert teacher model, and share practical lessons from model and runtime ablations. 
+
+2 Method 
+
+Overview. For request q, we score Kq candidate items using an ordered history of nq interactions: 
+
+Hq = (( i1, r 1), . . . , (inq , r nq )) ,Cq = ( c1, . . . , c Kq ).
+
+Each history entry (it, r t) records an item and the user’s feedback on it. As shown in Figure 1, an en-coder LLM A maps item text to user-independent representations. A continuous input interface con-verts each representation into one input embed-ding for a causal ranker LLM B, which scores candidates using the ordered history of item em-beddings and their associated feedback text (Sec-tion 2.1). The encoder, interface, and ranker are jointly trained with recommendation labels and distillation of candidate distributions from a sep-arately trained, frozen full-text teacher T (Sec-tion 2.2). After training, we precompute item embeddings and run only B online. Our run-time reuses these embeddings across requests and shares history KV states across candidates within each request (Section 2.3). 
+
+2.1 Model Architecture 
+
+The item encoder A produces user-independent content representations, while the personalized ranker B scores candidates using these represen-tations together with user history and feedback. A 2End-to-end training              
+
+> Item texts Item encoder
+> A
+> Continuous interface
+> One vector per item
+> Personalized scorer B
+> Feedback text ⋯zcj
+> User history Candidate Feedback text Full-text history, feedback and candidates Teacher TKL
+> p(τ)
+> T
+> Group CE
+> sq
+> p(τ)
+> S
+> Target yq
+> Offline preparation
+> All item texts Item encoder
+> A
+> Continuous interface
+> Item representation store
+> ⋯
+> GPU-resident ID-indexed
+> Online personalized ranking
+> User request
+> History and candidate IDs with user feedback
+> Virtual-ID lookup and text input Multi-item scoring (MIS)
+> Personalized scorer B
+> Shared prefix KV at each layer
+> History
+> Branch 1 Branch 2 Branch K
+> zc1zc2zcK
+> Candidate vectors Scores
+> sq
+> Segmented CUDA Graph replay
+
+Figure 1: Overview of DuoLM. Encoder A and ranker B are trained end to end through a continuous interface, using recommendation labels and distillation from a frozen teacher T . After training, we precompute one reusable vector per item. Online, virtual IDs retrieve these vectors for B, which scores candidates using user history and feedback. History KV is shared within each request, while candidate branches remain independent. 
+
+continuous input interface connects the two mod-els, both initialized from pretrained language mod-els with hidden dimension d.
+
+Encoder LLM. Let xi denote item i’s templated token sequence, terminated by EOS. We use the final-layer EOS hidden state as the item represen-tation, ai = [AθA (xi)] 
+
+> last
+
+∈ Rd, where [·]last se-lects the last valid input position. 
+
+Continuous Input Interface. The interface maps ai to a single continuous embedding zi, re-placing the item’s text span in B. History and candidate items share this interface. We RMS-normalize ai and calibrate its scale against B’s na-tive token embeddings. For v ∈ Rd, define RMS( v) = 
+
+√
+
+d−1 ∑dk=1 v2
+
+> k
+
+.The interface computes ̂
+
+ai = ai
+
+√RMS( ai)2 + ϵ , zi = ρe γ̂ ai. (1) We estimate the reference scale ρ > 0 from B’s initial native embedding table E(0)  
+
+> B
+
+:
+
+ρ2 = 1
+
+|U| 
+
+∑
+
+> u∈U
+
+RMS 
+
+(
+
+E(0)  
+
+> B
+
+[u]
+
+)2
+
+, (2) where U is the multiset of token occurrences in sampled training-item texts. We fix ρ, initialize the learnable scalar log-gain γ to zero, and use ϵ > 0
+
+for numerical stability. 
+
+Personalized Ranker LLM. The ranker B re-ceives continuous item embeddings and textual feedback. For each candidate, its input comprises an ordered history prefix followed by the candi-date embedding. Let EB (v) denote B’s embedding sequence for a separately tokenized text segment v, and let ⊕
+
+denote concatenation. We construct the t-th his-tory entry from its marker Gt, item embedding zit ,and feedback text F (rt):
+
+Rq,t = EB (Gt) ⊕ zit ⊕ E B (F (rt)) .
+
+An instruction I and candidate header J delimit the ordered history: 
+
+Pq = EB (I) ⊕ Rq, 1 ⊕ · · · ⊕ Rq,n q
+
+⊕ E B (J). (3) Each feedback segment immediately follows its corresponding item embedding. Appending zcj
+
+yields the following mixed input, where boxes de-note continuous embeddings: 
+
+<instruction> History 1: Item : zi1
+
+User rating : <rating> 
+
+. . . 
+
+Candidate: Item : zcj
+
+Let Lq denote the prefix length, counting each item embedding as one position. A shared linear head w ∈ Rd scores the candidate’s final-layer hid-den state, conditioned on Pq through causal atten-tion: hq,j = [BθB (Pq ⊕ zcj )]
+
+> last
+
+,sq,j = wThq,j .
+
+(4) 3I G1 zi1 User rating: 5 G2 zi2 User rating: 1 J zc1 
+
+> LL
+> zc2
+> L + 1 L
+> zc3
+> L + 2 LShared prefix P (L positions) Three candidate vectors
+> Text block: one or more tokens Item vector: one position
+> Packed input row Logical position
+
+Figure 2: Mixed inputs and candidate positions of MIS. The shared prefix P contains prompt text, history-item vectors, and ratings. The attention mask allows each candidate to attend to P and itself, while masking all other candidates. All three use logical position L, the first position after P .
+
+While zcj represents user-independent item con-tent, hq,j incorporates the current user’s history and feedback. Each candidate is scored with the shared prefix, without cross-candidate attention. The scores sq = (sq, 1, . . . , s q,K q ) directly rank candidates without autoregressive decoding. 
+
+2.2 Training 
+
+For each training request q, let Kq denote the num-ber of candidates and yq the index of the observed target. 
+
+Full-text Teacher. The teacher T receives the same instruction, ordered history, and feedback as 
+
+B, replacing item vectors with their original texts. Its input ends with a scoring suffix:  
+
+> <instruction> History 1: Item : <item text> User rating : <rating>
+> . . .
+> Candidate: Item : <candidate text> Next-book score :
+
+A linear head maps the final-layer hidden state at the last token of the scoring suffix to a scalar score tq,j . We train T with cross-entropy to identify the observed target within each candidate group. After training, we freeze T and cache its raw scores for the exact histories and ordered can-didate groups used in student training. 
+
+End-to-end Training. We use these cached scores together with the observed targets to jointly train A, the continuous input interface, and B. The trainable parameters are Θ = ( θA, γ, θ B , w ), in-cluding both backbones’ native embeddings; the teacher and reference scale ρ remain fixed. Item vectors are recomputed during each training for-ward pass, preserving the differentiable path from the scoring model through the interface to the en-coder. To transfer the teacher’s relative preferences within each candidate group, we convert teacher scores tq,j and student scores sq,j into probability distributions using a shared temperature τ > 0:
+
+p(τ )T,q,j = exp( tq,j /τ )
+
+∑Kq 
+
+> k=1
+
+exp( tq,k /τ ) ,p(τ )S,q,j = exp( sq,j /τ )
+
+∑Kq 
+
+> k=1
+
+exp( sq,k /τ ) .
+
+(5) Both denominators sum over all Kq candidates in the same request. These distributions define the distillation loss, while the observed target provides direct recommendation supervision: 
+
+ℓCE (q) = − log p(1) S,q,y q ,ℓKD (q) = τ 2
+
+> Kq
+
+∑
+
+> j=1
+
+p(τ )T,q,j log p(τ )T,q,j 
+
+p(τ )S,q,j 
+
+.
+
+(6) The recommendation loss uses temperature one. The distillation loss is the teacher-to-student KL divergence with the standard τ 2 scaling (Hinton et al., 2015). At update u, we combine the two losses with distillation weight βu:
+
+ℓu(q) = (1 − βu)ℓCE (q) + βuℓKD (q). (7) For a batch B of training requests, we minimize 
+
+LS (Θ; u) = |B| −1 ∑ 
+
+> q∈B
+
+ℓu(q), giving each re-quest equal weight. Appendix E.2 gives the cor-responding score gradients. The temperature τ controls the concentration of the distillation distributions, while βu controls the relative contributions of the two supervision terms. We linearly increase the distillation weight βu to 
+
+βfinal and then keep it fixed (Appendix E.2). 
+
+2.3 Efficient Inference Offline Item Representations and Virtual To-ken IDs. After freezing the student, we export its post-interface vectors to a GPU-resident table 
+
+D. Let ι(i) ∈ {0, . . . , N − 1} identify item 
+
+i’s unique row and V be the native vocabulary size. We store Dι(i) = FP16( zi) and assign the 4virtual input ID V + ι(i) to this row. The em-bedding lookup returns Λ( V + ι(i)) = Dι(i) for virtual IDs and Λ( v) = EB [v] for native IDs 
+
+0 ≤ v < V , using the trained frozen table EB .The same item row serves history and candidate occurrences across requests. Online inputs contain IDs and feedback text, avoiding item encoding and full-vector transmission. Scores still use the scalar head; virtual IDs do not expand the output vocab-ulary. 
+
+Multi-item Scoring with Shared Prefix KV. 
+
+We pack candidates after a shared prefix to reuse history computation, forming Xq = Pq ⊕ zc1 ⊕· · · ⊕ zcKq . A standard causal mask permits cross-candidate attention, while consecutive po-sition IDs assign candidates different logical po-sitions. Our multi-item scoring (MIS) path on SGLang (Zheng et al., 2024) controls both visi-bility and position IDs to preserve per-candidate scoring semantics (Appendix E.3). Let Vq(a) denote the key rows visible to query row a, and πq(a) its logical position. Prefix rows retain πq(a) = a for 0 ≤ a < L q. Candidate j
+
+occupies packed row aj = Lq + j − 1 but uses 
+
+πq(aj ) = Lq, matching standalone scoring. Visi-bility is defined by 
+
+Vq(a) = {0, . . . , a }, 0 ≤ a < L q,
+
+Vq(aj ) = {0, . . . , L q − 1} ∪ { aj }. (8) All other edges, including cross-request edges, are masked. Position-dependent operations use πq.These rules describe semantic rows; transport de-limiters and graph padding are handled separately. Figure 2 illustrates the layout; P, L abbreviate 
+
+Pq, L q in this figure and Figure 3. Since the prefix does not attend to candidates, 
+
+B prefills it once per request and reuses its lay-erwise KV cache across candidate branches (Fig-ure 3). Item embeddings are reused across re-quests, whereas prefix KV is shared within each request. Appendix E.3 gives the corresponding attention formulation. These visibility and position rules apply at every layer, giving each candidate the same attention context and logical positions as in standalone scoring. Tokenwise normalization and feed-forward layers preserve candidate isolation. A shared linear head scores the final candidate states and returns scores in input order. Let sMIS  
+
+> q,j
+
+denote the scalar readout at packed row aj , and sq,j the standalone score in Eq. (4). Vectors / KV cache Text Computation                  
+
+> IG1zi15G2zi21J
+> (a) History and text form prefix P
+> Pc1
+> L
+> c2
+> L
+> c3
+> L
+> (b) Each candidate reads P and itself
+> PRanker KV(P)
+> (c) Prefill history once per request and cache KV
+> zc1zc2zc3Ranker head s1,s2,s3
+> (d) Reuse KV to score each candidate independently
+
+Figure 3: Multi-item scoring with shared history. 
+
+The same ranker reuses the prefix KV cache to score candidates independently with a shared scoring head. 
+
+For the same full-attention ranker with identical in-put embeddings and dropout disabled, these rules imply, in exact arithmetic, 
+
+sMIS  
+
+> q,j
+
+= sq,j , j = 1 , . . . , K q, (9) including when both layouts use identically rounded item embeddings. For the same compact model, standalone scor-ing without history reuse and MIS have the follow-ing numbers of allowed query–key pairs per layer: 
+
+Nsep ,q = Kq
+
+Lq(Lq + 1) 2 + Kq(Lq + 1) ,NMIS ,q = Lq(Lq + 1) 2 + Kq(Lq + 1) .
+
+(10) MIS removes (Kq − 1) Lq(Lq + 1) /2 repeated prefix pairs while retaining all candidate–history pairs. These semantic counts exclude delimiters, padding, and kernel overheads. 
+
+Enable CUDA Graph. After prefix reuse, We further adapt segmented prefill capture to MIS us-ing CUDA Graphs. The runtime replays the cap-tured GPU operations with current inputs and up-dated candidate position IDs, reducing repeated per-kernel host dispatch. Request-specific han-dling of prefix and candidate boundaries, remains outside capture. 
+
+3 Experiment Settings 
+
+Data and evaluation. We evaluate rating predic-tion on Books and next-item recommendation on Books and Video Games from Amazon Reviews 2023 (Hou et al., 2024). Rating prediction uses 10,000 training users and 1,000 development users, with history lengths K ∈ { 1, 3, 5, 10 }. We re-port NLL, MAE med , MAE exp , RMSE, and RPS. MAE med uses the predictive median, whereas 5Table 1: Rating prediction on Books. All four history lengths use the same users and targets. Average metrics weight each K equally. Lower is better for all metrics ( ↓). Green and yellow mark the best and second-best results in each column, respectively. MAE med uses the predictive median; MAE exp and RMSE use the expected rating.                                                                                                               
+
+> NLL by history length ↓Average across history lengths Method K= 1 K= 3 K= 5 K= 10 NLL ↓MAE med ↓MAE exp ↓RMSE ↓RPS ↓
+> Global prior 1.0401 1.0401 1.0401 1.0401 1.0401 0.6017 0.7824 0.8858 0.1125 Item prior 1.0358 1.0358 1.0358 1.0358 1.0358 0.6020 0.7760 0.8813 0.1115 History prior 1.0151 0.9706 0.9460 0.9147 0.9616 0.5564 0.6919 0.8041 0.0994 Content kNN 1.0151 0.9707 0.9460 0.9147 0.9616 0.5566 0.6919 0.8040 0.0994 Raw Qwen3 1.9020 1.3401 1.2407 1.1103 1.3983 0.6581 0.7144 0.8525 0.1257 HLLM-rating 1.0080 0.9543 0.9373 0.9225 0.9555 0.5477 0.7110 0.8324 0.1009 DuoLM-FIE (m=8) 0.9796 0.9318 0.9039 0.8790 0.9236 0.5311 0.6434 0.7736 0.0965 DuoLM-FIR (m=8) 0.9831 0.9331 0.9053 0.8780 0.9249 0.5319 0.6472 0.7778 0.0966 DuoLM-FIR (m=1) 0.9848 0.9337 0.9061 0.8806 0.9263 0.5362 0.6415 0.7725 0.0968 Teacher model 0.9810 0.9325 0.9041 0.8758 0.9233 0.5308 0.6515 0.7795 0.0962
+
+MAE exp and RMSE use the expected rating. For next-item recommendation, each dataset uses 50,000 training users, yielding 237,558 training queries for Books and 233,868 for Video Games. We report HR@1, HR@10, and NDCG@10 on 5,000 Books users and 3,000 Video Games users. Data splits, candidate construction, and detailed evaluation protocols appear in Appendix A.1. 
+
+Model configuration. For fair comparisons, we use 0.6B Qwen3 backbones across methods, with the trained full-text teacher as the quality reference for both tasks. Feedback-in-Encoder (FIE) encodes feedback together with item con-tent, whereas Feedback-in-Ranker (FIR) sup-plies feedback as text to the Ranker. Our default, DuoLM ( m = 1 ), uses FIR with one vector per item and the short input-suffix template. Model and training details appear in Appendices A.2 and C, respectively. 
+
+Rating baselines. i) Global prior uses the over-all training-set rating distribution; ii) Item prior uses the target item’s rating distribution among training users; iii) History prior uses the current user’s historical rating distribution; iv) Content kNN weights historical ratings by the content sim-ilarity between each history item and the target; v) Raw Qwen3-0.6B reads the user history, feed-back, and target text to predict a five-star rating; vi) HLLM-rating adapts HLLM to five-star predic-tion. 
+
+Recommendation baselines. i) Popularity ranks items by the number of distinct training users who interacted with them; ii) History similarity compares each candidate with the average content vector of the user’s history; iii) ContentSASRec, based on SASRec (Kang and McAuley, 2018), models historical item vectors, ratings, and their order with a sequential Trans-former to score candidates. iv) HLLM (Chen et al., 2024) encodes item content and user history separately, then ranks candidates by user–item rep-resentation similarity. Baseline implementations details in Appendix A.2. 
+
+4 Results and Analysis 
+
+4.1 Recommendation Quality RQ1: Can our framework maintain high-quality personalized rating prediction and rec-ommendation? Rating prediction. Table 1 shows that DuoLM achieves rating prediction quality close to that of the full-text teacher. Its average NLL across his-tory lengths is 0.9263, compared with the teacher’s 0.9233. DuoLM achieves lower expected-rating MAE and RMSE, while the teacher has lower median-based MAE and RPS. DuoLM also out-performs the rating priors, Content kNN, and raw Qwen3-0.6B across all reported average metrics. 
+
+Next-item recommendation. DuoLM achieves higher NDCG@10 than HLLM on Books (0.5586 vs. 0.5508) and Video Games (0.5298 vs. 0.5025), although HLLM achieves higher HR@1 on Books (Table 2). Compared with the expert teacher model, DuoLM achieves higher NDCG@10 on Books (0.5586 vs. 0.5440) and comparable perfor-mance on Video Games (0.5298 vs. 0.5313). To-gether with the rating prediction results, these find-ings show that DuoLM maintains quality compara-ble to that of the full-text teacher across the evalu-ated tasks and datasets. 6Table 2: Next-item recommendation on Amazon Books and Amazon Video Games.                                     
+
+> Method HR@1 HR@10 NDCG@10 Amazon Books
+> Popularity 0.1770 0.4382 0.2944 HLLM 0.4022 0.7168 0.5508 FIE (m=1) 0.3870 0.7418 0.5538 FIR (m=1) 0.3910 0.7464 0.5586
+> Teacher model 0.3824 0.7270 0.5440
+> Amazon Video Games
+> Popularity 0.1460 0.5000 0.3012 History similarity 0.0737 0.3057 0.1722 ContentSASRec 0.1853 0.5970 0.3714 HLLM 0.3057 0.7150 0.5025 FIR (m=1) 0.3240 0.7650 0.5298 Teacher model 0.3237 0.7697 0.5313
+
+RQ2: Does more user history improve person-alized scoring quality? As K increases from 1 to 10, DuoLM’s NLL decreases from 0.9848 to 0.8806, its median-based MAE from 0.5705 to 0.5056, and its RPS from 0.1044 to 0.0911. These results show that DuoLM benefits from additional history even with a single vector per item. Com-plete results and supplementary within-user rank-ing analysis appear in Appendix B.1. 
+
+4.2 End-to-End Serving Efficiency RQ3: How fast can DuoLM serve personalized recommendations? We compare DuoLM with the teacher served on vLLM (with automatic pre-fix caching) and SGLang, using the same physical H100 80GB GPU and request trace with 100 can-didates per request. As concurrency increases from C = 1 to 
+
+C = 64 , DuoLM’s throughput rises from approxi-mately 8,870 to 26,400 candidate scores per sec-ond (Table 6). Across these settings, DuoLM achieves 22 .7–60 .1× the throughput of the teacher on vLLM and 37 .6–109 .9× that on SGLang. These throughput gains accompany lower full-request p99 latency at every tested concurrency level. At C = 64 , for example, DuoLM’s p99 la-tency is 536.90 ms, compared with 17,093.82 ms for the teacher on vLLM. Together, these results show that DuoLM achieves substantially higher throughput and lower latency under the evaluated workloads. With the model fixed, MIS improves throughput by 4.81–29.3 ×, with a further 1.06–3.54 × from CUDA Graph (Section 4.4).                            
+
+> Table 3: Single-vector readouts on Books. Quality is evaluated on 5,000 users, covers 7,424 training up-dates. Metric LastToken MEM1 Perceiver1 HR@1 ↑0.4024 0.3900 0.3588 HR@10 ↑0.7452 0.7374 0.7320 MRR@10 ↑0.5049 0.4982 0.4714 NDCG@10 ↑0.5621 0.5555 0.5335 Added parameters 01,024 12,599,296 Update time (h) 7.39 7.54 8.96
+
+4.3 Representation and Training Analysis 
+
+This section analyze how item readout, feedback placement, distillation, and self-alignment affect quality. Readout and loss ablations here share a separately trained default model. 
+
+RQ4: How should content be read out from the Encoder for effective use by the Ranker? 
+
+We compare direct EOS readout with two ded-icated learnable readout mechanisms on Books. All three readouts produce one vector per item and use the same scale-calibrated interface and joint training objective. LastToken uses the En-coder’s final-layer hidden state at EOS. MEM1 ap-pends one learnable memory position after EOS and uses its final-layer hidden state as the item vector, following PISCO (Louis et al., 2025) and CLaRa (He et al., 2025). Perceiver1 aggregates the Encoder’s output states with one learnable query, following Perceiver (Jaegle et al., 2021) and Flamingo (Alayrac et al., 2022). LastToken achieves the highest scores across all four ranking metrics (Table 3). It also introduces no additional readout parameters and records the shortest total update time: 7.39 hours for 7,424 training updates, compared with 7.54 for MEM1 and 8.96 for Perceiver1. We therefore adopt Last-Token as the default readout. 
+
+RQ5: Should user feedback enter the Encoder or remain with the Ranker? FIE achieves slightly lower rating NLL (0.9236 vs. 0.9249), while FIR achieves higher Books recommendation NDCG@10 (0.5586 vs. 0.5538), as shown in Ta-ble 4. Given their comparable quality, we adopt FIR to reuse item representations independently of user feedback. Config detailed in Appendix A. 7Table 4: Comparison of FIE and FIR using separately trained task recipes. Design Reuse unit Rating NLL ↓
+
+Books NDCG@10 ↑
+
+FIE Item–rating pair 0.9236 0.5538 FIR Item 0.9249 0.5586 
+
+Table 5: Distillation study on Books ( m = 1 ). Default CE+KD uses final KD weight β = 0 .5 and temperature 
+
+τ = 1 . Each variant changes only the indicated setting. metrics are reported on all 5,000 users. Training setting HR@1 HR@10 NDCG@10 CE only 0.3748 0.7474 0.5502 CE+KD (default) 0.4024 0.7452 0.5621 
+
+KD weight β = 0 .9 0.3774 0.7284 0.5428 Temperature τ = 2 0.3904 0.7424 0.5568 
+
+RQ6: Does distillation from the full-text teacher help beyond recommendation labels alone? We compare label-only training (CE-only) with the default CE+KD objective. On Books, adding distillation improves HR@1 from 0.3748 to 0.4024 and NDCG@10 from 0.5502 to 0.5621, while HR@10 decreases slightly from 0.7474 to 0.7452 (Table 5). These results indicate that teacher supervision complements recommen-dation labels, supporting CE+KD as default train-ing objective. 
+
+RQ7: Does a higher distillation weight or temperature improve recommendation qual-ity? We separately increase the final distillation weight and temperature from their default val-ues. On Books, raising β from 0.5 to 0.9 reduces NDCG@10 from 0.5621 to 0.5428, while raising 
+
+τ from 1 to 2 yields 0.5568 (Table 5). Neither change improves upon the default, so we retain de-fault. 
+
+RQ8: Is additional full-text self-alignment worthwhile? We add self-alignment to the de-fault CE+KD objective, encouraging consistency between the same Ranker’s outputs and hidden representations under full-text and compressed in-puts. On Books, NDCG@10 decreases from 0.5621 to 0.5554 (Table 7), while cumulative train-ing update time increases from 7.39 to 16.95 hours, or 2.29 × (Appendix C). We therefore omit self-alignment from the default configuration, as it in-
+
+Table 6: End-to-end Books recommendation serving on one H100 with 100 candidates per request. C denotes concurrency.                              
+
+> CTeacher model DuoLM vLLM SGLang
+> Throughput (candidate scores/s) ↑
+> 1390.98 235.87 8 870.36
+> 8438.98 241.55 20 740.56
+> 32 435.67 241.31 25 506.11
+> 64 439.08 240.29 26 403.98
+> Full-request p99 latency (ms) ↓
+> 1354.87 706.46 12.35
+> 82 099.20 4 138.95 43.89
+> 32 8 155.82 14 701.82 389.27
+> 64 17 093.82 28 189.04 536.90
+
+Table 7: Self-alignment on Books ( m = 1 ). Both rows use default KD. Alignment jointly adds output KL and hidden-state cosine losses. Self-alignment HR@1 HR@10 NDCG@10 Without (default) 0.4024 0.7452 0.5621 
+
+With 0.3900 0.7414 0.5554 
+
+creases cost without improving recommendation quality. 
+
+4.4 Runtime Attribution and Workload Analysis RQ9: Which runtime designs contribute to the speedup, and how do the gains vary with work-load? MIS and CUDA Graph. With the recommen-dation model and request trace fixed, MIS im-proves throughput over independent scoring by 
+
+4.81 × at C = 1 and 29 .3× at C = 64 (Figure 4 and Table D1). CUDA Graph provides a further 
+
+3.54 × speedup at C = 1 , compared with 1.06 ×
+
+at C = 64 . MIS therefore yields larger relative gains at higher concurrency, while graph replay contributes more at lower concurrency. 
+
+Virtual ID inputs. In the FIR rating diagnostic (m = 8 ), VID reduces request size by 99.0% and increases throughput by 66.5% at C = 8 , rela-tive to transferring FP32 vectors (Figure 5). FP16 transfer reduces request size but does not consis-tently improve throughput, indicating that fewer transferred bytes alone do not guarantee faster serving. 81 8 32 64 
+
+> Concurrent requests, C
+> 010 20 30
+> Throughput (k candidates/s)
+> Independent scoring MIS MIS + CUDA Graph
+
+Figure 4: Execution ablation with 100 candidates per request. FP32 FP16 VID VID + cache   
+
+> 0600 1200
+> Request size (kB)
+> 1,227 619 11.8 11.8
+> (a)
+> C = 1 C = 8 0123
+> Throughput (k candidates/s) (b)
+> FP32 FP16 VID VID + cache
+
+Figure 5: VID input-path diagnostics: request size and throughput. 
+
+CPU input preparation. At an arrival rate of 100 requests/s, increasing input-compilation pro-cesses from one to two brings the single-vector rat-ing service close to the offered request rate, show-ing that CPU input preparation can also limit end-to-end throughput. Detailed results appear in Ap-pendix D. 
+
+5 Related Work 
+
+Language models for personalized recommen-dation. In traditional recommendation pipelines, two-tower models encode users and items sepa-rately for efficient retrieval (Yi et al., 2019). For models that rely on ID embeddings, sparse or miss-ing interaction data limit representation learning for long-tail and cold-start items (Li et al., 2023). Language-based approaches use pretrained mod-els to encode item content and model user pref-erences (Hou et al., 2022; Li et al., 2023), in-cluding hierarchical item and user modeling in HLLM (Chen et al., 2024). Whereas HLLM scores candidates by user–item representation sim-ilarity, DuoLM lets each candidate attend directly to individual history items and their associated feedback. 
+
+Personalization and compact representations. 
+
+Prior work personalizes language models through history representations (Ning et al., 2024; Liu et al., 2025), and decoding adjustments (Song et al., 2026). Continuous context compression replaces long text with compact representations consumed by downstream LLM (Ge et al., 2024; Cheng et al., 2024; Louis et al., 2025; He et al., 2025). 
+
+Efficient language model inference. KV-cache management and shared-prefix execution reduce redundant storage and computation (Kwon et al., 2023; Zheng et al., 2024; Juravsky et al., 2024). Optimized attention kernels reduce memory traf-fic (Dao et al., 2022), and runtimes support CUDA Graph capture and replay (Ye et al., 2025). 
+
+6 Conclusion 
+
+We presented DuoLM, a framework that jointly trains two LLMs for reusable item representations and personalized recommendation, paired with an efficient serving runtime. DuoLM achieves recom-mendation quality comparable to the teacher. For Books recommendation on a single H100, it de-livers up to 60 .1× the throughput of the teacher served by vLLM. 
+
+Limitations 
+
+Our evaluation focuses on Amazon Books and Video Games with 0.6B language-model back-bones. Results on these datasets may not general-ize to other domains, larger models, or recommen-dation settings with rapidly changing user prefer-ences. Recommendation quality is evaluated on fixed candidate sets containing randomly sampled unobserved items, which may be easier to distin-guish than candidates produced by a strong re-trieval system. Compressing each item into a single vector may discard details relevant to particular users. Offline representations also require regeneration when item content or encoder parameters change. Our throughput measurements cover online serv-ing and exclude training and offline encoding costs. Finally, the serving results are measured on an H100 under controlled request loads. Perfor-mance under different hardware, traffic patterns, and latency constraints requires further evalua-tion. 9References 
+
+Jean-Baptiste Alayrac, Jeff Donahue, Pauline Luc, Antoine Miech, Iain Barr, Yana Hasson, Karel Lenc, Arthur Mensch, Katie Millican, Malcolm Reynolds, Roman Ring, Eliza Rutherford, Serkan Cabi, Tengda Han, Zhitao Gong, Sina Saman-gooei, Marianne Monteiro, Jacob Menick, Sebastian Borgeaud, and 8 others. 2022. Flamingo: a Visual Language Model for Few-Shot Learning. Preprint ,arXiv:2204.14198. Keqin Bao, Jizhi Zhang, Yang Zhang, Wenjie Wang, Fuli Feng, and Xiangnan He. 2023. TALLRec: An effective and efficient tuning framework to align large language model with recommendation. In Pro-ceedings of the 17th ACM Conference on Recom-mender Systems , RecSys ’23, pages 1007–1014. As-sociation for Computing Machinery. Junyi Chen, Lu Chi, Bingyue Peng, and Zehuan Yuan. 2024. Hllm: Enhancing sequential recommenda-tions via hierarchical large language models for item and user modeling. Preprint , arXiv:2409.12740. Xin Cheng, Xun Wang, Xingxing Zhang, Tao Ge, Si-Qing Chen, Furu Wei, Huishuai Zhang, and Dongyan Zhao. 2024. xrag: Extreme context com-pression for retrieval-augmented generation with one token. In Advances in Neural Information Pro-cessing Systems , volume 37, pages 109487–109516. Curran Associates, Inc. Tri Dao, Dan Fu, Stefano Ermon, Atri Rudra, and Christopher Ré. 2022. Flashattention: Fast and memory-efficient exact attention with io-awareness. In Advances in Neural Information Processing Sys-tems , volume 35, pages 16344–16359. Curran Asso-ciates, Inc. Tao Ge, Jing Hu, Lei Wang, Xun Wang, Si-Qing Chen, and Furu Wei. 2024. In-context autoencoder for context compression in a large language model. 
+
+Preprint , arXiv:2307.06945. Jie He, Richard He Bai, Sinead Williamson, Jeff Z. Pan, Navdeep Jaitly, and Yizhe Zhang. 2025. Clara: Bridging retrieval and generation with continuous la-tent reasoning. Preprint , arXiv:2511.18659. Geoffrey Hinton, Oriol Vinyals, and Jeff Dean. 2015. Distilling the knowledge in a neural network. 
+
+Preprint , arXiv:1503.02531. Yupeng Hou, Jiacheng Li, Zhankui He, An Yan, Xiusi Chen, and Julian McAuley. 2024. Bridging lan-guage and items for retrieval and recommendation. 
+
+arXiv preprint arXiv:2403.03952 .Yupeng Hou, Shanlei Mu, Wayne Xin Zhao, Yaliang Li, Bolin Ding, and Ji-Rong Wen. 2022. Towards universal sequence representation learning for rec-ommender systems. Preprint , arXiv:2206.05941. Andrew Jaegle, Felix Gimeno, Andrew Brock, Andrew Zisserman, Oriol Vinyals, and Joao Carreira. 2021. Perceiver: General Perception with Iterative Atten-tion. Preprint , arXiv:2103.03206. Jordan Juravsky, Bradley Brown, Ryan Ehrlich, Daniel Y. Fu, Christopher Ré, and Azalia Mirhoseini. 2024. Hydragen: High-throughput llm inference with shared prefixes. Preprint , arXiv:2402.05099. Wang-Cheng Kang and Julian McAuley. 2018. Self-Attentive Sequential Recommendation. Preprint ,arXiv:1808.09781. Sein Kim, Hongseok Kang, Seungyoon Choi, Donghyun Kim, Minchul Yang, and Chanyoung Park. 2024. Large language models meet collabo-rative filtering: An efficient all-round LLM-based recommender system. In Proceedings of the 30th ACM SIGKDD Conference on Knowledge Discov-ery and Data Mining , KDD ’24, pages 1395–1406. Association for Computing Machinery. Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody Hao Yu, Joseph E. Gonzalez, Hao Zhang, and Ion Stoica. 2023. Effi-cient memory management for large language model serving with pagedattention. In Proceedings of the ACM SIGOPS 29th Symposium on Operating Sys-tems Principles .Jiacheng Li, Ming Wang, Jin Li, Jinmiao Fu, Xin Shen, Jingbo Shang, and Julian McAuley. 2023. Text is all you need: Learning language represen-tations for sequential recommendation. Preprint ,arXiv:2305.13731. Jiongnan Liu, Yutao Zhu, Shuting Wang, Xiaochi Wei, Erxue Min, Yu Lu, Shuaiqiang Wang, Dawei Yin, and Zhicheng Dou. 2025. LLMs + persona-plug = personalized LLMs. In Proceedings of the 63rd An-nual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 9373– 9385, Vienna, Austria. Association for Computa-tional Linguistics. Maxime Louis, Hervé Déjean, and Stéphane Clin-chant. 2025. PISCO: Pretty simple compression for retrieval-augmented generation. In Findings of the Association for Computational Linguistics: ACL 2025 , pages 15506–15521, Vienna, Austria. Associ-ation for Computational Linguistics. Lin Ning, Luyang Liu, Jiaxing Wu, Neo Wu, De-vora Berlowitz, Sushant Prakash, Bradley Green, Shawn O’Banion, and Jun Xie. 2024. User-llm: Ef-ficient llm contextualization with user embeddings. 
+
+Preprint , arXiv:2402.13598. Yutong Song, Jiang Wu, Weijia Zhang, Chengze Shen, Shaofan Yuan, Weitao Lu, Jian Wang, Yu Wang, Nikil Dutt, and Amir M. Rahmani. 2026. Card: Cluster-level adaptation with reward-guided decod-ing for personalized text generation. Preprint ,arXiv:2601.06352. Zihao Ye, Lequn Chen, Ruihang Lai, Wuwei Lin, Yi-neng Zhang, Stephanie Wang, Tianqi Chen, Baris 
+
+10 Kasikci, Vinod Grover, Arvind Krishnamurthy, and Luis Ceze. 2025. Flashinfer: Efficient and customiz-able attention engine for llm inference serving. In 
+
+Proceedings of Machine Learning and Systems , vol-ume 7. MLSys. Xinyang Yi, Ji Yang, Lichan Hong, Derek Zhiyuan Cheng, Lukasz Heldt, Aditee Kumthekar, Zhe Zhao, Li Wei, and Ed Chi. 2019. Sampling-bias-corrected neural modeling for large corpus item recommenda-tions. In Proceedings of the 13th ACM Conference on Recommender Systems , RecSys ’19, pages 269– 277. ACM. Lianmin Zheng, Liangsheng Yin, Zhiqiang Xie, Chuyue Sun, Jeff Huang, Cody Hao Yu, Shiyi Cao, Christos Kozyrakis, Ion Stoica, Joseph E. Gonzalez, Clark Barrett, and Ying Sheng. 2024. Sglang: Ef-ficient execution of structured language model pro-grams. In Advances in Neural Information Process-ing Systems , volume 37, pages 62557–62583. Cur-ran Associates, Inc. 
+
+11 Appendix A Experimental Protocol and Implementation 
+
+This section provides the experimental details for rating prediction and next-item recommendation. It covers data construction and evaluation, model and baseline implementations, and serving mea-surements. 
+
+A.1 Data Splits and Evaluation 
+
+We use the 5-core interactions and item metadata from Amazon Reviews 2023, with splits deter-mined by a fixed user hash. Item text includes ti-tles, categories, features, and descriptions, and ex-cludes target reviews, target ratings, and aggregate ratings. 
+
+Rating prediction. We use 10,000 training users and 1,000 development users. Each user’s earliest ten valid items form a support pool, and targets occur after this pool. We evaluate histories of length K ∈ { 1, 3, 5, 10 }. These histories are nested subsets of the support pool, selected in a rating-independent hash order and then presented chronologically. The development set contains 8,757 targets, yielding 35,028 predictions across the four values of K.Rating metrics are first averaged within each user, then macro-averaged across users, and finally averaged with equal weight across K. MAE med 
+
+uses the first star rating at which the cumulative probability reaches or exceeds 0.5. MAE exp and RMSE use the expected rating, ˆy = ∑5 
+
+> r=1
+
+rp (r),where p(r) is the predicted probability of rating r.RMSE takes the square root of the mean squared error within each user before averaging across users and then across K. For a true rating y, RPS is defined as 
+
+RPS = 14
+
+> 4
+
+∑
+
+> r=1
+
+[F (r) − 1(y ≤ r)] 2 ,
+
+where F (r) is the cumulative probability of the predicted rating distribution. 
+
+Next-item recommendation. Books and Video Games each use 50,000 training users, yielding 237,558 and 233,868 training queries, respectively. Their item catalogs contain 495,063 and 25,611 items, respectively. Each history contains at most ten items, and each user contributes at most five training queries. During training, each target is paired with seven negatives: four sampled uniformly and three re-trieved using the history content. Evaluation uses one target and 99 fixed, randomly sampled items with which the user has not interacted. Users who cannot be scored remain in the macro-average de-nominator and contribute zero; there are seven such users in Books and six in Video Games. 
+
+Model selection and reporting. We select rat-ing models by NLL averaged equally across K on the full development set and report their results on the same set. Recommendation students are selected on a fixed development subset of 2,000 users. Books results use the full set of 5,000 users, which includes this subset; Video Games results use the remaining 3,000 users. The Books full-text teacher retains the checkpoint selected under the retrieved-candidate protocol and is then evaluated on the fixed 100-candidate protocol, comprising one target and 99 randomly sampled items with which the user has not interacted. 
+
+A.2 Model and Baseline Implementations Model configuration. Encoder A is initial-ized from Qwen3-Embedding-0.6B. The full-text teacher and ranker B use Qwen3-0.6B-Base for recommendation and Qwen3-0.6B for rating pre-diction. B is initialized from the public base weights. Both A and B have 28 layers and a hid-den dimension of 1,024. Recommendation uses LastToken and a scalar scoring head; rating prediction uses Resam-pler/RMS and a five-star output head. For the RMS reference in rating prediction, we use the mean of the per-token RMS values. The main con-figuration uses FIR, m = 1 , and the short input-suffix template. Appendix B.3 compares the long-and short input-suffix templates. Item content is capped at 512 tokens for recom-mendation and 256 tokens for rating prediction, measured with B’s tokenizer; A additionally re-ceives the template prefix and EOS. The rating FIE and FIR configurations in Table 4 use matched to-tal update budgets and ranker input budgets, while the allocation of history vectors varies by recipe. 
+
+Statistical and content baselines. For rating prediction, Global prior uses the training rating distribution; Item prior uses item rating counts; and History prior uses rating counts from the cur-rent user’s visible history. The latter two are smoothed toward the global distribution. Content 12 kNN weights historical ratings by the similarity of frozen content vectors and follows the same smoothing approach. Smoothing and kNN param-eters are selected by development NLL averaged equally across K and then fixed. For recommendation, Popularity counts the dis-tinct users who interacted with each item in the union of training histories and targets. History sim-ilarity compares each candidate with the equally weighted mean of the user’s history content vec-tors. 
+
+ContentSASRec/publicA. This content-based SASRec uses frozen Qwen3-Embedding-0.6B item vectors and trains a projection from 1,024 to 256 dimensions, rating and position embeddings, and a two-layer, four-head sequential Transformer. It scores candidates by the dot product of normal-ized user and candidate representations. 
+
+HLLM and HLLM-rating. For recommenda-tion, HLLM uses two Qwen3 models of approx-imately 0.6B parameters to encode item content and user history, respectively. It ranks candidates by the cosine similarity between user and candi-date representations, with the item sequence as the history input. Our adaptation for five-star predic-tion, HLLM-rating, adds star-rating embeddings to history item representations and feeds interac-tion features between the user and target represen-tations into a classification network. The HLLM and HLLM-rating baselines are initialized from public weights and trained on their respective task data. HLLM-rating uses cross-entropy loss on true star ratings. 
+
+Full-text language models. Raw Qwen3-0.6B directly reads the user history, feedback, and tar-get item text to predict a five-star rating. The full-text teacher is trained as described in Section 2.2. It uses Qwen3’s causal Transformer to jointly pro-cess the history, feedback, and original candidate text, then outputs candidate scores or probabilities over the five rating levels through an output head, without generating recommendation text. 
+
+A.3 Serving Measurements Timing scope. Throughput includes online in-put preparation, submission, transfer, queuing, model execution, and postprocessing. Offline en-coding, startup, warmup, candidate retrieval, and wide-area network transfer are outside the timing scope. For the three-run serving comparisons, re-quest p99 is the median of the p99 values from the three runs. 
+
+Recommendation serving. All systems use the same physical NVIDIA H100 80GB HBM3 and the same trace of 1,000 fixed, scorable users from the quality evaluation, selected independently of labels. The main FIR service has a KV budget of 262,144 tokens. The full-text teacher and Ours use FP16 rankers and FP32 output heads; HLLM uses a BF16/FP32 configuration. For the execution-method comparison in Table D1, we fix the model, item table, hardware, and request trace. At each concurrency level, we report median throughput across three closed-loop replays, each lasting at least 30 seconds and completing the full trace. Quality is measured using each user’s first response in the first run. On this trace, the full-text teacher on vLLM and Ours achieve NDCG@10 of 0.5801 and 0.5833, respectively. 
+
+Rating serving. HLLM-rating and Ours are compared on the same GPU, a different NVIDIA H100 80GB HBM3 from the recommendation ex-periments. HLLM-rating uses FP32. Ours uses an FP16 ranker and vector table, an FP32 five-star head, and four CPU input compilation processes. Each run contains 100 requests, and we report the median across three runs. For the full development-set quality evaluation of Ours ( m = 1 ) on rating prediction, the ranker and output head use FP32; vectors stored offline in FP16 are converted to FP32 after loading. 
+
+VID comparison. Table D2 fixes FIR ( m =8), an FP16 ranker, an FP32 output head, and one CPU compilation process. At each concur-rency level, a single replay contains 70 requests and 1,900 candidates, with a mixture of N ∈{5, 20 , 50 , 100 } and a total KV budget of 131,072 tokens. The item table occupies 2,171,764,736 bytes per instance. The maximum probability dif-ference across the four input paths is 0.000547, be-low the preset threshold of 0.001. 
+
+B Additional Results for Rating Prediction 
+
+This section examines how rating predictions rank items within each user and how additional history affects these predictions. We also test the effect of changing historical feedback and compare long and short input suffixes. 13 B.1 Within-User Ranking and History Length Within-user ranking protocol. We rank each user’s 5–10 target items by their predicted ex-pected ratings to assess whether the rating model correctly orders items according to the user’s ob-served preferences. This diagnostic differs from the next-item recommendation evaluation in Ta-ble 2: all target items here have observed star rat-ings. NDCG@3 uses gain 2y−1 −1, where y is the ob-served rating, with prediction ties evaluated using the average gain of the tied group. Pairwise agree-ment considers target pairs with different observed ratings and assigns 0.5 to prediction ties. Top-1 re-gret is the difference between the highest observed rating and the average observed rating of items tied for first in the predicted ranking. NDCG@3 and pairwise agreement use 758 users with differ-ing target ratings, while Top-1 regret uses all 1,000 users. 
+
+Overall ranking results. DuoLM improves within-user ranking over History prior across all three metrics (Table B1). The teacher model achieves the highest NDCG@3 and pairwise agreement. 
+
+Table B1: Within-user ranking, averaged equally across history lengths K ∈ { 1, 3, 5, 10 }. Agreement denotes pairwise agreement; regret denotes Top-1 re-gret. Bold/underlined: best/second-best.                     
+
+> Model NDCG@3
+> ↑
+> Agreement
+> ↑
+> Regret
+> ↓
+> History prior 0.7207 0.5000 0.5657 HLLM-rating 0.7682 0.5626 0.4263
+> Teacher model 0.7719 0.5675 0.4425 FIE ( m= 8 )0.7682 0.5645 0.4588 FIR ( m= 8 )0.7634 0.5535 0.4900 DuoLM 0.7634 0.5524 0.4640
+
+Rating prediction across history lengths. 
+
+DuoLM’s NLL, both MAE measures, RMSE, and RPS decrease consistently as history length increases (Table B2). From K = 1 to K = 10 ,expected-rating MAE decreases from 0.6888 to 0.6027, and RMSE decreases from 0.8197 to 0.7334. 
+
+B.2 Feedback Intervention 
+
+We test whether predictions depend on historical feedback by fixing the weights of the full-text 
+
+Table B2: Results for DuoLM at different his-tory lengths. MAE med uses the predictive me-dian; MAE exp and RMSE use the expected rating. NDCG@3 and agreement evaluate within-user ranking. Bold/underlined: best/second-best.                                            
+
+> Metric K= 1 K= 3 K= 5 K= 10
+> NLL ↓0.9848 0.9337 0.9061 0.8806 MAE med ↓0.5705 0.5394 0.5294 0.5056 MAE exp ↓0.6888 0.6473 0.6273 0.6027 RMSE ↓0.8197 0.7798 0.7569 0.7334 RPS ↓0.1044 0.0975 0.0943 0.0911 NDCG@3 ↑0.7641 0.7633 0.7631 0.7629
+> Agreement ↑0.5529 0.5521 0.5530 0.5516
+
+teacher, FIE ( m = 8 ), and FIR ( m = 8 ), and ei-ther shuffling the correspondence between history items and ratings or removing the ratings at infer-ence time. Shuffling preserves item order and the multiset of ratings; removal preserves the history items. The proportions of inputs actually changed by shuffling are 0%, 57.6%, 69.2%, and 79.0% for 
+
+K = 1 , 3, 5, 10 , respectively. 
+
+Table B3: Feedback intervention. ∆NLL is the inter-vention result minus the normal-input result, averaged equally across the four values of K. Brackets give 95% user-paired bootstrap intervals from 10,000 resamples. For normal-input NLL, bold and underlined values are best and second-best. Bold intervention differences have intervals that exclude zero.                              
+
+> Intervention ∆NLL 95% CI
+> Full-text teacher NLL ↓:0.9233
+> Shuffle +0.0042 [+0 .00219 ,+0 .00632]
+> Remove +0.1051 [+0 .09250 ,+0 .11822]
+> FIE ( m= 8 )NLL ↓: 0.9236 Shuffle +0.0016 [+0 .00028 ,+0 .00293]
+> Remove +0.1593 [+0 .14059 ,+0 .17877]
+> FIR ( m= 8 )NLL ↓: 0.9249 Shuffle +0.0028 [+0 .00125 ,+0 .00432]
+> Remove +0.1073 [+0 .09381 ,+0 .12128]
+
+Shuffling or removing historical ratings in-creases NLL for the full-text teacher, FIE ( m = 8 ), and FIR ( m = 8 ), with removal having a larger ef-fect (Table B3). These results show that all three models use historical feedback in their predictions. 
+
+B.3 Input Suffix Templates 
+
+We compare the original long input suffix with the short suffix for FIR ( m = 1 ), keeping the same weights and changing only the input template (Ta-ble B4). We use the short suffix in the main text to reduce the number of input tokens. 14 Table B4: Long and short input-suffix templates for FIR ( m = 1 ). Bold/underlined: best/second-best.            
+
+> Metric ↓
+> Original long suffix Short suffix (main text)
+> NLL 0.9268 0.9263
+> MAE med 0.5355 0.5362 MAE exp 0.6430 0.6415
+> RMSE 0.7749 0.7725
+> RPS 0.0969 0.0968
+
+C Training and Ablation Details 
+
+This section details the training settings for the Books ablations and reports additional metrics, paired comparisons, and training costs. 
+
+C.1 Experimental Settings Shared settings. The readout and loss ablations share a separately trained default model. The seven Books experiments use the same 237,558 training queries, an effective batch size of 32, a mi-crobatch size of 8, and 7,424 unique updates. Mod-ules shared across configurations are initialized from the same weights. Checkpoints are selected on a fixed development subset of 2,000 users, and results are reported on all 5,000 users. 
+
+Readouts and continuous input interface. Ev-ery readout produces one item vector. LastToken uses the Encoder’s final-layer hidden state at EOS. MEM1 appends one learnable 1,024-dimensional input vector, while Perceiver1 uses one learnable query and a single layer of eight-head attention to aggregate content. The continuous input inter-face RMS-normalizes each readout vector and cal-ibrates its scale: 
+
+z = ρe γ a
+
+√
+
+d−1 ∑dj=1 a2 
+
+> j
+
++ 10 −6
+
+,d = 1024 .
+
+Here, a is the readout vector, and γ is a learn-able scalar log-gain initialized to zero. For recom-mendation, we compute the reference RMS jointly over the ranker B’s native content embeddings for the first 256 distinct training items and fix ρ =0.0280669 .
+
+Training objectives. The default recommenda-tion objective combines recommendation cross-entropy with teacher-to-student distillation: 
+
+L = (1 − β)LCE + βτ 2DKL (pτT ∥pτS ).
+
+This objective uses the frozen full-text teacher’s distribution. Here, β is the scheduled distillation weight and τ is the distillation temperature; table entries for β denote its final value. 
+
+Books distillation schedule. Following the schedule in Appendix E.2, the default Books FIR (m = 1 ) recipe uses βfinal = 0 .5, τ = 1 , and 
+
+rKD = 0 .1. Here, U is the planned number of optimizer updates, R is the ramp length, and rKD 
+
+is the fraction of planned updates allocated to the ramp. One epoch over 237,558 training requests with an effective batch size of 32 requests gives 
+
+U =
+
+⌈ 237 ,558 32 
+
+⌉
+
+= 7 ,424 , R = 743 . (11) The distillation weight increases linearly over the first 743 optimizer updates: it starts at β1 ≈ 6.73 ×
+
+10 −4, reaches 0.5 at update 743, and remains at 0.5
+
+thereafter. 
+
+Self-alignment. The self-alignment variant ex-tends the default recommendation objective with an output KL loss between two branches of the same B (full-text branch ∥ compressed branch, at temperature 1) and a hidden-state cosine loss. Gra-dients propagate through both branches. The out-put alignment weight decreases from 0.5 to 0.1, the hidden-state alignment weight decreases from 0.1 to 0.02, and the additional full-text CE weight is zero. 
+
+C.2 Ablation Results and Training Cost 
+
+We compare the selected and final checkpoints separately to examine whether the ablation differ-ences persist at the end of training. 
+
+Time accounting. Training time covers the up-date phase. The τ = 2 run includes 678 updates replayed after recovery. Self-alignment uses gra-dient checkpointing for B, while CE-only retains the teacher-cache reading path. 15 Table C1: Additional ablation metrics and training up-date time. Metrics are reported separately for the se-lected and final checkpoints. Update time is reported once per recipe. Bold/underlined: best/second-best.                                                        
+
+> Selected checkpoint Recipe HR@1
+> ↑
+> HR@10
+> ↑
+> MRR@10
+> ↑
+> Update time (h)
+> LastToken/default 0.4024 0.7452 0.5049 7.39 MEM1 0.3900 0.7374 0.4982 7.54 Perceiver1 0.3588 0.7320 0.4714 8.96 CE-only 0.3748 0.7474 0.4884 7.37
+> β= 0 .90.3774 0.7284 0.4846 7.40
+> τ= 2 0.3904 0.7424 0.4985 8.06
+> +Self-alignment 0.3900 0.7414 0.4971 16.95
+> Final checkpoint Recipe HR@1
+> ↑
+> HR@10
+> ↑
+> MRR@10
+> ↑
+> LastToken/default 0.3922 0.7372 0.4984
+> MEM1 0.3904 0.7386 0.4974 Perceiver1 0.3474 0.7302 0.4627 CE-only 0.3772 0.7438 0.4882
+> β= 0 .90.3742 0.7258 0.4801
+> τ= 2 0.3856 0.7366 0.4940
+> +Self-alignment 0.3870 0.7392 0.4943
+
+At both checkpoints, the default LastTo-ken+CE+KD recipe has higher HR@1, MRR@10, and NDCG@10 than CE-only, while CE-only has slightly higher HR@10 (Tables C1 and C2). 
+
+Paired Ablation Comparisons. For each abla-tion, Table C2 reports NDCG@10 differences (variant minus default) and 95% confidence inter-vals from 10,000 user-paired bootstrap resamples, separately for the selected and final checkpoints. At the selected checkpoint, all six intervals lie below zero. At the final checkpoint, the intervals remain below zero for CE-only, β = 0 .9, and Per-ceiver1. The gaps for MEM1, τ = 2 , and self-alignment narrow, and their final-checkpoint inter-vals cross zero. 
+
+Training cost. Relative to the default recipe, self-alignment increases update time from 7.39 to 16.95 hours without improving NDCG@10. Perceiver1 takes 8.96 hours and also has lower NDCG@10 than the default. 
+
+D Additional Serving Results 
+
+This section provides detailed serving measure-ments, covering execution ablations, request la-tency, the rating comparison with the teacher model, and CPU input preparation. 
+
+Table C2: NDCG@10 differences relative to the de-fault LastToken+CE+KD recipe and 95% user-paired bootstrap intervals. Bold differences have intervals ex-cluding zero.                                               
+
+> Selected checkpoint Recipe ∆NDCG@10 95% CI
+> MEM1 −0.0066 [−0.0108 ,−0.0024]
+> Perceiver1 −0.0286 [−0.0343 ,−0.0229]
+> CE-only −0.0119 [−0.0174 ,−0.0065]
+> β= 0 .9−0.0193 [−0.0243 ,−0.0144]
+> τ= 2 −0.0053 [−0.0099 ,−0.0007] +Self-alignment −0.0067 [−0.0106 ,−0.0028]
+> Final checkpoint Recipe ∆NDCG@10 95% CI
+> MEM1 −0.0004 [−0.0046 ,+0 .0038]
+> Perceiver1 −0.0290 [−0.0346 ,−0.0233]
+> CE-only −0.0064 [−0.0115 ,−0.0012]
+> β= 0 .9−0.0168 [−0.0216 ,−0.0120]
+> τ= 2 −0.0035 [−0.0079 ,+0 .0008] +Self-alignment −0.0027 [−0.0068 ,+0 .0013]
+
+D.1 Execution and Input-Path Diagnostics 
+
+Table D1 reports the exact throughput values un-derlying Figure 4, in candidates/s. The execution ablation fixes the recommendation model and re-quest trace, with 100 candidates per request and cross-request prefix reuse disabled. 
+
+Table D1: Numerical results for Figure 4. Execution ablation with a fixed recommendation model. Each re-quest has 100 candidates. Throughput is in candidates/s (higher is better). C denotes concurrent recommenda-tion requests. Green/yellow mark the best/second-best execution methods at each concurrency. Throughput (candidates/s) ↑
+
+C
+
+Independent scoring MIS MIS + CUDA Graph 1 520.53 2,503.55 8,870.36 8 921.45 9,480.19 20,740.56 32 881.61 19,883.01 25,506.11 64 851.48 24,953.95 26,403.98 
+
+Table D2 reports a separate rating input-path diagnostic with FIR ( m = 8 ) and mixed N ∈{5, 20 , 50 , 100 }. This diagnostic uses 10 users and one replay per concurrency setting (Ap-pendix A.3). Request sizes are in bytes and throughput is in candidates/s. FP32/FP16 denote the precision of transferred vectors, and “cache” denotes cross-request prefix caching. Figure 5 plots these values in kB ( 1 kB = 1 ,000 bytes) and thousands of candidates/s, with rounded labels. 16 Table D2: VID input paths for FIR ( m = 8 ), with mixed N ∈ { 5, 20 , 50 , 100 }. Bytes denotes mean re-quest size; throughput is in candidates/s. FP32/FP16 denote transferred-vector precision. VID+cache adds cross-request prefix caching. Green/yellow mark best/second-best values, including ties. Full values for Figure 5. 
+
+Metric FP32 FP16 VID VID+ cache Bytes ↓ 1,227,361 618,812 11,842 11,842 
+
+C = 1 ↑ 711.60 731.94 1,058.68 1,021.97 
+
+C = 8 ↑ 1,744.17 1,659.23 2,903.34 2,784.68 
+
+In this diagnostic, FP16 transfer reduces request size relative to FP32 but has lower throughput at 
+
+C = 8. VID+cache also has lower measured throughput than VID at both reported concurrency levels. 
+
+D.2 Request Latency 
+
+MIS lowers the p99 latency of recommendation re-quests, and CUDA Graph further reduces latency at low concurrency (Figure 6 and Table D3a). At 
+
+C = 1 , p99 falls from 485.01 ms with indepen-dent execution to 43.43 ms with MIS and 12.35 ms with MIS+CUDA Graph. 
+
+Table D3a: Request p99 latency (ms) for Books recom-mendation, corresponding to Tables 6 and D1. Lower is better. Bold/underlined: best/second-best. 
+
+System C = 1 C = 8 C = 32 C = 64 
+
+Full-text teacher on vLLM 354.87 2,099.20 8,155.82 17,093.82 Full-text teacher on SGLang 706.46 4,138.95 14,701.82 28,189.04 HLLM 23.77 46.32 55.89 75.54 
+
+Ours: independent execution 485.01 1,236.90 4,024.63 8,104.30 Ours: MIS 43.43 268.19 424.85 539.88 Ours: MIS+CUDA Graph 12.35 43.89 389.27 536.90 
+
+The separate rating comparison uses Ours ( m =1) and HLLM-rating, with the serving setup de-scribed in Appendix A.3. 
+
+D.3 Rating Serving Comparison with the Full-Text Teacher 
+
+We compare FIR (m = 8) with the full-text teacher on SGLang using a mixed N ∈{5, 20 , 50 , 100 } rating workload. At each concur-rency level, we perform three replays of 700 re-1 8 32 64      
+
+> Concurrency setting, C
+> 10 100 1,000 10,000
+> Request p99 (ms) ↓
+> (a) Complete serving systems
+> Teacher / vLLM Teacher / SGLang HLLM Ours
+> 1832 64
+> Concurrency setting, C
+> (b) Fixed-model execution
+> Independent MIS + CUDA Graph MIS
+
+Figure 6: Request p99 latency for Books recommenda-tion. Left: complete serving systems. Right: execu-tion methods for the same model. Each request scores 100 candidates. vLLM and SGLang denote full-text teacher deployments; Ours denotes MIS with CUDA Graph. Both latency axes use a logarithmic scale. Ex-act values appear in Table D3a. Table D3b: Request p99 latency (ms ↓) for Books rat-ing prediction. Bold/underlined: best/second-best. 
+
+C HLLM-rating Ours ( m = 1 )
+
+1 25.14 84.44 8 48.28 136.09 16 53.68 207.20 32 66.57 330.95 
+
+quests and 19,000 candidates each. Both systems run on the same H100 with shared input prepara-tion, MIS, FP16 rankers, and FP32 output heads, with cross-request prefix caching disabled. FIR uses offline vectors and a persistent tokenization directory; the full-text teacher uses a bounded to-kenization cache reset before each run. Both im-plementations pass numerical checks with a maxi-mum probability difference threshold of 0.001. On this mixed-N workload, FIR achieves 
+
+2.36 × the full-text teacher’s throughput at C = 1 
+
+and 4.52 × at C = 8 , measured in requests/s (Ta-ble D4). For requests with N = 100 , p50 latency falls from 417.42 ms with the full-text teacher to 92.03 ms with FIR at C = 1 , and from 2,427.76 to 322.11 ms at C = 8 .
+
+Table D4: Rating-serving throughput (requests/s ↑). Bold/underlined: best/second-best. 
+
+Model C = 1 C = 8 
+
+Full-text teacher on SGLang 7.5954 11.3411 FIR ( m = 8 ) 17.8960 51.3040 
+
+FIR/full-text teacher throughput ratio 2.36 × 4.52 ×
+
+D.4 CPU Input Preparation 
+
+We compare 1, 2, and 4 compilation processes un-der open-loop arrivals of 100 and 200 requests/s, with the rating model fixed at m = 1 , K = 10 ,17 1 2 4   
+
+> Compilation processes
+> 0510 15 20
+> Throughput (k cand./s) ↑ (a) Throughput
+> 124
+> Compilation processes
+> 0510 15
+> Request p99 (s) ↓  1,491 failed 684 failed
+> (b) Successful-request p99
+> 100 requests/s 200 requests/s
+
+Figure 7: Effect of CPU compilation processes at two request rates. Bars show throughput and successful-request p99 latency. Table D5 reports backlog growth and failures. 
+
+N = 100 , and a concurrency limit of 32. Each measurement uses a 20-second arrival window, fol-lowed by a drain phase to complete the remaining requests. We cycle through 100 request samples and recompile the inputs each time. Throughput includes the drain phase, and p99 covers successful requests only. Backlog growth is the mean outstanding request count in the last quarter minus that in the second quarter of the ar-rival window. 
+
+Table D5: Open-loop input processing. Procs: com-pilation processes. Bold/underlined: best/second-best within each arrival rate. Backlog growth and failures are not ranked. 
+
+Rate: 100 requests/s Procs Metric 1 2 4
+
+Throughput ↑
+
+(candidates/s) 7,358.81 9,962.70 9,971.89 
+
+p99 ↓ (ms) 7,193.63 488.25 474.90 
+
+Backlog growth (requests) 246.994 0.868 1.280 Failures 0 0 0
+
+Rate: 200 requests/s Procs Metric 1 2 4
+
+Throughput ↑
+
+(candidates/s) 7,402.85 11,683.26 16,969.58 
+
+p99 ↓ (ms) 14,274.90 8,437.53 3,691.89 
+
+Backlog growth (requests) 123.034 252.563 302.942 Failures 1,491 684 0
+
+At 100 requests/s, two processes reach approx-imately 10,000 candidates/s, with little further throughput gain from four (Figure 7 and Table D5). All three configurations complete without failures; backlog growth is 246.994 requests with one pro-cess, compared with 0.868 and 1.280 with two and four. At 200 requests/s, four processes raise through-put to 16,969.58 candidates/s and complete with-out failures, while backlog grows by 302.942 requests. One and two processes record 1,491 and 684 failures, respectively. Thus, the higher throughput at this arrival rate accompanies contin-ued backlog growth. 
+
+E Supplementary Method Details 
+
+This section provides further details on teacher training, student optimization, and the MIS imple-mentation. 
+
+E.1 Expert Teacher Training 
+
+Let ˜Xq,j denote the teacher’s input embedding se-quence for candidate j in request q, constructed using the text template in Section 2.2. With pa-rameters ϕ = ( θT , w T ), the teacher produces 
+
+tq,j (ϕ) = wT
+
+> T
+
+[TθT ( ˜Xq,j )]
+
+> last
+
+, (12) where last denotes the final token of the scoring suffix. For each request, yq indexes the observed target among Kq candidates. We train the teacher with cross-entropy: 
+
+LT (ϕ) = − 1
+
+|B T |
+
+∑
+
+> q∈B T
+
+log exp( tq,y q (ϕ)) 
+
+∑Kq 
+
+> j=1
+
+exp( tq,j (ϕ)) ,
+
+(13) where BT is a batch of training requests. After training, we freeze ϕ and cache the raw scores for the exact histories and ordered candidate groups used in student training. 
+
+E.2 Student Training Distillation Schedule. The weight βu in Eq. (7) controls the balance between label supervision and distillation from the cached teacher scores. Let u
+
+count optimizer updates after gradient accumula-tion, and let U be the planned number of such up-dates. We linearly increase the distillation weight to βfinal ∈ [0 , 1] over the first R updates and then keep it fixed: 
+
+βu = βfinal min 
+
+(
+
+1, uR
+
+)
+
+, u = 1 , . . . , U. 
+
+(14) The implementation computes the ramp length as 
+
+R = max (1, ⌈U r KD ⌉), (15) where rKD ∈ [0 , 1] is the fraction of planned up-dates allocated to the ramp, giving 1 ≤ R ≤ U .18 When rKD = 0 , we have R = 1 and apply βfinal 
+
+from the first update. For R > 1, the first update uses β1 = βfinal /R . Resumed runs continue the schedule from the saved update index plus one. 
+
+Student Score Gradients. For request q, differ-entiating the per-request objective ℓu(q) in Eq. (7) with respect to candidate score sq,j gives a label residual and a teacher residual: 
+
+∂ℓ u(q)
+
+∂s q,j 
+
+= (1 − βu)(p(1) S,q,j − 1[j = yq])
+
++ βuτ (p(τ )S,q,j − p(τ )T,q,j 
+
+),
+
+(16) where 1[·] is the indicator function. The factor 
+
+τ in the teacher residual comes from the τ 2 loss scaling and the 1/τ factor from differentiating the temperature-scaled softmax. The label residual fa-vors the observed target, whereas the teacher resid-ual matches the teacher’s candidate-group distribu-tion. Both supervision signals propagate through the ranker and continuous input interface to the encoder; the teacher and reference scale ρ remain fixed. 
+
+E.3 Multi-Item Scoring 
+
+We implement multi-item scoring (MIS) on top of SGLang (Zheng et al., 2024) to score multiple candidates in a single forward pass. Each request packs a shared history prefix followed by candi-date segments separated by transport delimiters. An item-aware causal attention mask allows each candidate to attend to the shared prefix and its own segment while blocking cross-candidate attention. The prefix KV states are computed once per re-quest and shared across candidates. To execute these packed requests, we pass the prefix length and candidate-boundary metadata to FlashInfer’s prefill kernels. We assign token positions within each candidate as if it followed the shared prefix directly, indepen-dent of the other candidates. For our recommenda-tion model, the scalar head reads the final candi-date hidden state immediately before each trailing delimiter. We exclude the endpoint of the shared history prefix and return one score per candidate in the original order. 
+
+Candidate Attention. Within this packed imple-mentation, the recommendation model represents each candidate with one continuous vector (Sec-tion 2.1). The attention formula below computes this candidate row’s output using the prefix rows and the candidate row itself, following the vis-ibility rule in Eq. (8) and the logical positions defined in Section 2.3. For one request and at-tention head at a given layer, let KP , V P denote prefix key/value matrices and qj , k j , v j the candi-date’s query, key, and value rows. Queries and keys incorporate positional transformations at the assigned logical positions. With head width dh,candidate attention is 
+
+oj = softmax 
+
+( qj (KP ⊕ kj )T
+
+√dh
+
+)
+
+(VP ⊕vj ). (17) Here, ⊕ concatenates rows along the sequence di-mension. 19
