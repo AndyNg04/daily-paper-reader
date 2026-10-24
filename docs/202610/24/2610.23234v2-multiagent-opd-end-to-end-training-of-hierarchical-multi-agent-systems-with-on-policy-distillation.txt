@@ -1,0 +1,1104 @@
+Title: MultiAgent-OPD: End-to-End Training of Hierarchical Multi-Agent Systems with On-Policy Distillation
+
+URL Source: https://arxiv.org/pdf/2610.23234v2
+
+Published Time: Wed, 21 Oct 2026 01:15:28 GMT
+
+Number of Pages: 28
+
+Markdown Content:
+# MultiAgent-OPD: End-to-End Training of Hierarchical Multi-Agent Systems with On-Policy Distillation 
+
+Yuhan Sun 1,‡, Jiaxin Zhao 1,2,†,‡, Yongdong Luo 1, Yibo Hu 1,∗,Meiguang Jin 1,∗, Junfeng Ma 1, Weixun Wang 1, Weihang Pan 2, Zhongan Bi 2
+
+> 1
+
+Alibaba Group 2Zhejiang University  
+
+> ∗Corresponding authors: Yibo Hu (boxuan.hyb@taobao.com) Meiguang Jin (meiguang.jmg@taobao.com)
+> ABSTRACT
+
+In a hierarchical multi-agent system, a Leader assigns tasks and subagents carry them out. Jointly training the Leader and the subagents is difficult because a final answer gives only indirect feedback to the subagents. An LLM judge can score the performance of the subagents, but these scores depend on the judge’s own assessment of the quality of subagents’ responses. We present MultiAgent-OPD, which combines on-policy distillation with reinforcement learning to jointly train a shared-parameter Leader–Searcher–Answerer team end to end. We first train a Teacher in a Searcher–Answerer workflow using answer correctness. During team training, the frozen Teacher scores student-generated search and summary tokens to provide local process supervision for the Searchers, while the Leader learns from team success and the Answerer from candidate correctness. Across seven datasets, the trained system reaches 38.68% macro avg@4, exceeding Prompted Critic by 4.06 percentage points and C-MAS + RL, the trained cascaded multiagent system, by 2.61 percentage points. The team also solves more questions within four attempts. 
+
+1 Introduction 
+
+Reinforcement learning (RL) for LLM-based multi-agent systems faces a central challenge: the final outcome reflects the team’s combined decisions, making it difficult to assess individual intermediate actions. As agents specialize in planning, information acquisition, and reasoning, effective training requires signals that reflect their different roles in a shared objective. Recent advances in collaborative post-training span discussion-based RL [Park et al., 2025], credit propagation through sequential reasoning [Motwani et al., 2025], and agent-wise advantage normalization [Feng et al., 2026]. This difficulty is particularly pronounced in Leader–Subagent systems, where a Leader decomposes a task, delegates its execution, and integrates subagent reports. Kimi K2.5’s PARL addresses the challenge by optimizing the Leader with frozen subagents [Kimi Team, 2026], so subagent adaptation stays outside joint training. M-GRPO enables joint optimization by combining final-answer and format rewards with LLM-based evaluations of subtask execution [Hong et al., 2025]. Such evaluations provide local supervision, but their reliability depends on the judge’s assessment capabilities, which are subject to biases and reasoning errors [Zheng et al., 2023]. Moreover, a 
+
+> †
+
+Work done during an internship at Alibaba Group. 
+
+> ‡
+
+Equal contribution.  
+
+> 1arXiv:2610.23234v2 [cs.CL] 20 Oct 2026 MultiAgent-OPD Technical Report · October 2026
+
+single subtask score offers limited guidance on the sequence of search decisions that produced the report. Jointly optimizing the hierarchy calls for informative feedback at the level of subagent execution. We match learning signals to each role’s relation to the final task objective. Outcome rewards align the Leader’s coordination decisions with team success and directly evaluate the Answerer’s predictions. Searchers, in contrast, acquire intermediate evidence whose downstream value depends on later selection and reasoning. A useful report may receive no positive outcome reward when another role fails to use it. This motivates us to introduce a complementary source of supervision for Searchers: a policy trained to acquire and summarize evidence guides them locally, while outcome rewards train coordination and answer generation. We introduce MultiAgent-OPD, a two-stage framework that integrates on-policy distillation (OPD) into end-to-end RL for hierarchical multi-agent systems (Figure 1). The first stage trains the Teacher in a simpler Searcher–Answerer workflow with rewards on answer correctness. In the second stage, the frozen Teacher provides token-level supervision on Searcher trajectories sampled from the hierarchical student’s current policy. Teacher–student log-probability differences yield local advantages for query generation and evidence summarization [Agarwal et al., 2024, Gu et al., 2024], while the Leader and the Answerer keep outcome-based RL objectives. Because the Teacher conditions on the subtask and the interaction history of the student, the feedback follows the states that the team reaches as its policies evolve. All three roles jointly update a shared student model, and inference requires only the trained student. Outcome RL          
+
+> Wave 1
+> SEARCHERS
+> Wave 2
+> SEARCHERS
+> Question LEADER LEADER LEADER ANSWERER Final Answer
+> Final reward
+> OPD
+> Frozen Teacher
+> Figure 1. MultiAgent-OPD: multi-wave collaboration with two training signals. The same L E A D E R assigns successive waves of S E A R C H E R S , collects their reports, and selects evidence for the A N S W E R E R . Each S E A R C H E R
+> retrieves evidence for its assigned subtask and summarizes the retrieved passages into a report. Gray arrows show this workflow. Orange OPD feedback from the frozen T E AC H E R trains the S E A R C H E R S , and green final-answer reward feedback trains the L E A D E R and the A N S W E R E R . All student roles share one model. Two waves are shown for illustration.
+
+On seven question-answering datasets, MultiAgent-OPD achieves 38.68% macro avg@4, the highest among the evaluated systems. The score exceeds Prompted Critic (Appendix C.4) by 4.06 percentage points and C-MAS + RL, the cascaded multi-agent baseline, by 2.61 percentage points. It also exceeds the five RL-based search agents included in the comparison. Diagnostic comparisons examine the roles of direct Searcher supervision and task-specific Teacher training. Together, these results characterize how a policy learned in a simpler workflow can supply process supervision for subagents in a jointly trained hierarchy. We make three contributions.  
+
+> ▶
+
+We propose MultiAgent-OPD, a framework for end-to-end hierarchical multi-agent training that combines local Searcher supervision with outcome-based optimization of the Leader and the Answerer.  
+
+> ▶
+
+We formulate Searcher process supervision as on-policy distillation from a task-trained Teacher, which provides token-level guidance on the student’s evolving subtask trajectories.  
+
+> ▶
+
+We report higher macro avg@4 across seven datasets than the included cascaded, hierarchical, and RL-based search baselines, and provide diagnostic comparisons of the Searcher learning signal, Teacher training, and direct subagent supervision.  
+
+> 2MultiAgent-OPD Technical Report · October 2026
+
+2 Related Work  
+
+> Multi-agent learning signals and credit assignment.
+
+MAPoRL trains agents through discussion, ReMA separates planning from reasoning execution, and MHGPO uses heterogeneous rollout groups for multi-agent search [Park et al., 2025, Wan et al., 2025, Chen et al., 2026]. Dr. MAS uses agent-wise advantage normalization and verifier-controlled Search–Answer calls [Feng et al., 2026]. PARL trains a Leader with frozen subagents [Kimi Team, 2026]. M-GRPO jointly trains main and subagent models with outcome, format, and expert LLM scores [Hong et al., 2025]. Our method jointly trains the hierarchy with OPD from a task-trained Teacher for Searcher supervision and outcome-based RL for the Leader and Answerer.  
+
+> Multi-agent systems.
+
+Agent harnesses such as Claude Code, Codex, DeepSeek Harness, and Kimi Code support task delegation to subagents and integration of their results [Anthropic, 2026, OpenAI, 2026, DeepSeek, 2026, Moonshot AI, 2026]. Anthropic’s research system similarly coordinates parallel searchers [Anthropic, 2025]. These systems motivate our Leader–Subagent structure, and we study how to train the cooperating roles end to end.  
+
+> On-policy distillation.
+
+GKD and MiniLLM train on student-generated sequences using teacher probabilities [Agarwal et al., 2024, Gu et al., 2024]. Recent work shows how dense OPD feedback supports reasoning and preserves learned behavior [Lu and Thinking Machines Lab, 2025]. SOD adjusts distillation strength at each tool-use step based on teacher–student divergence [Zhong et al., 2026], while MAD-OPD uses multi-agent debate to improve teacher supervision [Wang et al., 2026]. OPID derives hindsight skills from completed on-policy trajectories and uses them for self-distillation alongside outcome optimization [Yang et al., 2026]. SD-Search adds step-level supervision at query positions through hindsight self-distillation, where a single model acts as both student and outcome-conditioned teacher [Ma et al., 2026]. OPDSearch+ distills a frozen off-the-shelf teacher on live search trajectories and then refines the student with RL [Ye et al., 2026]. Both train a single search agent without task delegation. In contrast, we use a frozen, task-trained Searcher–Answerer policy to guide Searcher tokens on delegated subtask histories, while the Leader learns from team success and the Answerer from candidate correctness. Applying a task-trained teacher to delegated subtasks within a jointly trained hierarchy distinguishes our approach from prior work on OPD for search. 
+
+3 MultiAgent-OPD 
+
+MultiAgent-OPD trains the Leader–Searcher–Answerer team in two stages and gives each role a learning signal that matches the relation of the role to the final outcome (Section 1, Figure 1). Stage I trains the simpler Searcher–Answerer workflow, in which the report goes straight to the Answerer, and freezes the trained policy as the Teacher (Section 3.2). Stage II trains the team with role-specific advantages, in which the Searchers learn from the Teacher through on-policy distillation and the Leader and the Answerer learn from team rewards (Section 3.3). 
+
+> 3.1 Preliminaries
+
+The Leader breaks a question into subtasks, assigns the subtasks to Searchers in successive waves and selects reports for the Answerer. Each Searcher writes a query, reads the passages that the retriever returns and then either searches again or writes a report. The Leader can request further searches before the Answerer produces the final response, so the subtask of each Searcher depends on the current policy of the Leader. All roles share one language model 𝜋 𝜃 , and a role prompt selects the role for each call. An update from any role also changes the policies of the other roles. For a question 𝑥 with reference answers 𝑦 ★, we sample a group of 𝐺 trajectories 𝜏 1, . . . , 𝜏 𝐺 with the sampling policy 𝜋 old , where a trajectory is one full run of a workflow on 𝑥 . We write 𝑎 𝑡 for a generated token and ℎ𝑡 for the history of the token, which holds the role prompt, the question or subtask and every token and retrieved passage before 𝑎 𝑡 in the same call. We index the roles of the Leader, the Searchers and the Answerer by 
+
+𝑟 ∈ { 𝐿, 𝑆, 𝐴 } and write 𝑅 𝑟 ,𝑖 for the reward of role 𝑟 in 𝜏 𝑖 . During training, each answering request produces five candidates in Stage I, Stage II, and all ablations. Let 𝑐 𝑖, 𝑗 be the normalized exact-match score of candidate 𝑗 in 𝜏 𝑖  
+
+> 3MultiAgent-OPD Technical Report · October 2026
+
+(Appendix A). The team outcome is 𝑅 EM ,𝑖 = max 𝑗 𝑐 𝑖, 𝑗 : it equals 1 if at least one answer candidate matches a reference answer under normalized exact match, and 0 otherwise. Each Answerer candidate receives its own exact-match reward. Training aims to raise the expected outcome E𝑥 E𝜏 ∼ 𝜋 𝜃 [𝑅 EM ] of the team, and both stages start from the instruction-tuned base model 𝜋 0.The team outcome defines the task objective, while role-specific rewards provide training signals for individual roles. Stage I derives advantages from these rewards. Stage II retains reward-based advantages for the Leader and Answerer and uses teacher-derived token-level advantages for Searchers. We optimize the model with group-relative policy optimization (GRPO) [Shao et al., 2024] and normalize the rewards within each role [Feng et al., 2026]. For workflow-level rewards, the advantage of a token that role 𝑟 
+
+generates in 𝜏 𝑖 is 
+
+b𝐴 GRPO  
+
+> 𝑟 ,𝑖
+
+= 𝑅 𝑟 ,𝑖 − 𝜇 𝑥,𝑟 
+
+𝜎 𝑥,𝑟 + 𝜖 , (1) where 𝜇 𝑥,𝑟 and 𝜎 𝑥,𝑟 are the mean and the standard deviation of the rewards of role 𝑟 over the group of 𝑥 and 𝜖 
+
+is a small constant. For the Answerer, the same normalization compares candidate rewards within the parent workflow, yielding b𝐴 GRPO  
+
+> 𝐴,𝑖, 𝑗
+
+. Both stages maximize the PPO clipped surrogate [Schulman et al., 2017] using token advantages b𝐴 𝑡 , with different advantage assignments in each stage. 
+
+3.2 Stage I: Learn a Teacher That Searches and Summarizes 
+
+In Stage I, we train the simpler Searcher–Answerer workflow from 𝜋 0. The Searcher receives the question, gathers evidence from a fixed retriever and writes a report, and the Answerer answers the question from the report. The Searcher thus helps the Answerer solve the question directly, and the outcome of each trajectory depends on the evidence that one Searcher gathers. Training the workflow teaches the model both searching and summary writing. We reward the two roles with 𝑅 𝐴,𝑖, 𝑗 = 𝑐 𝑖, 𝑗 ,𝑅 𝑆,𝑖 = 0.9 𝑅 EM ,𝑖 + 0.1 𝑏 𝑆,𝑖 , (2) The behavior bonus 𝑏 𝑆,𝑖 equals 0.5 if the Searcher produces a summary after one search step, 1 after two or more search steps, and 0 otherwise. We assign a total reward of −1 to any output with an invalid action format. Answer correctness thus carries most of the reward, and the Searcher earns a small additional reward for its behavior. We compute the advantages of both roles with Eq. (1), update the model with PPO and evaluate the trained policy in this cascaded workflow as C-MAS + RL. We freeze the same Stage-I policy as the Teacher 𝜋 𝑇 for Stage II. 
+
+3.3 Stage II: Train the Team with Role-Specific Advantages 
+
+In Stage II, we initialize the hierarchical student from 𝜋 0 and sample several team trajectories for each question, which form the group of Eq. (1) (Figure 2(a)). If the Searchers learned from the outcome reward, Eq. (1) would give all Searchers of a trajectory the same advantage, whether or not the Leader passes their reports to the Answerer. Eq. (1) would also give every Searcher token zero advantage whenever the 𝐺 trajectories of a question receive the same outcome. We train the Searchers with token-level advantages from the Teacher. The Searcher role has the same interface in both workflows, taking a question or a subtask and returning a report, so the Teacher trained on questions can score the Searcher tokens of the team on subtasks. We distill the Teacher into the Searchers with sampled reverse-KL distillation [Agarwal et al., 2024, Gu et al., 2024]. For each Searcher response, we evaluate the frozen Teacher on the same role prompt, subtask, retrieved passages and generated prefix as the student (Figure 2(b)). The distillation then minimizes 
+
+LOPD (𝜃 ) = E𝜏 ∼ 𝜋 𝜃 
+
+h∑︁ 
+
+> 𝑡
+
+𝑀 𝑡 ℓ𝑡 (𝜃 )
+
+i
+
+,ℓ𝑡 (𝜃 ) = 𝐷 KL 
+
+ 𝜋 𝜃 (· | ℎ𝑡 ) ∥ 𝜋 𝑇 (· | ℎ𝑡 ),
+
+(3)   
+
+> 4MultiAgent-OPD Technical Report · October 2026 (a) A group of Agent Teams
+> Same question x
+
+1 L S A
+
+i L S A
+
+G L S ALeader: compare across Teams 
+
+{RL, j}Gj = 1 →̂ AGRPO  
+
+> L,i
+> Answerer: within each workflow
+
+{ci, k}5  
+
+> k= 1
+
+→̂ AGRPO       
+
+> A,i,j
+> (b) Leader Agent: final reward as feedback Search Subagents: feedback from a stronger Search Agent
+> Wave 1 Wave 2
+> Leader
+> spawn search subagent summaries spawn search subagent summaries
+
+…             
+
+> spawn answer subagent ̂
+> AGRPO
+> L,i
+> Think Act Obs. Think Act Obs. Summary
+> S1, 1
+> S1, 2
+> Think Act Obs. Think Act Obs. Summary
+> S2, 1
+> S2, 2
+> Stronger Search Agent πT(frozen)
+> Scores the same student tokens and local history ̂
+
+AOPD   
+
+> S,t
+
+= βM t(log πT − log πold )
+
+> Per-token OPD on generated text only
+> Answer subagent
+> EM ̂
+
+AGRPO   
+
+> A,i,j
+
+RL, i = 0.9 REM, i + 0.1 Rassign, i, RA, i, j = ci, ĵ AGRPO   
+
+> r,i
+
+= Rr, i − μx, r      
+
+> σx,r+εGRPO OPD mask = 0
+
+Figure 2. Role-selective process supervision in MultiAgent-OPD. (a) Multiple Agent Teams sample trajectories for the same question. Team outcomes yield GRPO advantages for the L E A D E R , and candidate rewards yield GRPO advantages for the A N S W E R E R within each workflow. (b) The L E A D E R spawns parallel S E A R C H E R S over successive waves, collects their summaries, and delegates the final answer to the A N S W E R E R . The S E A R C H E R S follow ReAct trajectories to search and summarize results. The S E A R C H E R S receive per-token OPD guidance weights from the frozen T E AC H E R through teacher–old-student log-probability differences under the same local history. Retrieved observations and summaries received by the L E A D E R are masked from the corresponding role’s loss. 
+
+where the mask 𝑀 𝑡 equals 1 on the tokens that the Searchers generate and 0 elsewhere. The retriever writes the passages, so the mask excludes the passages together with padding. At a fixed history, the negative gradient of ℓ𝑡 is 
+
+−∇ 𝜃 ℓ𝑡 (𝜃 ) = E𝑎 𝑡 ∼ 𝜋 𝜃 
+
+h
+
+log 𝜋 𝑇 (𝑎 𝑡 | ℎ𝑡 )
+
+𝜋 𝜃 (𝑎 𝑡 | ℎ𝑡 )× ∇ 𝜃 log 𝜋 𝜃 (𝑎 𝑡 | ℎ𝑡 )
+
+i
+
+,
+
+(4) since E𝑎 𝑡 ∼ 𝜋 𝜃 [∇ 𝜃 log 𝜋 𝜃 (𝑎 𝑡 | ℎ𝑡 )] = 0. The log-ratio thus acts as the advantage of the sampled token. In the PPO update, each Searcher token 𝑎 𝑡 sampled from 𝜋 old receives the advantage 
+
+b𝐴 OPD 
+
+𝑆,𝑡 = 𝛽𝑀 𝑡 log 𝜋 𝑇 (𝑎 𝑡 | ℎ𝑡 )
+
+𝜋 old (𝑎 𝑡 | ℎ𝑡 ) , (5) where 𝛽 = 0.01. The log-ratio in Eq. (5) serves as a teacher-guided local process-supervision weight. It reflects the frozen Teacher’s preference at a student-generated history and does not estimate the token’s causal contribution to the final answer. The advantage is positive when the Teacher assigns a token a higher probability than the sampling policy does, and the update then raises the probability of the token. Every Searcher token receives the signal, including tokens from trajectories whose final answer is wrong and tokens of questions on which all 𝐺 trajectories receive the same outcome. The Teacher scores prefixes that the student generates, so the supervision follows the new subtasks whenever the Leader changes the division of tasks. The Leader and the Answerer keep Eq. (1) with outcome rewards, since outcome rewards align the coordination of the Leader with team success and evaluate the predictions of the Answerer directly. We reward the Answerer with 𝑅 𝐴,𝑖, 𝑗 = 𝑐 𝑖, 𝑗 as in Stage I and the Leader with 
+
+𝑅 𝐿,𝑖 = 0.9 𝑅 EM ,𝑖 + 0.1 𝑅 assign ,𝑖 , (6) where 𝑅 assign ,𝑖 = min (𝐶 tool ,𝑖 , 6)/ 6 and 𝐶 tool ,𝑖 counts environment steps containing at least one Searcher search action in 𝜏 𝑖 , so the Leader earns most of its reward from correct answers and a bounded bonus for search activity.  
+
+> 5MultiAgent-OPD Technical Report · October 2026
+
+We normalize the rewards of the two roles separately with Eq. (1) and give each token 𝑎 𝑡 of a minibatch the advantage of the role that generated the token, 
+
+b𝐴 𝑡 =
+
+b𝐴 GRPO  
+
+> 𝐿,𝑖
+
+, 𝑟 (𝑎 𝑡 ) = 𝐿, 
+
+b𝐴 GRPO  
+
+> 𝐴,𝑖, 𝑗
+
+, 𝑟 (𝑎 𝑡 ) = 𝐴, 
+
+b𝐴 OPD  
+
+> 𝑆,𝑡
+
+, 𝑟 (𝑎 𝑡 ) = 𝑆, 
+
+(7) where 𝑟 (𝑎 𝑡 ) is the role that generated 𝑎 𝑡 and 𝜏 𝑖 is the trajectory of 𝑎 𝑡 . The index 𝑗 identifies its Answerer candidate when 𝑟 (𝑎 𝑡 ) = 𝐴 . We update the student with the PPO clipped objective with the advantages of Eq. (7) and an entropy bonus. The frozen reference policy is the Stage-I Teacher 𝜋 𝑇 . For the Leader and the Answerer, a KL penalty with coefficient 10 −3 toward 𝜋 𝑇 enters the rewards before advantage computation. For the Searchers, Eq. (5) replaces the outcome-based advantages with the teacher–student log-ratio. No additional KL penalty is added to their policy loss. The Teacher serves only during training, and at test time the student plays all three roles. 
+
+4 Experiments 
+
+We evaluate MultiAgent-OPD on open-domain question answering, training on NQ and HotpotQA and testing on 5,000 fixed questions from the seven benchmarks in Table 1 [Kwiatkowski et al., 2019, Joshi et al., 2017, Mallen et al., 2023, Yang et al., 2018, Ho et al., 2020, Trivedi et al., 2022, Press et al., 2023]. We compare MultiAgent-OPD with the cascaded and hierarchical baselines in the table and with five RL-based search agents, Search-R1 [Jin et al., 2025], DeSA [Wang et al., 2025], Tree-GRPO [Ji et al., 2026], MemSearcher [Yuan et al., 2026] and Dr. MAS [Feng et al., 2026]. We build all systems on Qwen3-4B-Instruct-2507 [Qwen Team, 2025] and connect them to the same retriever, which returns three passages per query (Appendix B). The cascaded and hierarchical systems use inference limits of 5 and 12 environment steps, respectively (Appendix B.2). We run each system four times per question, with one Answerer candidate per request, and score each final answer by normalized exact match. We report avg@4, the mean score over the four runs, and pass@4, the fraction of questions answered correctly at least once. avg@4 estimates the single-attempt success rate and requires no answer-selection rule, while pass@4 is the coverage upper bound across the four attempts. The primary metric is macro avg@4, which weights the seven datasets equally (Appendix A). 
+
+4.1 Main Results 
+
+Table 1 compares correctness across datasets for the cascaded and hierarchical systems and the five RL-based search agents.  
+
+> The base hierarchy outperforms the base cascaded workflow.
+
+Both base systems directly use Qwen3-4B-Instruct-2507 without task-specific training. H-MAS, the hierarchical Leader–Searcher–Answerer system, reaches 28.60% macro avg@4 versus C-MAS base’s 25.09%, a gain of 3.51 percentage points. Macro pass@4 rises from 34.02% to 39.32%. H-MAS has higher avg@4 on five of seven datasets, including all four multi-hop datasets, with the largest gains on Bamboogle and 2WikiMultiHopQA.  
+
+> C-MAS + RL has a higher score than Prompted Critic.
+
+C-MAS + RL, the Stage-I policy evaluated in its cascaded workflow, reaches 36.07% macro avg@4. Prompted Critic, which trains the hierarchy with an M-GRPO-like combination of team rewards and a prompted judge of Searcher reports [Hong et al., 2025], reaches 34.62%, 1.45 percentage points lower. Their macro pass@4 values are nearly tied (45.97% and 45.96%), so the observed difference is in average correctness across attempts. This comparison motivates evaluating local Searcher supervision within the hierarchy.  
+
+> MultiAgent-OPD improves over both trained workflows.
+
+MultiAgent-OPD reaches 38.68% macro avg@4, exceeding Prompted Critic by 4.06 percentage points and C-MAS + RL by 2.61 points. Both paired 95% intervals exceed zero (Table 2). The policy evaluated as C-MAS + RL supplies the frozen Teacher for Searcher OPD.  
+
+> 6MultiAgent-OPD Technical Report · October 2026
+
+(a) avg@4 (%) 
+
+Method Single-hop Multi-hop Macro NQ TriviaQA PopQA HotpotQA 2Wiki MuSiQue Bamboogle 
+
+> Cascaded and hierarchical systems
+
+C-MAS base 30.0 50.9 25.6 23.6 12.9 6.3 26.4 25.09 C-MAS + RL 43.7 60.2 33.9 33.3 30.5 11.5 39.4 36.07 H-MAS base 30.7 49.8 23.2 27.1 22.6 9.7 37.2 28.60 Prompted Critic 37.4 56.9 28.5 33.1 33.9 11.5 41.0 34.62 
+
+MultiAgent-OPD 42.3 62.5 33.6 37.5 34.0 14.0 46.8 38.68 
+
+> RL-based search agents
+
+Search-R1 41.1 58.4 32.8 34.0 32.1 8.1 27.2 33.39 DeSA 35.9 61.4 35.9 36.6 33.0 13.5 42.4 36.96 Tree-GRPO 38.6 60.5 36.3 36.8 32.8 12.2 44.4 37.37 MemSearcher 37.8 59.0 36.8 36.5 38.3 13.3 36.0 36.81 Dr. MAS 34.2 60.5 35.4 36.5 30.6 13.2 38.4 35.54 
+
+(b) pass@4 (%) 
+
+Method Single-hop Multi-hop Macro NQ TriviaQA PopQA HotpotQA 2Wiki MuSiQue Bamboogle 
+
+> Cascaded and hierarchical systems
+
+C-MAS base 38.4 58.4 32.1 33.0 25.6 11.4 39.2 34.02 C-MAS + RL 53.8 67.6 40.9 44.0 46.7 19.1 49.6 45.97 H-MAS base 39.3 60.8 31.8 39.9 40.0 15.5 48.0 39.32 Prompted Critic 48.6 67.4 36.8 43.8 49.4 18.8 56.8 45.96 
+
+MultiAgent-OPD 52.1 70.6 42.7 47.5 49.8 20.8 57.6 48.73 
+
+> RL-based search agents
+
+Search-R1 50.5 64.0 39.9 45.8 49.2 13.5 43.2 43.73 DeSA 51.5 69.3 42.0 45.1 47.2 19.3 55.2 47.09 Tree-GRPO 54.9 70.0 40.5 48.7 48.3 16.7 53.6 47.53 MemSearcher 53.0 69.7 44.2 45.3 51.9 18.2 51.2 47.64 Dr. MAS 48.6 68.1 41.0 43.7 40.8 15.1 56.0 44.76 
+
+Table 1. Main results: avg@4 and pass@4 (%). Macro weights the seven datasets equally. Missing and malformed answers score zero. C-MAS denotes the cascaded S E A R C H E R –A N S W E R E R system, and H-MAS denotes the hierarchical L E A D E R –S E A R C H E R –A N S W E R E R system. Prompted Critic and MultiAgent-OPD both use H-MAS. The two base systems use the same general-purpose instruction model without task-specific training. The RL-based search agents use the same backbone and protocol. Bold marks the highest value for each metric and dataset. 
+
+Comparator Δ avg@4 (pp) 95% CI 
+
+Prompted Critic +4.06 [+2.98, +5.12] C-MAS + RL +2.61 [+1.49, +3.73] 
+
+Table 2. MultiAgent-OPD score minus each compared system (percentage points). In each bootstrap sample, we resample questions within datasets and keep all four attempts for each question together.  
+
+> 7MultiAgent-OPD Technical Report · October 2026
+
+MultiAgent-OPD exceeds Prompted Critic in avg@4 on all seven datasets and C-MAS + RL on five, with the largest observed gain over C-MAS + RL on Bamboogle (+7.40 percentage points). 
+
+Comparison with RL-based search agents. MultiAgent-OPD exceeds the strongest included agent, Tree-GRPO (37.37%), by 1.31 percentage points in macro avg@4. On the single-hop and the multi-hop average alike, MultiAgent-OPD stays above each included agent, and the lead holds in macro pass@4 (48.73% against at most 47.64%). 
+
+4.2 Diagnostic Comparisons 
+
+Table 3 varies the Searcher learning signal, Teacher training, and direct supervision within the shared-parameter Leader–Searcher–Answerer hierarchy. All four configurations retain the Leader and Answerer objectives, normalization, and other training settings, including five answer candidates per request. Training batches differ; every row uses a step-500 checkpoint.          
+
+> (a) avg@4 (%)
+> Method Single-hop Multi-hop Macro NQ TriviaQA PopQA HotpotQA 2Wiki MuSiQue Bamboogle
+
+MultiAgent-OPD (full) 42.3 62.5 33.6 37.5 34.0 14.0 46.8 38.68 
+
+w/ outcome-based Searcher RL 12.5 30.8 14.7 16.8 27.6 3.9 18.2 17.78 w/ base-model teacher 27.8 49.7 26.4 29.5 25.2 11.2 36.6 29.50 w/o direct Searcher supervision 31.3 51.7 27.1 28.2 21.2 10.1 39.2 29.82          
+
+> (b) pass@4 (%)
+> Method Single-hop Multi-hop Macro NQ TriviaQA PopQA HotpotQA 2Wiki MuSiQue Bamboogle
+
+MultiAgent-OPD (full) 52.1 70.6 42.7 47.5 49.8 20.8 57.6 48.73 
+
+w/ outcome-based Searcher RL 17.0 38.3 17.9 20.3 34.2 6.3 25.6 22.79 w/ base-model teacher 37.7 62.3 35.1 40.7 39.6 18.6 52.0 40.86 w/o direct Searcher supervision 40.5 62.4 34.9 40.2 34.1 15.7 51.2 39.86          
+
+> Table 3. Diagnostic comparisons of Searcher supervision and Teacher training: avg@4 and pass@4 (%). Relative to the full method, w/ outcome-based Searcher RL replaces S E A R C H E R OPD with RL using final-answer rewards.
+> w/ base-model teacher uses the base model instead of the search-trained T E AC H E R for OPD. w/o direct Searcher supervision removes the direct training losses of the S E A R C H E R S . All variants keep the training of the L E A D E R and the A N S W E R E R . Macro weights the seven datasets equally.
+
+w/ outcome-based Searcher RL replaces Searcher OPD with group-relative advantages computed from final-answer exact-match rewards and removes distillation from the Teacher. w/ base-model teacher keeps Searcher OPD but uses an independently loaded, frozen base instruction model as the Teacher. w/o direct Searcher supervision sets Searcher policy, entropy, and direct KL losses to zero while keeping Searcher trajectories and the original loss denominator. Updates of the Leader and the Answerer still change the shared parameters used by the Searchers. 
+
+Outcome-based Searcher RL exhibits a collapse of search behavior. The outcome-based Searcher RL variant reaches 17.78% macro avg@4, 10.82 points below H-MAS base. Across its 20,000 test workflows, no search action is recorded, although 99.51% still produce subtasks and reports and 99.03% produce a final answer. Development EM also declines as retrieval disappears (Appendix A.5). This suggests that final-answer rewards failed to sustain retrieval in this hierarchical multi-agent system. 
+
+The task-trained-teacher configuration has higher scores. Replacing the OPD Teacher of Stage II with the base model changes macro avg@4 from 38.68% to 29.50% and pass@4 from 48.73% to 40.86%. The full configuration scores higher on every dataset in both metrics. The base-model teacher variant keeps the token-level  
+
+> 8MultiAgent-OPD Technical Report · October 2026
+
+distillation objective, while replacing the task-trained Teacher that guides the student’s queries and reports during hierarchical training. 
+
+The direct-supervision configuration has higher scores. Without the direct losses of the Searchers, macro avg@4 is 29.82% and pass@4 is 39.86%, compared with 38.68% and 48.73% for the full method. The Leader and the Answerer still receive their outcome rewards in this variant, and the Searchers still change through shared-parameter updates. 
+
+4.3 Training Dynamics 
+
+Figure 3 shows one historical validation trajectory for each method. The displayed MultiAgent-OPD trajectory rises through the middle of the run and remains above the two displayed baselines in their later shared interval. C-MAS + RL levels off, while Prompted Critic declines after an early increase. 0 300 600 900 1200 
+
+## Training step 
+
+0.20 0.25 0.30 0.35 0.40 
+
+> Validation avg@1
+
+MultiAgent-OPD C-MAS + RL Prompted Critic  
+
+> Figure 3. Training-time validation avg@1. Each curve shows one smoothed historical validation run, digitized from the recorded curves. The horizontal axis counts training steps, not compute. These trajectories describe the displayed runs and do not measure variation across training seeds.
+
+4.4 Answer Coverage and Consistency 
+
+MultiAgent-OPD reaches 48.73% macro pass@4, compared with 45.97% for C-MAS + RL and 45.96% for Prompted Critic. It also answers 29.27% of questions correctly on all four attempts, versus 27.05% for C-MAS + RL and 23.24% for Prompted Critic (Table 4). The gains thus extend to both question coverage and consistency.     
+
+> 9MultiAgent-OPD Technical Report · October 2026
+> Method avg@4 pass@4 4/4 correct
+
+C-MAS base 25.09 34.02 17.12 C-MAS + RL 36.07 45.97 27.05 H-MAS base 28.60 39.32 18.73 Prompted Critic 34.62 45.96 23.24 
+
+MultiAgent-OPD 38.68 48.73 29.27 
+
+Table 4. Success across four attempts (macro %). Pass@4 counts questions answered correctly at least once. The 4/4 score counts questions answered correctly every time. These scores do not include a method for selecting an answer. 
+
+4.5 Inference Resource Usage 
+
+The accuracy gains come with more search and input processing. MultiAgent-OPD uses 5.39 search actions and 9,172 input tokens per workflow, compared with 4.45 and 6,786 for Prompted Critic, and 2.86 and 3,886 for C-MAS + RL (Figure 4, dataset-macro averages). Relative to Prompted Critic, searches rise by 21.4% and input tokens by 35.2%, while output tokens fall from 885 to 697. Recorded tokens include repeated histories (Appendix A). Prompted Critic and MultiAgent-OPD use the same Leader objective (Eq. (6)), so their workload difference reflects behavior learned under the same search-activity incentive. C-MAS + RL reaches 36.07% macro avg@4 with the fewest searches, so a higher recorded workload alone does not explain the ranking. 2 3 4 5Search actions / workflow 25 30 35 40 Macro strict EM (%) 2000 4000 6000 8000 10000 Recorded input tokens / workflow 200 400 600 800 Recorded output tokens / workflow C-MAS base C-MAS + RL H-MAS base Prompted Critic MultiAgent-OPD 
+
+Figure 4. Correctness and recorded inference workload. Recorded token totals include repeated histories and do not measure latency, unique context, service cost, or training compute. Error bars show pointwise question-bootstrap intervals. 
+
+5 Conclusion 
+
+MultiAgent-OPD jointly trains a hierarchical multi-agent team using a task-trained Teacher for local Searcher supervision, team success for the Leader, and candidate correctness for the Answerer. It achieves higher seven-dataset macro avg@4 and macro pass@4 than Prompted Critic, C-MAS + RL, and the included RL-based search agents, while using more searches and input tokens. A policy trained in a simpler workflow can thus guide subagents during joint training. 
+
+Limitations 
+
+Scope and uncertainty. We evaluate cascaded and hierarchical systems and five RL-based search agents built on Qwen3-4B-Instruct-2507 on a fixed English open-domain QA set. Four attempts per question and question-bootstrap intervals characterize variation within the evaluated checkpoints, not variation across independently trained runs. Macro averaging weights the seven datasets equally, and normalized exact match does not detect  
+
+> 10 MultiAgent-OPD Technical Report · October 2026
+
+semantic overlap or pretraining contamination. Systems run at their own workflow budgets. We do not compare them under a matched retrieval or token budget.  
+
+> Mechanism.
+
+OPD supplies teacher-conditioned local process supervision, not a causal estimate of a token’s contribution to the final answer. The teacher can make errors, full-question teacher training differs from delegated-subtask use, and shared role parameters couple updates across roles. Reverse-KL training can reduce exploration, and teacher and student require compatible token vocabularies. The diagnostic comparisons retain Leader and Answerer outcome objectives, so they do not separately evaluate those objectives.  
+
+> Reproducibility.
+
+The anonymous artifact provides the scored evaluation records, aggregation script, result file, and evaluation protocol needed to reproduce the reported summary statistics. Recorded token counts measure inference workload. 
+
+Ethical Considerations 
+
+We use public QA datasets and a text retriever. Retrieved material can be inaccurate or biased. Exact match measures answer correctness. Further checks are needed to assess whether evidence supports the answer, whether sources are credited, and whether the system is safe to use. 
+
+AI Assistance Disclosure 
+
+AI assistants helped find related work, write and debug evaluation code, track jobs, combine results, create figures, draft the paper, and review example reports. The authors directed the research motivation and argument of the revised manuscript. Quantitative results are computed from recorded outputs. The human authors are responsible for the methods, numerical checks, references, and final manuscript. 
+
+References 
+
+Rishabh Agarwal, Nino Vieillard, Yongchao Zhou, Piotr Stanczyk, Sabela Ramos, Matthieu Geist, and Olivier Bachem. On-policy distillation of language models: Learning from self-generated mistakes. In International Conference on Learning Representations , 2024. URL https://proceedings.iclr.cc/paper_files/paper/2024/hash/5 be69a584901a26c521c2b51e40a4c20-Abstract-Conference.html. Anthropic. How we built our multi-agent research system. Engineering blog, 2025. URL https://www.anthropic. com/engineering/multi-agent-research-system. Anthropic. How and when to use subagents in Claude Code. Official blog, 2026. URL https://claude.com/resourc es/articles/subagents-in-claude-code. Accessed October 12, 2026. Guanzhong Chen, Shaoxiong Yang, Chao Li, Wei Liu, Jian Luan, and Zenglin Xu. End-to-end optimization of LLM-driven multi-agent search systems via heterogeneous-group-based reinforcement learning. In Proceedings of the 64th Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 30319–30338, 2026. doi: 10.18653/v1/2026.acl-long.1399. URL https://aclanthology.org/2026.acl-long.1399/. DeepSeek. DeepSeek Harness: Explore the limits of intelligence. Official documentation, 2026. URL https: //deepseek.com/en/harness/. Accessed October 12, 2026. Lang Feng, Longtao Zheng, Shuo He, Fuxiang Zhang, and Bo An. Dr. MAS: Stable reinforcement learning for multi-agent LLM systems. In Advances in Neural Information Processing Systems , 2026. URL https: //langfengq.github.io/DrMAS/. To appear. Yuxian Gu, Li Dong, Furu Wei, and Minlie Huang. MiniLLM: Knowledge distillation of large language models. In International Conference on Learning Representations , 2024. URL https://proceedings.iclr.cc/paper_files/p aper/2024/hash/8ac015d409635f196f9e3e9dcfb9a94e-Abstract-Conference.html.  
+
+> 11 MultiAgent-OPD Technical Report · October 2026
+
+Xanh Ho, Anh-Khoa Duong Nguyen, Saku Sugawara, and Akiko Aizawa. Constructing a multi-hop QA dataset for comprehensive evaluation of reasoning steps. In Proceedings of the 28th International Conference on Computational Linguistics , pages 6609–6625, 2020. doi: 10.18653/v1/2020.coling-main.580. Haoyang Hong, Jiajun Yin, Yuan Wang, Jingnan Liu, Zhe Chen, Ailing Yu, Ji Li, Zhiling Ye, Hansong Xiao, Yefei Chen, Hualei Zhou, Yun Yue, Minghui Yang, Chunxiao Guo, Junwei Liu, Peng Wei, and Jinjie Gu. Multi-agent deep research: Training multi-agent systems with M-GRPO. arXiv preprint arXiv:2511.13288 , 2025. URL https://arxiv.org/abs/2511.13288. Yuxiang Ji, Ziyu Ma, Yong Wang, Guanhua Chen, Xiangxiang Chu, and Liaoni Wu. Tree search for LLM agent reinforcement learning. In International Conference on Learning Representations , 2026. URL https: //openreview.net/forum?id=ZpQwAFhU13. Bowen Jin, Hansi Zeng, Zhenrui Yue, Jinsung Yoon, Sercan O. Arik, Dong Wang, Hamed Zamani, and Jiawei Han. Search-R1: Training LLMs to reason and leverage search engines with reinforcement learning. In Second Conference on Language Modeling , 2025. URL https://openreview.net/forum?id=Rwhi91ideu. Mandar Joshi, Eunsol Choi, Daniel Weld, and Luke Zettlemoyer. TriviaQA: A large scale distantly supervised challenge dataset for reading comprehension. In Proceedings of the 55th Annual Meeting of the Association for Computational Linguistics , pages 1601–1611, 2017. doi: 10.18653/v1/P17-1147. Kimi Team. Kimi K2.5: Visual agentic intelligence. arXiv preprint arXiv:2602.02276 , 2026. URL https: //arxiv.org/abs/2602.02276. Tom Kwiatkowski, Jennimaria Palomaki, Olivia Redfield, Michael Collins, Ankur Parikh, Chris Alberti, Danielle Epstein, Illia Polosukhin, Jacob Devlin, Kenton Lee, Kristina Toutanova, Llion Jones, Matthew Kelcey, Ming-Wei Chang, Andrew M. Dai, Jakob Uszkoreit, Quoc Le, and Slav Petrov. Natural questions: A benchmark for question answering research. Transactions of the Association for Computational Linguistics , 7:452–466, 2019. doi: 10.1162/tacl_a_00276. Kevin Lu and Thinking Machines Lab. On-policy distillation. Thinking Machines Lab: Connectionism , 2025. doi: 10.64434/tml.20251026. URL https://thinkingmachines.ai/blog/on-policy-distillation/. Yufei Ma, Zihan Liang, Ben Chen, Zhipeng Qian, Huangyu Dai, Lingtao Mao, Xuxin Zhang, Chenyi Lei, and Wenwu Ou. SD-Search: On-policy hindsight self-distillation for search-augmented reasoning. arXiv preprint arXiv:2605.18299 , 2026. URL https://arxiv.org/abs/2605.18299. Alex Mallen, Akari Asai, Victor Zhong, Rajarshi Das, Daniel Khashabi, and Hannaneh Hajishirzi. When not to trust language models: Investigating effectiveness of parametric and non-parametric memories. In Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics , pages 9802–9822, 2023. doi: 10.18653/v1/2023.acl-long.546. Moonshot AI. Agents and sub-agents. Kimi Code documentation, 2026. URL https://www.kimi.com/code/docs/e n/kimi-code-cli/customization/agents. Accessed September 28, 2026. Sumeet Ramesh Motwani, Chandler Smith, Rocktim Jyoti Das, Rafael Rafailov, Philip H. S. Torr, Ivan Laptev, Fabio Pizzati, Ronald Clark, and Christian Schroeder de Witt. MALT: Improving reasoning with multi-agent LLM training. In Second Conference on Language Modeling , 2025. URL https://openreview.net/forum?id=jX P9bgFack. OpenAI. Subagents. Official documentation, 2026. URL https://learn.chatgpt.com/docs/agent-configuration/suba gents. Accessed September 28, 2026.  
+
+> 12 MultiAgent-OPD Technical Report · October 2026
+
+Chanwoo Park, Seungju Han, Xingzhi Guo, Asuman E. Ozdaglar, Kaiqing Zhang, and Joo-Kyung Kim. MAPoRL: Multi-agent post-co-training for collaborative large language models with reinforcement learning. In Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics , pages 30215–30248, 2025. doi: 10.18653/v1/2025.acl-long.1459. URL https://aclanthology.org/2025.acl-long.1459/. Ofir Press, Muru Zhang, Sewon Min, Ludwig Schmidt, Noah A. Smith, and Mike Lewis. Measuring and narrowing the compositionality gap in language models. In Findings of the Association for Computational Linguistics: EMNLP 2023 , pages 5687–5711, 2023. doi: 10.18653/v1/2023.findings-emnlp.378. Qwen Team. Qwen3 technical report. arXiv preprint arXiv:2505.09388 , 2025. URL https://arxiv.org/abs/2505.0 9388. John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov. Proximal policy optimization algorithms. arXiv preprint arXiv:1707.06347 , 2017. Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, Y. K. Li, Y. Wu, and Daya Guo. DeepSeekMath: Pushing the limits of mathematical reasoning in open language models. arXiv preprint arXiv:2402.03300 , 2024. URL https://arxiv.org/abs/2402.03300. Guangming Sheng, Chi Zhang, Zilingfeng Ye, Xibin Wu, Wang Zhang, Ru Zhang, Yanghua Peng, Haibin Lin, and Chuan Wu. HybridFlow: A flexible and efficient RLHF framework. In Proceedings of the Twentieth European Conference on Computer Systems , 2025. doi: 10.1145/3689031.3696075. URL https://doi.org/10.1145/368903 1.3696075. Harsh Trivedi, Niranjan Balasubramanian, Tushar Khot, and Ashish Sabharwal. MuSiQue: Multihop questions via single-hop question composition. Transactions of the Association for Computational Linguistics , 10:539–554, 2022. doi: 10.1162/tacl_a_00475. Ziyu Wan, Yunxiang Li, Xiaoyu Wen, Yan Song, Hanjing Wang, Linyi Yang, Mark Schmidt, Jun Wang, Weinan Zhang, Shuyue Hu, and Ying Wen. ReMA: Learning to meta-think for LLMs with multi-agent reinforcement learning. In Advances in Neural Information Processing Systems , volume 38, 2025. URL https://proceedings.ne urips.cc/paper_files/paper/2025/hash/b83514e453ff03741a5fb3e5e49f709b-Abstract-Conference.html. Jianze Wang, Ying Liu, Jinlong Chen, Xuchun Hu, Qilong Zhang, Yu Cao, Jun Wang, Hua Yang, Yong Xie, and Qianglong Chen. MAD-OPD: Breaking the ceiling in on-policy distillation via multi-agent debate. arXiv preprint arXiv:2605.01347 , 2026. URL https://arxiv.org/abs/2605.01347. Liang Wang, Nan Yang, Xiaolong Huang, Binxing Jiao, Linjun Yang, Daxin Jiang, Rangan Majumder, and Furu Wei. Text embeddings by weakly-supervised contrastive pre-training. arXiv preprint arXiv:2212.03533 , 2022. URL https://arxiv.org/abs/2212.03533. Yiding Wang, Zhepei Wei, Xinyu Zhu, and Yu Meng. Beyond outcome reward: Decoupling search and answering improves LLM agents. arXiv preprint arXiv:2510.04695 , 2025. URL https://arxiv.org/abs/2510.04695. Shuo Yang, Jinyang Wu, Zhengxi Lu, Yuhao Shen, Fan Zhang, Lang Feng, Shuai Zhang, Haoran Luo, Zheng Lian, Zhengqi Wen, and Jianhua Tao. OPID: On-policy skill distillation for agentic reinforcement learning. arXiv preprint arXiv:2606.26790 , 2026. URL https://arxiv.org/abs/2606.26790. Zhilin Yang, Peng Qi, Saizheng Zhang, Yoshua Bengio, William W. Cohen, Ruslan Salakhutdinov, and Christopher D. Manning. HotpotQA: A dataset for diverse, explainable multi-hop question answering. In Proceedings of the 2018 Conference on Empirical Methods in Natural Language Processing , pages 2369–2380, 2018. doi: 10.18653/v1/D18-1259.  
+
+> 13 MultiAgent-OPD Technical Report · October 2026
+
+Qinglin Ye, Zhiyuan Gu, Jingjie Xia, Yiheng Zhang, Kaiyan Zhao, Shunchao Zheng, Yuhang Mu, Wenchao Du, and Yiming Wang. OPDSearch+: On-policy distillation with RL refinement for search-augmented reasoning. 
+
+arXiv preprint arXiv:2608.24310 , 2026. URL https://arxiv.org/abs/2608.24310. Qianhao Yuan, Jie Lou, Zichao Li, Jiawei Chen, Yaojie Lu, Hongyu Lin, Le Sun, Debing Zhang, and Xianpei Han. MemSearcher: Iterative memory integration for search agent via end-to-end reinforcement learning. In Findings of the Association for Computational Linguistics: ACL 2026 , pages 14965–14977, 2026. doi: 10.18653/v1/2026.findings-acl.736. URL https://aclanthology.org/2026.findings-acl.736/. Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao Zhuang, Zi Lin, Zhuohan Li, Dacheng Li, Eric P. Xing, Hao Zhang, Joseph E. Gonzalez, and Ion Stoica. Judging LLM-as-a-judge with MT-Bench and Chatbot Arena. In Advances in Neural Information Processing Systems , volume 36, 2023. URL https://proceedings.neurips.cc/paper_files/paper/2023/hash/91f18a1287b398d378ef22505bf41832-Abstract-Datasets_and_Benchmarks.html. Lianmin Zheng, Liangsheng Yin, Zhiqiang Xie, Chuyue Sun, Jeff Huang, Cody Hao Yu, Shiyi Cao, Christos Kozyrakis, Ion Stoica, Joseph E. Gonzalez, Clark Barrett, and Ying Sheng. SGLang: Efficient execution of structured language model programs. In Advances in Neural Information Processing Systems , volume 37, 2024. URL https://proceedings.neurips.cc/paper_files/paper/2024/hash/724be4472168f31ba1c9ac630f15dec8-Abstract-Conference.html. Qiyong Zhong, Mao Zheng, Mingyang Song, Xin Lin, Jie Sun, Houcheng Jiang, Xiang Wang, and Junfeng Fang. SOD: Step-wise on-policy distillation for small language model agents. arXiv preprint arXiv:2605.07725 , 2026. URL https://arxiv.org/abs/2605.07725. 
+
+A Evaluation and Further Checks 
+
+> A.1 Fixed Test Set and Strict Scoring
+
+The sample was constructed with seed 20260728, before this evaluation. NQ, TriviaQA, and PopQA each contribute 812 questions; HotpotQA, 2WikiMultiHopQA, and MuSiQue each contribute 813; Bamboogle contributes 125. The split builder removed 14 test-pool entries matching normalized training questions (10 TriviaQA, two NQ, two PopQA). Normalization applies Unicode NFKC, lowercasing, punctuation removal, and whitespace collapse. No question hash is shared by the training, development, and main test sets. This check does not detect paraphrases or pretraining contamination. For each workflow, we use the last output from the Answerer. We take the text inside its last <answer> tag and compare it with all accepted reference answers. Before comparison, we convert text to lowercase and remove punctuation, articles, and extra spaces. A missing span scores zero. No workflow is discarded. Four workflows per question give 20,000 records per system and 100,000 across the five systems. 
+
+> A.2 Summary Scores and Uncertainty
+
+The anonymous artifact includes scores for each question and attempt, the aggregation script, and hashes of the included files. Readers can use it to check the summary results without a platform account. For each of 4,000 bootstrap draws (seed 20260912), questions are sampled with replacement within each dataset. A sampled question keeps its four attempts and all five methods. Dataset means receive equal weight. The intervals in Table 5 are the 2.5th and 97.5th percentiles; pairwise intervals are not adjusted for multiple comparisons. These intervals and the anonymous scored-record artifact cover C-MAS base, C-MAS + RL, H-MAS base, Prompted Critic, and MultiAgent-OPD. The five external RL-based search baselines are available as aggregate scores; comparisons with them are descriptive and have no paired intervals. For the main comparison, checkpoints and the distillation coefficient were fixed before inspecting test results. The reported comparisons concern these retained policies.  
+
+> 14 MultiAgent-OPD Technical Report · October 2026
+
+To measure how often all four answers are correct, let 𝑛 𝑖 = Í4 
+
+> 𝑘 =1
+
+𝑐 𝑖,𝑘 , where 𝑐 𝑖,𝑘 indicates whether attempt 
+
+𝑘 answers question 𝑖 correctly. The 4/4-correct column is the dataset-macro average of 𝑁 −1 Í𝑖 1{𝑛 𝑖 = 4}; the complete distribution of 𝑛 𝑖 is kept in the derived metrics. It reuses the existing four stochastic workflows and introduces no additional sampling runs.   
+
+> Method avg@4 CI pass@4 CI
+
+C-MAS base [23.85, 26.37] [32.41, 35.64] C-MAS + RL [34.54, 37.56] [44.25, 47.65] H-MAS base [27.19, 29.95] [37.63, 40.96] Prompted Critic [33.19, 35.99] [44.25, 47.59] 
+
+MultiAgent-OPD [37.15, 40.18] [47.05, 50.39]  
+
+> Table 5. Macro scores with 95% question-bootstrap intervals (%) for the fixed models used in evaluation.
+
+A.3 How We Count Resource Use 
+
+Each workflow record contains prompt/response token totals, search actions, returned passages, Searcher reports, Leader subtasks, and a duration value. For each turn, the recorder applies the chat template to the assistant sample and cuts it to the input and output limits. It then adds the token counts across turns. This may count the same history more than once. Output counts include EOS tokens. These counts let us compare recorded workload across systems. They do not measure unique context, exact service usage, or total training cost. Searcher-action counts include nonempty queries recorded with a complete search tag. We separately count search actions that return passages. A returned passage may still be irrelevant or lack the needed evidence. The Searcher–Answerer workflow has no Leader, so the JSON value of zero for task assignments means this field does not apply. It is not a measurement of Leader behavior. We also keep separate report and task-assignment counts. Costs average the four attempts within each question, then questions within each dataset, then datasets equally. Relative changes are calculated from unrounded values. Pooled descriptive statistics are kept separately. Batch duration is not a per-question response time measurement. 
+
+A.4 Flexible Answer Extraction and the Completion Bound 
+
+The extraction rules were selected before inspecting these diagnostic results. Table 6 reports completion and flexible-extraction results from the saved workflows, with the main scoring rule unchanged.   
+
+> Method No candidate Empty candidate Untagged Failure (macro %) Rescued Relaxed EM (%)
+
+C-MAS base 493 0 173 3.41 3 25.105 C-MAS + RL 22 0 0 0.10 0 36.069 H-MAS base 2,451 104 109 12.79 5 28.624 Prompted Critic 658 9 0 3.73 0 34.617 
+
+MultiAgent-OPD 62 66 0 0.68 0 38.677  
+
+> Table 6. Answer completion and flexible extraction. Candidate, untagged, and rescued are total counts out of 20,000 records per method. Failure rate and relaxed EM give each dataset equal weight. Rescued counts extra correct answers found by the flexible rules. All failures remain in the evaluation.
+
+The flexible extractor applies the following rules in order. It does not use the reference answer: 1. If the strict rule finds an answer, keep that answer unchanged. 2. Otherwise accept a paired answer tag with capitalization or internal whitespace differences, using the last pair. 3. Otherwise accept a single unclosed answer opening tag only when followed by 1–128 characters of single-line plain text.  
+
+> 15 MultiAgent-OPD Technical Report · October 2026
+
+4. Otherwise accept a trailing Final answer: or Answer: line with a 1–128-character plain-text candidate. 5. Otherwise accept the entire output only if it is 1–128 characters, single-line plain text without angle brackets or Markdown code fences. 6. If no rule applies, keep the record unparsed and incorrect. We score the extracted text using the original normalized EM rule and accepted reference answers. These rules only change which formats we accept. They do not judge meaning or use the reference to select an answer. The rescued count is the total number of extra correct answers. Macro score differences give each dataset equal weight. We divide failures into three types: no Answerer candidate, an empty final candidate, or a nonempty output without a valid answer tag. These types describe the saved outputs, not the causes of failure. Each format failure currently scores zero. If all such failures in the compared system became correct, its score would be 𝑎 𝐵 + 𝑓 𝐵 .Subtracting this from MultiAgent-OPD’s unchanged score gives the bound in Table 7. We use the same paired question samples for its intervals. This is an upper limit based on an assumed repair of every failure, not a measured gain from actual repairs.        
+
+> Comparator Remaining gap (pp) 95% CI
+> Prompted Critic +0.33 [-0.80, +1.46] C-MAS + RL +2.51 [+1.39, +3.65]
+> Table 7. Upper bound from repairing format failures (pp). We assume every format failure in the compared system becomes correct and leave MultiAgent-OPD unchanged. These are assumed bounds, not results from actual repairs.
+
+A.5 Collapse of Search Behavior under Outcome-Based Searcher RL 
+
+Table 8 follows the outcome-based Searcher RL variant on a fixed 1,000-question development set. Between steps 300 and 400, the fraction of workflows with no recorded search rises from 0.5% to 100%, while EM falls from 26.0% to 21.8%. Final-answer production increases to 99.3%, indicating that the loss of retrieval occurs even as more workflows finish with an answer. At step 500, retrieval remains absent and EM falls to 19.2%.                    
+
+> Step EM (%) No search (%) Final answer (%)
+> 100 27.0 1.2 64.8 200 30.9 0.4 78.8 300 26.0 0.5 49.9 400 21.8 100.0 99.3 500 19.2 100.0 99.5
+> Table 8. Training progression of the outcome-based Searcher RL variant on 1,000 fixed development questions. EM, workflows with no recorded search, and workflows producing a final answer are percentages. Development EM uses one attempt per question and a pooled question average; it is distinct from test-set macro avg@4.
+
+The evaluated variant produces no recorded search actions in any of its 20,000 test workflows across the seven datasets. Nevertheless, 19,902 workflows (99.51%) contain subtasks and reports, and 19,805 (99.03%) produce a final answer. These are pooled workflow percentages, rather than dataset-macro averages. The recorder extracts search actions from <search> tags independently of whether retrieval returns passages. The observed failure is therefore a collapse of recorded search behavior while report generation and answering continue. This supports the interpretation that final-answer rewards did not sustain retrieval in this configuration; it does not isolate the contribution of each training choice.  
+
+> 16 MultiAgent-OPD Technical Report · October 2026
+
+B Systems and Training Details 
+
+> B.1 Compared Systems
+
+The compared systems vary architecture, task-specific training, and Searcher supervision. C-MAS base and H-MAS base use the base model without task-specific training. C-MAS + RL jointly trains the Searcher and the Answerer with outcome-based RL in an implementation adapted from Dr. MAS [Feng et al., 2026]; it evaluates the Stage-I policy in its original cascaded workflow. Prompted Critic trains the hierarchy with an M-GRPO-like combination of local and team rewards [Hong et al., 2025]. The judge prompt appears in Appendix C.4. Its Searchers receive 0 .3𝑅 EM + 0.5𝑅 judge + 0.2𝑏 𝑆 , where 𝑅 judge is a binary report score prompted from the shared checkpoint. Its Leader and Answerer use the same outcome objectives as in MultiAgent-OPD (Eq. (6)); the two trained hierarchies differ only in the Searcher learning signal. Published M-GRPO instead trains separate role models and aligns variable subagent trajectories. MultiAgent-OPD trains the same hierarchy with token-level Searcher OPD from the frozen Stage-I Teacher and outcome-based RL for the Leader and the Answerer. Neither trained hierarchy requires the Teacher or a judge at inference. H-MAS base is not trained and therefore receives no Leader reward. The three diagnostic variants in Table 3 retain the full configuration’s Leader and Answerer objectives while changing the Searcher path. The RL-based search agents use the same backbone and protocol as our systems. Search-R1 trains a single agent with outcome rewards to interleave reasoning and search calls. DeSA first trains search with a retrieval-recall reward and then trains answering with an outcome reward. Tree-GRPO samples trajectories as trees over agent steps and derives step-level advantages from outcome rewards. MemSearcher keeps a compact memory across turns and trains the agent with multi-context GRPO. Dr. MAS trains a hierarchical team with agent-wise advantage normalization. 
+
+> B.2 Training and Inference Settings
+
+Training uses 79,168 Natural Questions and 90,447 HotpotQA examples [Kwiatkowski et al., 2019, Yang et al., 2018]. Training uses batch size 32, five trajectories per question, five PPO minibatch updates, and learning rate 10 −6, with veRL and SGLang [Sheng et al., 2025, Zheng et al., 2024]. Stage I allows five environment steps; Stage II allows 12 steps and up to five Leader delegation rounds. All training configurations, including the three diagnostic variants, use five Answerer candidates per request. The full method and its ablations share the same reward and advantage normalization and other training settings. Answerer rewards are normalized within the parent workflow, as defined in Eq. (1). Evaluation uses one candidate per answering request for all systems. The four evaluation runs per question are independent workflows, each using this single-candidate answering rule. Evaluation uses vLLM in float16, temperature 0.6, top-𝑝 = 0.95, an 8,192-token input limit, and a 512-token output limit per call. Cascaded and hierarchical systems keep their respective 5- and 12-step limits. Following Dr. MAS [Feng et al., 2026], we use E5 [Wang et al., 2022] as the retriever. All systems use the same retriever, returning three passages per query. Saved trajectories provide search and token counts, completion statistics, and evidence-use examples. 
+
+> B.3 Evaluation Provenance and Statistics
+
+The main comparison uses a fixed 5,000-question manifest and four stochastic workflows per method. Appendix A gives the dataset composition, question-overlap check, answer extraction rule, and question-bootstrap procedure. Checkpoints are saved every 100 steps. Trained systems in the main comparison use checkpoints nearest in step to the validation peak; all four rows of Table 3 use step 500. Checkpoints and the OPD coefficient were fixed before their respective test evaluations. The anonymous artifact includes question–replica scores and a Python/NumPy script for recomputing macro metrics and paired intervals. Figure 3 digitizes smoothed historical curves on a separate validation set, plotted against training steps rather than compute.  
+
+> 17 MultiAgent-OPD Technical Report · October 2026
+
+C Prompt Templates 
+
+The following templates are used by the hierarchical team. For the Leader, {query} is the original question, and for a Searcher it is the delegated sub-question. The Answerer receives the original question and the reports selected by the Leader in {summaries} . C-MAS + RL uses the same Searcher and Answerer templates, with the original question passed to the Searcher. The role templates below reproduce the evaluation code; the critic template is used during Prompted Critic training. 
+
+C.1 L E A D E R 
+
+> Leader Agent Prompt
+
+# Your Role You are a Leader Agent coordinating search and answer subagents to answer: {query} ## Actions: - <search_agent>...</search_agent> — dispatch a search subagent. Put your specific sub-query inside the tags. Can send multiple at once. - <answer_agent>...</answer_agent> — produce final answer. Put relevant summary IDs (comma-separated) inside the tags. ## Strategy: First briefly analyze what information is needed, then take action. - Break multi-hop questions into single-fact sub-queries. - Write specific, targeted queries — never vague or overly broad. - Never repeat queries already covered by existing summaries. ## When to Act: - **Search** when: key entities unknown, relationships unclear, or facts unverified. - **Answer** when: summaries already contain all facts needed to fully answer the question. ## Example Output: I need to find who won the 2024 Nobel Prize in Physics first. <search_agent>2024 Nobel Prize in Physics winner</search_agent> ## Example Output (multiple searches): I need both the director and the release year of this film. <search_agent>Erta Ale documentary film director</search_agent> <search_agent>Erta Ale documentary release year</search_agent> ## Example Output (answer): The summaries contain all needed facts. <answer_agent>01,03</answer_agent> 
+
+C.2 S E A R C H E R 
+
+> Search Agent Prompt
+
+# Your Role You are a Search Agent. Iteratively search for information to answer: {query} ## Actions (pick ONE per turn): - ‘<search>query</search>‘ — search for information. One query per turn. Fill a specific gap, avoid repeating past queries. - ‘<summary>...</summary>‘ — conclude with a structured summary when info is sufficient. ## Rules: 1. Check past ‘<search>‘ and ‘<information>‘ to avoid redundant or too-broad queries. 2. When info is sufficient, output a ‘<summary>‘ with Key Findings and Relevance Assessment.  
+
+> 18 MultiAgent-OPD Technical Report · October 2026
+
+C.3 A N S W E R E R 
+
+> Answer Agent Prompt
+
+# Your Role You are an Answer Agent. Use the summaries below and your own knowledge to answer the question. ## Summaries {summaries} ## Question {query} ## Rules: 1. Then give a short, precise answer in ‘<answer></answer>‘. Answer with the minimal necessary entity (name, date, number, phrase). 
+
+C.4 Prompted Critic 
+
+The critic receives the original question in {question} , the delegated sub-question in {sub_query} , and the search report in {summary} . The following template reproduces CRITIC_PROMPT from the critic implementation. 
+
+> Critic Agent Prompt
+
+# Your Role You are a Critic Agent. Your job is to evaluate a search agent’s summary for a given sub-question derived from a main question. ## Main Question {question} ## Sub-Question Assigned to Search Agent {sub_query} ## Search Agent’s Summary {summary} ## Evaluation Criteria 1. **Relevance**: Does the summary directly address the sub-question? 2. **Completeness**: Does the summary cover the key aspects needed to answer the sub-question? 3. **Accuracy**: Is the information factually consistent and well-supported? 4. **Usefulness**: Will this summary help answer the main question? ## Instructions 1. Output a binary score: ‘<score>1</score>‘ if the summary is adequate, ‘<score>0</score>‘ if it is not. 2. Output a concise, actionable hint in ‘<hint>...</hint>‘ (10-30 words). If score=1, acknowledge what is good and note any minor gaps. If score=0, explain what is missing or wrong and suggest specific improvements. 
+
+D Illustrative Examples of Multi-Agent Collaboration 
+
+We select two questions where H-MAS base and the C-MAS + RL score 0/4 and MultiAgent-OPD scores 4/4. All examples show attempt 0 from the main evaluation. Each search query is followed by all three stored document previews; [...] marks text beyond the 200 characters saved by the recorder. Search reports are verbatim excerpts. Messages are grouped by subagent; this grouping does not specify the timing between subagents.  
+
+> 19 MultiAgent-OPD Technical Report · October 2026
+
+D.1 Resolving the Entity: Athlete and the River Thames 
+
+Case 1: H-MAS base 
+
+0/4 correct; attempt 0. 
+
+> Query
+
+What is the body of water by the area where Athlete was formed? 
+
+> Leader Agent
+
+01: What is the body of water near Athlete, Florida? 02: Is there a place named Athlete in Florida? 
+
+> Search Agent 01
+
+what is the body of water near Athlete, Florida? 
+
+> Search Engine
+
+Doc 1: 2010 NACAC Under-23 Championships in Athletics – Results 
+
+2010 NACAC Under-23 Championships in Athletics – Results These are the results of the 2010 NACAC Under-23 Championships in At [...] 
+
+Doc 2: 2005 Central American and Caribbean Championships in Athletics – Results 
+
+10 July 10–11 2005 Central American and Caribbean Championships in Athletics – Results These are the off [...] 
+
+Doc 3: 2010 NACAC Under-23 Championships in Athletics – Results 
+
+-1.3 m/s, Heat 2: -1.1 m/s Final Wind: +2.2 m/s Heats Wind: Heat 1: +2.1 m/s, Heat 2: +3.5 m/s Final Wind: +2.1 m/s Final Final Fi [...] 
+
+> Search Agent 01
+
+what is the nearest body of water to Athlete, Florida? 
+
+> Search Engine
+
+Doc 1: Fort Lauderdale, Florida 
+
+Dolphins and the Miami Heat of the National Basketball Association all play in neighboring Dade County. The New York Yankees, Baltimore Orioles, and Kansas City Royals [...] 
+
+Doc 2: Florida Sports Hall of Fame 
+
+Florida Sports Hall of Fame The Florida Sports Hall of Fame (FSHOF) is an association dedicated to honoring athletes with outstanding achievement in sports in Flori [...] 
+
+Doc 3: Fort Lauderdale, Florida 
+
+one 20 by diving well. The complex is open to Fort Lauderdale residents, and has also been used in many different national and international competitions since its ope [...] 
+
+> Search Agent 01
+
+geographical location of Athlete, Florida and nearby water bodies 
+
+> Search Engine
+
+Doc 1: 2010 NACAC Under-23 Championships in Athletics – Results 
+
+2010 NACAC Under-23 Championships in Athletics – Results These are the results of the 2010 NACAC Under-23 Championships in At [...] 
+
+Doc 2: 2010 NACAC Under-23 Championships in Athletics – Results 
+
+-1.3 m/s, Heat 2: -1.1 m/s Final Wind: +2.2 m/s Heats Wind: Heat 1: +2.1 m/s, Heat 2: +3.5 m/s Final Wind: +2.1 m/s Final Final Fi [...] 
+
+Doc 3: 2005 Central American and Caribbean Championships in Athletics – Results 
+
+10 July 10–11 2005 Central American and Caribbean Championships in Athletics – Results These are the off [...]  
+
+> 20 MultiAgent-OPD Technical Report · October 2026
+> Search Agent 01
+
+location of Athlete, Florida and adjacent water bodies such as rivers, lakes, or oceans 
+
+> Search Engine
+
+Doc 1: Fort Lauderdale, Florida 
+
+Dolphins and the Miami Heat of the National Basketball Association all play in neighboring Dade County. The New York Yankees, Baltimore Orioles, and Kansas City Royals [...] 
+
+Doc 2: United States Olympic Training Center 
+
+United States Olympic Training Center The United States Olympic Training Centers (OTCs) are three campuses created by the United States Olympic Committee [...] 
+
+Doc 3: United States Olympic Training Center 
+
+United States Olympic Committee will continue funding athlete programming at the center at least through 2020. United States Olympic Training Center The U [...] 
+
+> Search Agent 01
+
+where is Athlete, Florida located and what is the nearest body of water? 
+
+> Search Engine
+
+Doc 1: 2005 Central American and Caribbean Championships in Athletics – Results 
+
+10 July 10–11 2005 Central American and Caribbean Championships in Athletics – Results These are the off [...] 
+
+Doc 2: 2010 NACAC Under-23 Championships in Athletics – Results 
+
+2010 NACAC Under-23 Championships in Athletics – Results These are the results of the 2010 NACAC Under-23 Championships in At [...] 
+
+Doc 3: 2009 Central American and Caribbean Age Group Championships in Athletics 
+
+2009 Central American and Caribbean Age Group Championships in Athletics The 13th Central American and Caribbean Age Gr [...] 
+
+> Search Agent 02
+
+Is there a place named Athlete in Florida? 
+
+> Search Engine
+
+Doc 1: Florida Sports Hall of Fame 
+
+Florida Sports Hall of Fame The Florida Sports Hall of Fame (FSHOF) is an association dedicated to honoring athletes with outstanding achievement in sports in Flori [...] 
+
+Doc 2: Coastal Florida Sports Park 
+
+with a great deal of support from private sports investors, the Cocoa Expo Sports Center received a long-overdue renovation of the entire complex. From the stadium [...] 
+
+Doc 3: Florida Gators track and field 
+
+The following Florida Gators athletes have earned medals in one or more track and field events at the Summer Olympics: Florida Gators track and field The Florida [...] 
+
+> Search Agent – Report
+
+There is no geographical location or town named "Athlete" in Florida. The term "Athlete" appears in contexts such as the "Florida Sports Hall of Fame," which honors accomplished athletes from Florida, and in references to athletic programs like the Florida Gators track and field team. 
+
+> Leader Agent
+
+Selected reports: 02  
+
+> 21 MultiAgent-OPD Technical Report · October 2026
+> Answer Agent
+
+<answer>There is no place named Athlete in Florida, so there is no body of water associated with its formation.</answer> 
+
+End of trajectory. 
+
+Case 1: C-MAS + RL 
+
+0/4 correct; attempt 0. 
+
+> Query
+
+What is the body of water by the area where Athlete was formed? 
+
+> Search Agent 01
+
+where is Athlete formed? 
+
+> Search Engine
+
+Doc 1: Athlete 
+
+definition of ""sportsman"" according to Webster’s ""Third Unabridged Dictionary"" (1960) is, ""a person who is active in sports: as (a): one who engages in the sports of the [...] 
+
+Doc 2: Athletic heart syndrome 
+
+Athletic heart syndrome Athletic heart syndrome (AHS), also known as athlete’s heart, athletic bradycardia, or exercise-induced cardiomegaly is a non-pathological condi [...] 
+
+Doc 3: Health issues in athletics 
+
+Health issues in athletics Health issues of athletics concern the health and well-being of athletes who participate in an organized sport. If athletes are physically [...] 
+
+> Search Agent 01
+
+Body of water near the town or location named Athlete?** 
+
+> Search Engine
+
+Doc 1: Team sport 
+
+match surrounded by crowds. Prehistoric cave-paintings in Japan show a sport similar to sumo wrestling. In Wadi Sura, near Gilf Kebir in Libya, a Neolithic rock painting in the cave [...] 
+
+Doc 2: International Olympic Academy 
+
+for so many years in effect proved that the correct and effective means for the special Olympic education of the people who would wish to offer their strength and [...] 
+
+Doc 3: NC Vouliagmeni 
+
+NC Vouliagmeni The Nautical Club of Vouliagmeni, or ""NOV"" (Greek: Ναυτικός ΄Ομιλος Βου \ [...] 
+
+> Search Agent 01
+
+Near which body of water is the place named Athlete located? Or is there a geographical location called Athlete? 
+
+> Search Engine
+
+Doc 1: Athlete 
+
+Athlete An athlete (also sportsman or sportswoman) is a person who competes in one or more sports that involve physical strength, speed or endurance. The application of the term to tho [...] 
+
+Doc 2: Athlete 
+
+definition of ""sportsman"" according to Webster’s ""Third Unabridged Dictionary"" (1960) is, ""a person who is active in sports: as (a): one who engages in the sports of the [...] 
+
+Doc 3: Athlete 
+
+soccer, baseball, lacrosse, and did ballroom dancing. King Gustav V of Sweden, while awarding Thorpe the decathlon gold said: ""You, sir, are the greatest athlete in the world."" T [...]  
+
+> 22 MultiAgent-OPD Technical Report · October 2026
+> Search Agent – Report
+
+The term "athlete" refers to a person engaged in physical sports or competitive activities. There is no geographical location or body of water named "Athlete" based on available information. 
+
+> Answer Agent
+
+<answer>Sea of Greece</answer> 
+
+End of trajectory. 
+
+Case 1: MultiAgent-OPD 
+
+4/4 correct; attempt 0. 
+
+> Query
+
+What is the body of water by the area where Athlete was formed? 
+
+> Leader Agent
+
+01: who formed the band Athlete 02: what is the body of water near Deptford, London 
+
+> Search Agent 01
+
+who formed the band Athlete 
+
+> Search Engine
+
+Doc 1: Wilt (band) 
+
+Wilt (band) Wilt were an alternative rock band founded in Kilkenny, Ireland in 1998. Formed by ex-Kerbdog members Cormac Battle on vocals/guitar and Darragh Butler on drums, the li [...] 
+
+Doc 2: Wesley Geer 
+
+and groups, playing guitar, co-writing and/or producing songs, such as Papa Roach, The Damages, Ben Grosse, and Thrill Kill Kult. Born in Fullerton, California to parents Wesley Ha [...] 
+
+Doc 3: Matthew Meschery 
+
+Matthew Meschery Matthew Thomas Meschery Shakey Lo the Creation Kid (born April 12, 1975) is a vocalist and programmer. He is best known for being the original lead vocalist o [...] 
+
+> Search Agent 01
+
+who formed the band Athlete (music group) 
+
+> Search Engine
+
+Doc 1: Athlete (band) 
+
+Athlete (band) Athlete are an English indie rock band formed in Deptford, London, comprising Joel Pott (lead vocals and guitar), Carey Willetts (bass and backing vocals), Stephe [...] 
+
+Doc 2: Athlete (band) 
+
+records on regular basis. Their subsequent two albums ""Beyond the Neighbourhood"" (2007) and ""Black Swan"" (2009) sees the band exploring different styles, influenced [...] 
+
+Doc 3: Sportsman (artist) 
+
+Sportsman (artist) Sportsman, real name Per Magnusson, is an artist, songwriter and previous singer in the Swedish band The Sonnets. He has released one single and one EP on [...] 
+
+> Search Agent – Report 01
+
+The band Athlete is an English indie rock band formed in Deptford, London. 
+
+> Search Agent 02
+
+body of water near Deptford, London  
+
+> 23 MultiAgent-OPD Technical Report · October 2026
+> Search Engine
+
+Doc 1: Deptford 
+
+Deptford Deptford ( ) is a district of south-east London, England, within the London Borough of Lewisham. From the mid-16th to the late 19th century, Deptford was home to Deptford Doc [...] 
+
+Doc 2: Deptford Wharf 
+
+Deptford Wharf Deptford Wharf in London, UK is situated on the Thames Path south-east of South Dock Marina, across the culverted mouth of the Earl’s Sluice and north of Aragon T [...] 
+
+Doc 3: Deptford 
+
+Evelyn in the north and part of New Cross to the south. Deptford borders the areas of Brockley and Lewisham to the south, New Cross to the west and Rotherhithe to the north west; Dept [...] 
+
+> Search Agent 02
+
+River Thames 
+
+> Search Engine
+
+Doc 1: River Thames 
+
+River Thames The River Thames, ( ) known alternatively in parts as the Isis, is a river that flows through southern England including London. At , it is the longest river entirely [...] 
+
+Doc 2: River Thames 
+
+river a number of smaller private companies also offer river trips at Oxford, Wallingford, Reading and Hampton Court. Many companies also provide boat hire on the river. The leisu [...] 
+
+Doc 3: River Thames 
+
+to help reduce the flood risk in Maidenhead Windsor and Eton. In 2010, the Thames won the largest environmental award in the world – the $350,000 International Riverprize. On [...] 
+
+> Search Agent – Report 02
+
+The primary body of water near Deptford, London is the River Thames. Deptford is situated on the south bank of the River Thames, specifically in the area known as North Deptford, which is the only part of the London Borough of Lewisham to front the Thames. 
+
+> Leader Agent
+
+Selected reports: 01,02 
+
+> Answer Agent
+
+<answer>River Thames</answer> 
+
+End of trajectory. 
+
+H-MAS base searches for a place called Athlete in Florida. The C-MAS + RL system also treats Athlete as a place or a generic sports term. MultiAgent-OPD identifies Athlete as a band, reports its origin in Deptford, and connects Deptford to the River Thames. Its two search subtasks provide the facts needed for the final answer. 
+
+D.2 Preserving the Caretaker-Role Constraint 
+
+Case 2: H-MAS base 
+
+0/4 correct; attempt 0. 
+
+> Query
+
+Who succeeded Alf Ramsey as England (caretaker) football manager in 1974? 
+
+> Leader Agent
+
+01: Who succeeded Alf Ramsey as England caretaker football manager in 1974?  
+
+> 24 MultiAgent-OPD Technical Report · October 2026
+> Search Agent 01
+
+Who succeeded Alf Ramsey as England caretaker football manager in 1974? 
+
+> Search Engine
+
+Doc 1: Alf Ramsey 
+
+Alf Ramsey Sir Alfred Ernest Ramsey (22 January 1920 – 28 April 1999) was an English football player and manager who was manager of England from 1963 to 1974, and guided Englan [...] 
+
+Doc 2: Alf Ramsey 
+
+FA). England, having won the World Cup in 1966, were now perceived to have failed in three successive tournaments. The disappointments of quarter final exits from major tournaments [...] 
+
+Doc 3: 1973–74 Football League 
+
+1973–74 Football League The 1973–74 season was the 75th completed season of The Football League. Don Revie marked his last season as Leeds United’s manag [...] 
+
+> Search Agent – Report
+
+Don Revie succeeded Ramsey as England’s national football team manager, taking over immediately after Ramsey’s departure. The information confirms that Don Revie succeeded Alf Ramsey as England’s caretaker (and subsequent) manager in 1974, directly addressing the query. The documents provide clear historical context and confirm the succession without ambiguity. 
+
+> Leader Agent
+
+Selected reports: 01 
+
+> Answer Agent
+
+<answer>Don Revie</answer> 
+
+End of trajectory. 
+
+Case 2: C-MAS + RL 
+
+0/4 correct; attempt 0. 
+
+> Query
+
+Who succeeded Alf Ramsey as England (caretaker) football manager in 1974? 
+
+> Search Agent 01
+
+Who succeeded Alf Ramsey as England caretaker manager in 1974? 
+
+> Search Engine
+
+Doc 1: Alf Ramsey 
+
+Alf Ramsey Sir Alfred Ernest Ramsey (22 January 1920 – 28 April 1999) was an English football player and manager who was manager of England from 1963 to 1974, and guided Englan [...] 
+
+Doc 2: Alf Ramsey 
+
+FA). England, having won the World Cup in 1966, were now perceived to have failed in three successive tournaments. The disappointments of quarter final exits from major tournaments [...] 
+
+Doc 3: Alf Ramsey 
+
+his England side being dubbed ""The Wingless Wonders"". England’s World Cup victory at Wembley in 1966 made Ramsey a national hero, though he had his critics, both at the time a [...] 
+
+> Search Agent 01
+
+Who took over as caretaker manager of England after Alf Ramsey was sacked in 1974?  
+
+> 25 MultiAgent-OPD Technical Report · October 2026
+> Search Engine
+
+Doc 1: Alf Ramsey 
+
+FA). England, having won the World Cup in 1966, were now perceived to have failed in three successive tournaments. The disappointments of quarter final exits from major tournaments [...] 
+
+Doc 2: Alf Ramsey 
+
+Alf Ramsey Sir Alfred Ernest Ramsey (22 January 1920 – 28 April 1999) was an English football player and manager who was manager of England from 1963 to 1974, and guided Englan [...] 
+
+Doc 3: 1973–74 in English football 
+
+1973–74 in English football The 1973–74 season was the 94th season of competitive football in England. It is considered as the end of Leeds United do [...] 
+
+> Search Agent 01
+
+Geographic distribution of ozone layers 
+
+> Search Engine
+
+Doc 1: Ozone layer 
+
+Ozone layer The Ozone layer or ozone shield is a region of Earth’s stratosphere that absorbs most of the Sun’s ultraviolet radiation. It contains high concentrations of ozone (O) i [...] 
+
+Doc 2: Ozone layer 
+
+28, 2003, which operated until early 2012. Ozone layer The Ozone layer or ozone shield is a region of Earth’s stratosphere that absorbs most of the Sun’s ultraviolet radiation. It [...] 
+
+Doc 3: Ozone layer 
+
+called the ozone-oxygen cycle. Chemically, this can be described as: About 90 percent of the ozone in the atmosphere is contained in the stratosphere. Ozone concentrations are grea [...] 
+
+> Search Agent – Report
+
+There is a mention that Don Revie, who managed Leeds United, took over from Sir Alf Ramsey as England national team manager after Ramsey’s sacking in 1974. The information confirms that Don Revie succeeded Alf Ramsey as caretaker manager of England in 1974. However, cross-referencing the details: While Revie is noted to have managed Leeds United during the 1973–74 season and succeeded Ramsey in a managerial capacity, the term "caretaker manager" is not explicitly used in the documents. The transition from Ramsey to Revie is presented in the context of a managerial handover, but without explicit confirmation of the "caretaker" designation in official sources or FA records. Therefore, while Don Revie is the most plausible successor based on available information, the specific label "caretaker manager" may not be historically accurate in this context. A more precise source on the official FA designation would be required for absolute certainty. 
+
+> Answer Agent
+
+<answer>Don Revie</answer> 
+
+End of trajectory. 
+
+Case 2: MultiAgent-OPD 
+
+4/4 correct; attempt 0. 
+
+> Query
+
+Who succeeded Alf Ramsey as England (caretaker) football manager in 1974? 
+
+> Leader Agent
+
+01: who succeeded Alf Ramsey as caretaker manager of England national football team in 1974 02: what is the duration of Joe Mercer’s caretaker management of England 
+
+> Search Agent 01
+
+who succeeded Alf Ramsey as caretaker manager of England national football team in 1974  
+
+> 26 MultiAgent-OPD Technical Report · October 2026
+> Search Engine
+
+Doc 1: Alf Ramsey 
+
+Alf Ramsey Sir Alfred Ernest Ramsey (22 January 1920 – 28 April 1999) was an English football player and manager who was manager of England from 1963 to 1974, and guided Englan [...] 
+
+Doc 2: Alf Ramsey 
+
+managers ever in ""The Independent"". He is widely regarded as one of British football’s all-time great managers. Nonetheless, not everyone reveres Ramsey’s managerial style. Ac [...] 
+
+Doc 3: History of the England national football team 
+
+equalised from the penalty spot six minutes later and chances continued to rain down on the Polish goal, the score remained 1–1. Although at [...] 
+
+> Search Agent 01
+
+who served as caretaker manager of England after Alf Ramsey was sacked in 1974 
+
+> Search Engine
+
+Doc 1: Alf Ramsey 
+
+Alf Ramsey Sir Alfred Ernest Ramsey (22 January 1920 – 28 April 1999) was an English football player and manager who was manager of England from 1963 to 1974, and guided Englan [...] 
+
+Doc 2: Alf Ramsey 
+
+FA). England, having won the World Cup in 1966, were now perceived to have failed in three successive tournaments. The disappointments of quarter final exits from major tournaments [...] 
+
+Doc 3: Alf Ramsey 
+
+managers ever in ""The Independent"". He is widely regarded as one of British football’s all-time great managers. Nonetheless, not everyone reveres Ramsey’s managerial style. Ac [...] 
+
+> Search Agent 01
+
+who was the caretaker manager of England after Alf Ramsey’s sacking in 1974 
+
+> Search Engine
+
+Doc 1: Alf Ramsey 
+
+Alf Ramsey Sir Alfred Ernest Ramsey (22 January 1920 – 28 April 1999) was an English football player and manager who was manager of England from 1963 to 1974, and guided Englan [...] 
+
+Doc 2: Alf Ramsey 
+
+FA). England, having won the World Cup in 1966, were now perceived to have failed in three successive tournaments. The disappointments of quarter final exits from major tournaments [...] 
+
+Doc 3: Alf Ramsey 
+
+managers ever in ""The Independent"". He is widely regarded as one of British football’s all-time great managers. Nonetheless, not everyone reveres Ramsey’s managerial style. Ac [...] 
+
+> Search Agent – Report 01
+
+After Ramsey’s sacking, Joe Mercer served as caretaker manager of England. Don Revie was appointed as Ramsey’s permanent successor by the FA. 
+
+> Search Agent 02
+
+Joe Mercer’s caretaker management duration of England national team 
+
+> Search Engine
+
+Doc 1: England national football team manager 
+
+ended in a 1–1 draw. England had failed to qualify for the World Cup, and Ramsey was dismissed the following May. Joe Mercer took control of the tea [...] 
+
+Doc 2: England national football team manager 
+
+on third party ownership of players. He subsequently left the role as manager of England later that day. Former England international defender and Englan [...]  
+
+> 27 MultiAgent-OPD Technical Report · October 2026
+> Search Engine (continued)
+
+Doc 3: England national football team manager 
+
+inception; four of those were in short-term caretaker manager roles: Joe Mercer (seven games in charge), Howard Wilkinson (two games, a year apart from o [...] 
+
+> Search Agent 02
+
+Joe Mercer’s caretaker management duration of England national team (exact number of games or days) 
+
+> Search Engine
+
+Doc 1: England national football team manager 
+
+ended in a 1–1 draw. England had failed to qualify for the World Cup, and Ramsey was dismissed the following May. Joe Mercer took control of the tea [...] 
+
+Doc 2: England national football team manager 
+
+inception; four of those were in short-term caretaker manager roles: Joe Mercer (seven games in charge), Howard Wilkinson (two games, a year apart from o [...] 
+
+Doc 3: Steve McClaren 
+
+first time in 14 years that England had not qualified for a major tournament, and the first time in 24 years that they had not qualified for the European Championships. The foll [...] 
+
+> Search Agent – Report 02
+
+Joe Mercer served as caretaker manager of the England national football team for seven matches. His tenure followed the dismissal of Alf Ramsey and preceded the appointment of Don Revie. 
+
+> Leader Agent
+
+Selected reports: 01,02 
+
+> Answer Agent
+
+<answer>Joe Mercer</answer> 
+
+End of trajectory. 
+
+Both comparison systems answer Don Revie. Their reports confuse or leave unresolved the distinction between a caretaker and a permanent manager. MultiAgent-OPD separates Joe Mercer’s caretaker role from Don Revie’s permanent appointment, and its second subtask checks Mercer’s seven-match tenure.

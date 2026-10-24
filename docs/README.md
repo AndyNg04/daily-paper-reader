@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-23</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-24</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 35 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 26 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>9</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>17</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-23 18:32:55 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-24 17:54:45 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-23 论文日报出炉：完成 35 篇推荐筛选，精读 15 篇、速读 20 篇。</p>
-<p>最值得关注的是人机协作如何塑造科学创意与人的认知（10.0/10），以及如何利用延迟、单侧反馈学习个性化记忆门控（9.0/10）。</p>
-<p>建议先读人机协作论文，再按兴趣速览 AI 智能体安全治理或触觉表征学习，两篇均获 8.0/10。</p>
+<p>2026-10-24 论文日报出炉：共梳理 26 篇论文，分为精读 9 篇、速读 17 篇，聚焦大模型安全、记忆使用与智能体可靠性等议题。</p>
+<p>最值得关注的是大模型安全相关行为的探测与引导，以及面向记忆使用的人类偏好奖励建模，两篇推荐论文均获 9.0/10。</p>
+<p>建议先读这两篇高分论文的摘要，再按兴趣速览电商智能体静默工具错误韧性评估或养老场景人机交互研究。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">15 篇</strong>
+    <strong class="dpr-home-dashboard-count">9 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Beyond Better Ideas: How Human-AI Collaboration Shapes Scientific Ideas and Human Perceptions">Beyond Better Ideas: How Human-AI Collaboration Shapes Scientific Ideas and Human Perceptions</span></li><li><span class="dpr-home-dashboard-paper-title" title="Learning Personalized Memory Gating from Delayed One-Sided Feedback">Learning Personalized Memory Gating from Delayed One-Sided Feedback</span></li><li><span class="dpr-home-dashboard-paper-title" title="Conversational AI for Perceived Cognitive Decline Screening in Older Adults">Conversational AI for Perceived Cognitive Decline Screening in Older Adults</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Probing and Steering for Safety-Relevant Behaviours in Large Language Models">Probing and Steering for Safety-Relevant Behaviours in Large Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="Memory-Aware Reward Modeling: Learning Human Preferences for LLM Memory Use">Memory-Aware Reward Modeling: Learning Human Preferences for LLM Memory Use</span></li><li><span class="dpr-home-dashboard-paper-title" title="CoWriter: Guiding Methodological and Synergetic Human-LLM Co-Authoring">CoWriter: Guiding Methodological and Synergetic Human-LLM Co-Authoring</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>7</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>5</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>4</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -93,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">20 篇</strong>
+    <strong class="dpr-home-dashboard-count">17 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Digital Nudge Effects in Optimal Stopping Games: Antagonistic Interactions in Layered Choice Architectures">Digital Nudge Effects in Optimal Stopping Games: Antagonistic Interactions in Layered Choice Architectures</span></li><li><span class="dpr-home-dashboard-paper-title" title="Touch-JEPA: Tactile Representation Learning from Hand-Object Video with Limited Tactile Supervision">Touch-JEPA: Tactile Representation Learning from Hand-Object Video with Limited Tactile Supervision</span></li><li><span class="dpr-home-dashboard-paper-title" title="A Three-Pillar Governance Framework for Safe and Trustworthy AI Agents">A Three-Pillar Governance Framework for Safe and Trustworthy AI Agents</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Multimodal Interaction Estimation for Contact-Aware Adaptive Impedance Control">Multimodal Interaction Estimation for Contact-Aware Adaptive Impedance Control</span></li><li><span class="dpr-home-dashboard-paper-title" title="RITE: Evaluating End-to-End Resilience to Silent Tool Errors in E-Commerce Agentic Systems">RITE: Evaluating End-to-End Resilience to Silent Tool Errors in E-Commerce Agentic Systems</span></li><li><span class="dpr-home-dashboard-paper-title" title="Navigating human-robot interaction challenges in private and residential aged care homes">Navigating human-robot interaction challenges in private and residential aged care homes</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>4</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>4</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>4</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>3</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>5</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
 </section>
 </div>
 
