@@ -1,0 +1,936 @@
+LocoPilot: Single-Operator Bilateral Teleoperation
+for Loco-Manipulation Policy Learning
+Antonio Langella∗,1, Giovanni Minelli∗,1, Giovanni B. Dessy∗,1, Lorenzo Amatucci1,
+Giulio Turrisi1, Victor Barasuol1 and Claudio Semini1
+LocoPilot
+Teleop
+Data
+Collection
+VLA
+"Pick up the red block"
+Unified 11-D action 
+x
+z
+y
+yaw
+pitch
+Policy
+Deployment
+Fig. 1: Overview of the proposed LocoPilot framework. The upper-left block shows the single-operator teleoperation interface, combining
+a leader arm with two handheld controllers to command the manipulator, gripper, base motion, and body posture during data collection.
+The lower-left block represents autonomous deployment, where a Vision-Language-Action (VLA) policy uses visual observations and a
+language instruction to replace the human operator. Both modes command the same arm-equipped quadruped, shown in the center, through
+the same unified whole-body loco-manipulation action interface. The right panel shows representative loco-manipulation tasks executed
+with the platform. Code available at: https://github.com/iit-DLSLab/LocoPilot
+Abstract— Learning
+loco-manipulation
+policies
+requires
+demonstrations that capture coordinated base and arm mo-
+tion on the target embodiment. Robot-free interfaces allow
+demonstrations to be collected independently of the target
+robot, increasing flexibility but without directly capturing
+platform-specific commands, proprioception, and body-mounted
+observations. On-robot teleoperation allows to capture these
+signals directly, but requires an interface capable of commanding
+the complete system concurrently. This paper presents LocoPilot,
+a single-operator bilateral teleoperation and data-collection
+framework implemented on a 12-DoF Unitree Go2 quadruped
+equipped with a 6-DoF AgileX Piper L manipulator, an Intel
+RealSense D435 wrist camera, and an Intel RealSense D405
+head camera. A second 6-DoF Piper L arm, used as the leader
+and two handheld controllers provide simultaneous control
+of the base, body posture, manipulator, and gripper. The
+follower arm interaction forces are estimated without a dedicated
+force/torque sensor and rendered to the operator through a
+passivity-constrained haptic channel. A ROS 2 pipeline records
+synchronized multimodal observations together with a unified
+11D action shared by teleoperation and policy deployment.
+Compared to prior work, LocoPilot uniquely unifies robot-in-
+the-loop legged data collection, force feedback without motion-
+capture instrumentation, and the same action interface at
+deployment. We evaluate the interface across multiple loco-
+manipulation tasks and validate the complete collection-to-
+deployment pipeline by fine-tuning MolmoAct2 [1] on pick-
+and-place demonstrations and deploying on the physical robot
+without action retargeting or additional inverse kinematics.
+I. INTRODUCTION
+Robots capable of both locomotion and manipulation ex-
+tend physical interaction beyond the workspace of fixed-base
+manipulators. Arm-equipped quadruped robots are particularly
+suited to unstructured environments, where they combine
+legged mobility with physical interaction capabilities. Prior
+work has explored legged loco-manipulation through model-
+based whole-body control [2], or learned coordination of lo-
+comotion and manipulation [3], [4]. More recently, generalist
+Visual Language Action (VLA) models have gained increasing
+attention for learning manipulation behaviors from multimodal
+demonstrations, leveraging large-scale visual and language
+representations [5]–[8]. For loco-manipulation, however, such
+demonstrations must capture both base and arm actions on
+the target embodiment. Ideally, the collection interface should
+therefore minimize the collection–deployment gap while
+preserving direct operator authority over all task-relevant
+commands.
+Existing systems trade off these requirements in different
+ways:
+Teleoperation systems place a human directly in the
+control loop of the physical robot, combining the operator task
+understanding with the constraints of the target embodiment.
+Leader-follower interfaces with direct joint correspondence
+arXiv:2610.27998v1  [cs.RO]  20 Oct 2026
+
+
+provide intuitive control of fixed-base manipulators [9],
+[10], while mounting the same kind of interface on a
+wheeled base extends the concept to mobile manipulation,
+recording base motion alongside bimanual manipulation [11].
+XR-based systems provide more general cross-embodiment
+interfaces [12], [13], and DROID demonstrates the use of
+teleoperation for standardized large-scale data collection [14].
+Immersive interfaces additionally stream the robot’s own
+onboard imagery to the operator [12], allowing real-time
+inspection of the visual inputs that will directly condition the
+downstream policy. For arm-equipped quadrupeds, previous
+systems have used wearable motion capture, joysticks, haptic
+devices, or hand gestures [15]–[18]. Collecting directly on
+the target robot reduces observation and action mismatch, but
+simultaneously commanding all task-relevant DoFs becomes
+increasingly difficult for a single operator.
+Robot-free interfaces make the opposite trade-off. The
+Universal Manipulation Interface (UMI) [19] records demon-
+strations using a sensorized handheld gripper, allowing the
+operator to demonstrate manipulation without the kinematic
+constraints of the target robot. This improves collection
+flexibility, but omits embodiment-specific signals such as base
+commands, proprioception, and body-mounted observations.
+Deployment therefore requires an additional mapping from
+demonstrated end-effector motion to the target embodiment,
+as in UMI on Legs [20].
+This work aims to combine the collection-deployment
+consistency of on-robot teleoperation with the flexibility of
+learning-based interfaces for arm-equipped quadrupeds. As
+illustrated in Fig. 1, both the human operator and the learned
+policy act through the same loco-manipulation interface, while
+the resulting demonstrations are collected directly on the
+target platform. Achieving this requires addressing two main
+challenges.
+The first challenge is enabling a single operator to
+command the entire loco-manipulation action concurrently.
+Reaching and grasping may require the robot to translate,
+rotate, or change body posture while the arm is moving, so
+sequential base and manipulator control produces segmented
+demonstrations rather than the smooth continuous coordina-
+tion desired from the final policy. Existing systems address
+this through multiple operators, wearable instrumentation,
+or partial autonomy, introducing additional coordination or
+removing task decisions from the demonstrator.
+To retain these decisions under single-operator control,
+we propose a bimanual interface design where a handheld
+controller is mounted on the end-effector handle of the leader
+arm. The dominant hand articulates the manipulator while
+operating the mounted controller, and the non-dominant hand
+provides the remaining base commands through a second
+controller. Together, the two interfaces provide concurrent
+control of planar base velocity, yaw rate, body pitch, arm
+configuration, and gripper aperture. Interaction forces at
+the follower are additionally estimated online and rendered
+through the leader arm, providing contact feedback without
+a dedicated force/torque sensor.
+The second challenge is maintaining consistency between
+TABLE I: Comparison with the closest systems.
+M. ALOHA TeLeMan UMI-Legs Ours
+[11]
+[15]
+[20]
+Legged embodiment
+–
+✓
+✓
+✓
+Robot in the loop
+✓
+✓
+–
+✓
+Base action + proprioception
+✓
+✓
+–
+✓
+Body-mounted view
+✓
+✓
+–
+✓
+Robot force feedback to op-
+erator
+–
+–
+–
+✓
+No mocap instrumentation
+✓
+–
+✓
+✓
+Same action interface at de-
+ployment
+✓
+n/a
+–
+✓
+collection and deployment. On a legged manipulator, high-
+level commands are executed through a locomotion and
+manipulation stack whose behavior also shapes the recorded
+motion. Replacing this stack at deployment can therefore
+shift the distribution of observations and executed motions
+away from the demonstrated one, even when the high-level
+action representation is unchanged. We avoid this by using
+the same 11-dimensional loco-manipulation action in both
+regimes and by keeping the same downstream execution
+modules: the locomotion policy and leg controller, the arm
+controller, and the gripper interface. During collection, the
+action is generated by the operator, whereas at deployment it
+is generated by the learned policy; the locomotion policy, arm
+controller, and gripper interface remain unchanged. Table I
+compares LocoPilot with the closest prior systems in terms
+of the teleoperation and data-collection properties discussed
+above. The contributions of this work can be summarized as
+follows:
+• A single-operator bilateral teleoperation interface for
+arm-equipped quadrupeds, combining concurrent base,
+body, arm, and gripper control with sensorless force
+reflection and an operator-side passivity layer.
+• A unified 11-dimensional action interface shared between
+teleoperation and learned-policy deployment, with the
+same locomotion and manipulation controllers used in
+both regimes.
+• A synchronized learning-oriented data pipeline recording
+multi-camera RGB-D observations, robot state, odometry,
+and commanded actions, validated through multiple
+teleoperation tasks and real-robot deployment of a fine-
+tuned MolmoAct2 policy.
+The remainder of this paper is organized as follows:
+Section II presents the hardware and software architecture.
+Section III the teleoperation mapping and unified command.
+Section IV reports the teleoperation experiments and validates
+the collected demonstrations through real-robot deployment.
+Section VI draws the final conclusions.
+II. SYSTEM OVERVIEW
+In this section we provide an overview of the hardware
+and software components that compose our framework.
+A. Hardware
+Figure 1 shows both the teleoperation setup and the system
+being controlled. In particular, the follower platform, shown
+
+
+Follower
+Leader
+0/1
+Fig. 2: The two sides of the manipulation system setup. Left:
+the leader station, with the end-effector handle, and the handheld
+controller mounted. Right: the follower platform, a Piper L arm and
+a gripper-mounted RGB-D camera.
+on the right, consists of a 12-DoF Unitree Go2 quadruped
+equipped with a 6-DoF AgileX Piper L manipulator and
+parallel gripper. Two RGB-D cameras provide complementary
+observations: an Intel RealSense D435 mounted near the
+gripper captures close-range manipulation, while an Intel
+RealSense D405 mounted on the quadruped head, thanks
+to its larger field of view, observes the wider workspace in
+front of the robot. This platform is the same during both
+demonstration collection and autonomous deployment.
+The leader station, on the left of Fig. 2, is used only
+during data collection. It is built around a second Piper L arm
+serving as a leader device. A custom handle at the end-effector
+improves ergonomics and holds one of two Nintendo Joy-
+Con controllers [21]. The operator grips this handle with the
+dominant hand and articulates the leader arm. With the thumb
+of the same hand, the operator reaches the controller’s analog
+stick and buttons, which respectively control the quadruped
+robot pitch and yaw rate and the episode markers, while
+the index finger controls the gripper through the trigger
+button. With the non-dominant hand the operator holds the
+second controller, which commands the base velocity. The
+configuration shown in Fig. 2 assumes a right-handed operator:
+for left-handed operation, a specular handle can be employed
+while swapping the controller assignment without changing
+the teleoperation scheme.
+To ensure visual consistency, the operator drives the
+robot using the exact onboard camera streams recorded for
+downstream policy training, displayed in real time at the
+leader station. This visual alignment ensures the demonstrator
+and the policy share the exact same perspective.At the same
+time, placing all commands under a single operator makes it
+easy to execute base and arm movements concurrently instead
+of sequentially; for instance, the operator can steer and turn
+the quadruped while reaching toward an out-of-reach object
+in a single coordinated motion.
+B. Software Architecture
+On the software side, the framework is composed of inter-
+connected, distributed modules running on the quadruped’s
+onboard computer and an operator workstation, as shown
+in Fig. 3. In particular, the quadruped’s onboard computer
+runs: the reinforcement-learning base policy of [22], which
+converts base-velocity and body-pitch references into joint
+position targets for a low-level PD controller; the MUSE state
+estimator [23], which provides the state estimates used as
+input by the policy; the arm control stack; and the camera
+nodes, which publish the two RGB-D streams.
+As a direct consequence of unifying the action and obser-
+vation interfaces, the same software modules run on the robot
+both for data collection and for autonomous deployment. What
+changes between the two modes is the operator side. During
+demonstration collection the workstation runs: the leader arm
+control stack; the teleoperation module described in Sec. III-A
+that couples leader and follower and renders contact back
+to the operator; and the recording module that assembles
+episodes from the observation, state, and command streams.
+During autonomous deployment a single policy-inference
+node replaces all three, receiving the same observations and
+emitting the same commands the teleoperation loop previously
+produced. The switch between the operator and the policy
+therefore falls at one interface, and everything after it is
+unaffected by which of the two is in control.
+Having defined explicit software interfaces that decouple
+the teleoperation and autonomous deployment stack from the
+underlying robot hardware, each hardware-dependent subsys-
+tem can be replaced independently, provided that it preserves
+the corresponding input-output contract. In particular, the
+locomotion subsystem, including the base, leg controller,
+reinforcement-learning policy, and state estimator, can be
+replaced by any implementation that accepts commanded
+planar velocity and absolute body pitch and exposes the leg
+states and base-velocity estimate required by the higher-level
+stack. Likewise, the manipulation subsystem can be replaced
+by any arm and controller implementation that supports joint-
+space impedance control and exposes joint position, velocity,
+and torque feedback. All components above these interfaces,
+including the teleoperation logic, action representation, and
+data-collection pipeline, remain unchanged.
+This interface-based organization therefore reduces the
+engineering effort required to port the framework to a different
+platform and makes the overall architecture modular at both
+the software and hardware levels. The present implementation
+uses ROS 2 Jazzy with Cyclone DDS. Section III details the
+central elements of the software stack, i.e., the teleoperation
+and data collection modules.
+III. TELEOPERATION AND DATA-COLLECTION
+FRAMEWORK
+A. Leader-Follower Arm Mapping
+A haptic bilateral teleoperation scheme is used to map the
+leader arm motion to the follower while reflecting interaction
+forces back to the operator, as shown in Fig. 2. Because leader
+and follower share the same kinematic structure, the coupling
+between them can be imposed directly in joint space: the
+follower directly tracks the leader configuration, and the latter
+renders the joint-space interaction torques experienced by the
+follower. We model both manipulators with the standard
+
+
+Teleoperation Stack
+Learned Policy 
+State Estimator
+Locomotion Policy
+Arm Control Stack
+Go2 HAL
+Piper L Arm
+Operator Devices 
+6-DoF Piper L + 2 Nintendo Joy-Con
+Go2 Quadruped
+Unified Command Interface
+Camera Nodes
+RGB-D Cameras
+Operator PC 
+Robot PC
+Fig. 3: Software modules and their placement. The robot-side modules are identical during demonstration collection and autonomous
+deployment; only the operator-side stack changes, with the leader arm, teleoperation loop, and recorder replaced by a single policy-inference
+node.
+joint-space rigid-body dynamics
+(
+Ml¨ql + Cl ˙ql + gl + fl = τl + τh,
+Mf ¨qf + Cf ˙qf + gf + ff = τf + τext.
+(1)
+where subscripts l and f denote leader and follower quantities,
+respectively. In the usual notation, q∗is the joint configuration,
+M∗the inertia matrix, C∗the Coriolis/centrifugal matrix,
+and g∗the gravity torque. The term f∗denotes the friction,
+while τ∗is the actuator torque. Finally, τh and τext are the
+human operator and environment interaction torques. The two
+models are identified separately, starting from their nominal
+values, since the leader carries the operator handle while the
+follower carries the gripper and the wrist camera. As usual,
+M∗is symmetric positive definite and ˙M∗−2C∗is skew-
+symmetric. Throughout, the dependence on time is omitted
+where unambiguous, and made explicit only for quantities
+evaluated at a specific instant.
+1) Position channel: The follower tracks the leader through
+a local PD law with gravity compensation,
+τ d
+f = −Kp (qf −ql) −Kd ( ˙qf −˙ql) + gf(qf),
+(2)
+with Kp, Kd ∈R6×6 diagonal and positive definite. The
+superscript d denotes a desired quantity; we assume the drives
+realize τ d
+f as the actuator torque τf of (1) without saturation.
+2) Force channel: The leader receives an estimate of the
+external joint torque induced by the interaction between the
+follower and the environment. The estimate is obtained using
+a generalized-momentum residual filter [24] on the identified
+follower model, which does not require dedicated force/torque
+sensors. Let p = Mf(qf) ˙qf be the generalized momentum
+of the follower, p(0) its value at the instant t = 0 at which the
+observer is initialized, and β = gf + ff −C⊤
+f ˙qf the sum of
+its gravity, friction and Coriolis terms. Differentiating p and
+using the skew-symmetry of ˙Mf −2Cf gives ˙p = τf −β +
+τext, so the momentum change p −p(0) accumulated since
+initialization differs from the change predicted by the known
+torques, the integral term below, exactly by the contribution
+of τext. The residual evaluates this mismatch and feeds it
+back through KI,
+r = KI
+
+p −p(0) −
+Z t
+0
+ τ m
+f −β + r
+
+ds
+
+,
+(3)
+where the actuator torque is replaced by the current-derived
+joint-effort feedback τ m
+f ≈τf reported by the follower drives.
+The observer is initialized at teleoperation engagement, when
+the follower is at rest and p(0) = 0. Under the rigid-body
+dynamics of
+(1), the residual obeys ˙r = KI(τext −r),
+so r estimates the external joint torque to first order with
+bandwidth KI and without requiring joint acceleration. To
+suppress high-frequency residual components caused by
+measurement noise and unmodeled dynamics, we apply a
+low-pass filter on the residual at fc = 5 Hz; in the equations
+below, r denotes the filtered residual.
+On the leader side, gravity compensation and light damping
+are combined with the reflected estimate,
+τl = gl(ql) −Dl ˙ql + α Λ r,
+(4)
+where Λ is a diagonal reflection gain, Dl ≻0 a diagonal
+damping matrix, and α ∈[0, 1] the modulation supplied
+by the passivity layer (described below). No position term
+appears in (4): the leader is free to move under damping
+alone, and the operator feels the follower only when the latter
+interacts with the environment.
+The force channel is therefore designed to convey infor-
+mative interaction cues rather than reproduce the environ-
+ment impedance exactly. Wildenbeest et al. [25] compared
+teleoperated assembly under haptic feedback of increasing
+fidelity and found that most of the improvement in task time
+and control effort was already achieved by the lowest-fidelity
+condition, which conveyed only the low-frequency component
+of the interaction, while higher-fidelity conditions added
+little further benefit. Filtering the residual at fc retains that
+component. In learning from demonstration, haptic feedback
+during teleoperated data collection has also been shown to
+improve demonstration throughput and the performance of
+the resulting autonomous policies [26].
+3) Passivity layer: Position–force coupling does not, in
+general, make the teleoperator passive by construction [27].
+Classic bilateral frameworks constrain both sides of the
+chain [28]; we instead passivize only the operator-facing
+port, a single-port approach with precedent in Time-Domain
+Passivity Control [29], which leaves the follower command
+unmodified and therefore identical to the one used at de-
+ployment. Following [30], the active reflection τ d
+r = Λr is
+budgeted by an energy tank H, filled by the power dissipated
+
+
+by the leader damping and drained by the power the reflection
+injects,
+˙H = ˙q⊤
+l Dl ˙ql −α τ d⊤
+r
+˙ql,
+0 < H(0) = H0 ≤Hmax,
+(5)
+with H upper-bounded by Hmax so that no unbounded
+reservoir accumulates, and initialized at the same instant
+t = 0 as the residual. Writing P d
+k = τ d⊤
+r,k ˙ql,k for the power
+the reflection would inject at control sample k, the modulation
+is
+αk =
+
+
+
+
+
+1,
+P d
+k ≤0,
+min
+
+1, max
+
+0,
+Hk
+Tδ P d
+k
+
+,
+P d
+k > 0,
+(6)
+with Tδ the control period. Reflection passes unchanged
+whenever it absorbs energy from the operator, and is scaled
+down when it would inject more than the tank holds over the
+next interval. Taking the storage S = 1
+2 ˙q⊤
+l Ml ˙ql + H, and
+using the skew-symmetry of ˙Ml −2Cl together with Eqs. (4)
+and (5), the damping and reflected-power terms cancel and
+˙S = τ ⊤
+h ˙ql −˙q⊤
+l fl ≤τ ⊤
+h ˙ql, since the leader joint friction is
+dissipative. The same bound holds when Hmax is reached
+and the excess energy is discarded. As S is non-negative,
+the haptic subsystem is passive at the operator port (τh, ˙ql),
+and the guarantee does not extend to the complete operator–
+leader–follower–environment chain. Since the residual enters
+only through the injected power, errors in the follower model
+degrade the rendered cue but not the energy accounting.
+4) Engagement and safety: Teleoperation is engaged after
+an automatic procedure which aligns the follower and the
+leader configurations, preventing a position-error transient
+at coupling. The tank is initialized to H0 at engagement,
+providing an initial energy budget for active reflection. The
+operator can suspend coupling at any time, and loss of
+the leader state stream triggers the same transition, causing
+the follower to hold its current configuration. Commanded
+positions and torques are clamped to the hardware limits.
+B. Unified Loco-Manipulation and Learning Interface
+In both regimes of Section II-B, the robot is commanded
+through the same 11-dimensional loco-manipulation action,
+written by the operator during collection and by the policy
+at deployment,
+a =
+vd
+x
+vd
+y
+ωd
+z
+θd
+qd⊤
+arm
+gd⊤,
+(7)
+where vd
+x and vd
+y are the desired linear velocities of the base in
+the horizontal plane, expressed in a gravity-aligned frame that
+follows the base yaw, ωd
+z the desired yaw rate, θd the desired
+body pitch, qd
+arm ∈R6 the follower-arm joint references, and
+gd the gripper aperture. The command is divided among three
+low-level interfaces: the base velocities and pitch references
+are sent to the locomotion policy, the arm references to the
+manipulator controller, and the gripper reference to the gripper
+interface. During deployment, the joint-position references
+produced by the policy are temporally interpolated by the arm
+trajectory interface, which samples the resulting trajectory to
+provide both position and velocity references to the low-level
+joint controller of (2). During demonstration collection, these
+references are provided directly by the leader position and
+velocity, while the remaining action entries come from the
+two handheld controllers.
+1) Locomotion policy: The base velocities and pitch
+reference are tracked by a reinforcement-learning policy,
+adapted from BinWalker [22], that outputs the 12 desired leg
+joint positions passed to the quadruped low-level controller.
+Since the arm changes the mass distribution of the platform
+and transmits a wrench to its base, the measured arm
+configuration is part of the proprioceptive observation,
+o =
+ v, ω, gb, qleg, ˙qleg, qarm, vd
+x, vd
+y, ωd
+z, θd
+,
+(8)
+alongside the estimated base linear and angular velocities
+v and ω, the gravity direction gb = R⊤
+b ˆg expressed in
+the base frame, where Rb maps base-frame vectors to the
+world frame, the leg joint positions and velocities, and the
+four commanded entries of
+(7) that the policy is asked
+to track. The term gb encodes the base roll and pitch and
+not the yaw, which matches the command convention of
+(7): the pitch reference θd is absolute, whereas the yaw is
+commanded as a rate. The five most recent observations are
+stacked and given to the policy at each step. On hardware
+v, ω, and the base orientation Rb are supplied by the
+MUSE state estimator [23], in both modes. We also extend
+the arm-configuration randomization of BinWalker’s policy
+at training time to cover the workspace required by this
+platform. Specifically, this accounts for the forward-extended
+configurations that occur when reaching for and transporting
+objects.
+The policy therefore adapts the leg motion to the current
+arm configuration, while never commanding the arm itself.
+Locomotion and manipulation remain modular, and the policy
+accounts for their physical coupling through the observation
+of (8).
+2) Policy learning interface: The recording module is
+designed so that demonstrations can be used for policy
+learning without redefining the robot interface. At each step,
+it pairs the synchronized camera images and proprioceptive
+state with the command issued by the operator at that instant.
+Complete episodes are exported to the LeRobot dataset
+format [31] and can be used for training without further
+conversion.
+Two choices keep the exported data model-agnostic while
+preserving the collection–deployment interface. First, the
+recorded action is the command received by the low-level con-
+trollers, rather than the robot response measured afterwards.
+A policy trained on these labels therefore emits quantities that
+the same controllers already accept at deployment. Second,
+each episode includes colour and depth images from both
+cameras, the proprioceptive state, the action, and custom
+language instructions, allowing a candidate model to condition
+on any subset of these observations. The only requirement
+imposed by the framework is that the model transmits the
+loco-manipulation action of (7), or a subset of it. Its output
+rate is not constrained to match the low-level controllers, since
+the arm trajectory interface interpolates the joint references to
+
+
+Fig. 4: Leader–follower tracking and interaction during a tabletop
+pick-and-place episode with a payload of known weight. (a) Norm
+of the end-effector position error ∥e∥. (b) Vertical component |Fz|
+of the estimated interaction force, with the payload weight drawn as
+a reference line. Blue and red shaded regions mark the free-motion
+and holding phases respectively.
+the controller rate, and the remaining entries are held between
+updates.
+IV. EXPERIMENTAL EVALUATION
+A. Arm-to-arm Teleoperation
+We evaluate the leader–follower teleoperation interface
+of Sec. III-A on a tabletop pick-and-place task containing
+both free-space motion and sustained object interaction.
+The experiment verifies that the two channels required for
+demonstration collection operate simultaneously: the follower
+tracks the leader motion, while contact with the environment
+produces an interaction estimate suitable for haptic rendering.
+To obtain a ground-truth reference for the force channel,
+the manipulated object is a known payload of 1.5 kg, so
+that during transport the expected vertical component of the
+estimated interaction force is known.
+The position channel is evaluated through the Cartesian
+tracking error e between the leader and follower end-effector
+positions, while the force channel is characterized by the
+norm of the estimated interaction force F. Figure 4 reports
+both over a representative episode, in which the robot first
+moves in free space, then grasps and transports the payload,
+and finally releases it. The weight of the payload is drawn
+as a reference line, since it is the force the estimate should
+report while the object is held.
+We compare the estimate against the value expected in
+each phase: zero while the robot moves in free space, and
+the weight of the payload while it is carried. Grasping and
+releasing take a short time, during which the load builds up
+and vanishes, so the second (1 s) before and after each of the
+two transitions is excluded from the comparison.
+In free motion the estimated force has an RMSE of 1.27 N,
+which is the noise floor of the estimate and therefore the
+smallest interaction the operator can perceive. While the
+payload is held, the RMSE against its known weight is
+2.25 N, or 15.3 % of the reference value. Tracking error
+follows the same structure: 8.02 mm in free motion against
+60.14 mm during interaction, as expected when environmental
+constraints oppose the configuration commanded by the
+leader. Larger tracking errors occur in the same interval
+with a mean of 24.55 mm, as expected when environmental
+constraints oppose the configuration commanded by the
+leader. The two signals remain complementary, with the
+position error quantifying the deviation between commanded
+and executed motion and the force estimate exposing the
+interaction responsible for it.
+B. VLA Deployment
+We evaluate the collected demonstrations by fine-tuning
+a vision-language-action model and deploying it on the
+robot. The purpose of the experiment is to verify that the
+recorded episodes are directly usable for policy learning,
+and that the coordinated base and arm motion they contain
+is reproduced by the learned policy. The episodes exported
+by the recorder are used to train the policy, which then
+drives the robot through the interface the operator employed,
+with no intermediate processing stage between collection and
+deployment. We instantiate the command interface of Sec. III-
+B with MolmoAct2 [1], a vision-language-action model
+that predicts action chunks from camera observations and a
+language instruction. The choice is motivated by openness: its
+authors release the training data, the training recipe, and the
+pretrained checkpoints, so the fine-tuning procedure reported
+here contains no proprietary component and can be repeated
+in full. In its original paper [1] the model is demonstrated
+only on fixed-base manipulators, so fine-tuning it here also
+accounts for instructing a new physical embodiment which
+includes commanding a mobile base.
+The dataset collected with the framework covers two tasks,
+Grasp and Push. Grasp motion requires the operator to drive
+the quadruped toward a cube, close the gripper on it, and
+place it on a colored target region. In Push, the operator
+uses the end-effector to push the cube toward the target
+without lifting it, starting from a nearby initial position. In
+both tasks the target usually lies outside the workspace of the
+arm at the stance in which the episode starts, so the recorded
+actions contain coordinated base and arm motion rather than
+manipulation alone. Either a red or a white cube are used
+for the collection, and textual instructions are generated from
+templates over the object and target descriptions, which varies
+the language input across episodes.
+The collection comprises 289 demonstrations, 259 of
+grasping and 30 of pushing, of which 258 are used for fine-
+tuning and 31 are held out for validation.
+Fine-tuning starts from the released MolmoAct2 post-
+training checkpoint, of 5.5B parameters, and follows the
+TABLE II: Fine-tuning configuration.
+Parameter
+Value
+Control rate
+5 Hz
+Action dimension
+11
+Prediction horizon
+10 actions (2 s)
+Adapter rank
+512
+GPU
+RTX 6000 Pro
+
+
+(a) Start
+(b) Approach
+(c) Grasp
+(d) Lift
+(e) Transport
+(f) Release
+Fig. 5: Snapshot of representative successful autonomous rollout of our fine-tuned vision-language-action model. The policy receives
+the two camera streams, the proprioceptive state, and the language instruction “Pick the red cube and place it on the blue base”, and
+commands the base and the arm through the same interface used during teleoperation, presented in Sec. III-B. In time order: the base
+approaches the cube (a, b), the robot pitches its body and the gripper closes (c), the cube is lifted and carried toward the target while the
+base repositions (d, e), and it is released on the target (f).
+strategies reported by its authors, adapting the vision-language
+backbone with rank-512 low-rank adapters [32] and training
+the action head in full. Table II reports the rest of the
+configuration. We select the best checkpoint based on its
+open-loop performance on held-out episodes, where predicted
+action chunks are compared against recorded commands, then
+deploy that checkpoint on the robot.
+Deployment. On the robot the policy replaces the operator
+without any change below the interface: it receives the two
+camera streams, the proprioceptive state, and a language
+instruction, and writes the same command that the teleop-
+eration layer produced during collection, at the same rate.
+Example instructions include “Move the red cube to the blue
+square” and “Pick up the red cube and place it in the blue
+square.” Figure 5 shows a successful rollout, in which the
+model drives the base toward the cube, pitches the robot’s
+body to extend the reach of the arm, closes the gripper, and
+carries the cube to the target region, coordinating base and
+arm within one continuous motion. The trials are assessed
+qualitatively, with respect to the ability to solve the task from
+different starting positions. The policy learns the pick-and-
+place motion in the simplest scenarios, specifically when
+both the cube and the target are visible and no complex
+reorientation is required. Complications arise when the target
+region leaves the camera’s field of view, since the policy must
+then reorient and navigate based solely on surrounding visual
+cues, and it sometimes walks and moves the cube in the
+wrong direction. Another challenging scenario occurs when
+the base stops too early or too far from the target region,
+so that the cube is released slightly away from it. In these
+situations the smooth transition between motions leads the
+policy to perform corrections, nudging the cube toward the
+target or re-approaching it for a second grasp until the task
+is completed.
+V. LIMITATIONS AND APPLICABILITY
+The residual of (3) is computed from a model of the arm
+alone. The floating base is treated as inertial, so whenever it
+accelerates the resulting inertial effects appear at the joints
+and the observer attributes them to the environment. A second
+error comes from the identified inertial and friction parameters,
+whose residual mismatch, dominated by the static friction
+of the joint drives, biases the estimate as a function of the
+configuration. Neither contribution can be removed entirely,
+and together they set a free-motion floor, which is the smallest
+interaction the operator can perceive. Compensating the base
+acceleration explicitly, from the base state already estimated
+on board, would reduce the noise in the force channel, and
+we leave it to future work.
+These errors affect what the operator perceives but not the
+stability of the interface. The passivity layer of Sec. III-A.3
+accounts for measured power flow, so an inaccurate residual
+costs force feedback accuracy rather than safety. The force
+channel is designed as an extension of the position channel,
+such that disabling it does not change the recorded action
+nor the collection pipeline.
+We found that the force channel is most useful when the
+environment constrains the end-effector motion in ways not
+visible to onboard cameras, and when the resulting interaction
+is sustained rather than impulsive. Opening a door or rotating
+a valve constrains the end effector along a path that the
+operator has to follow, and pushing or pulling a load requires
+regulating a force over the whole motion. In these cases the
+operator perceives the constraint directly instead of inferring
+
+
+it from the position error. Tasks dominated by free-space
+motion, or in which contact is brief and light with respect to
+the floor reported above, gain correspondingly less from the
+force channel.
+The evaluation covers a single hardware configuration.
+The autonomous policy is trained on two task families and
+assessed qualitatively over a limited number of trials, and
+a quantitative study of the success rate against the dataset
+size, or of the contribution of contact feedback to the quality
+of the collected demonstrations, would require a controlled
+comparison that we leave to future work.
+VI. CONCLUSIONS
+We presented a teleoperation and data-collection framework
+for an arm-equipped quadruped in which a single operator
+commands base velocity, body pitch, arm configuration, and
+gripper through one 11-dimensional action, and demonstra-
+tions are recorded in the same action the learned policy later
+writes. Holding it fixed across the two regimes removes the
+conversion stage that usually separates a recorded demonstra-
+tion from a deployable policy: the exported episodes are used
+for fine-tuning as they are, and the resulting policy is executed
+by the controllers already in place. We additionally showed
+a successful fine-tuning of MolmoAct2 on pick-and-place
+data collected with the framework, obtaining a policy that
+coordinates base and arm motion on the robot. Beyond that,
+the framework simplifies the collection of new data and the
+addition of new tasks through the same recording pipeline,
+making extensions along this axis straightforward.
+REFERENCES
+[1] H. Fang, J. Duan, D. Clay et al., “Molmoact2: Action reasoning
+models for real-world deployment,” 2026. [Online]. Available:
+https://arxiv.org/abs/2605.02881
+[2] C. D. Bellicoso, K. Kr¨amer, M. St¨auble et al., “Alma - articulated
+locomotion and manipulation for a torque-controllable robot,” in 2019
+International Conference on Robotics and Automation (ICRA), 2019,
+pp. 8477–8483.
+[3] Z. Fu, X. Cheng, and D. Pathak, “Deep whole-body control: Learning
+a unified policy for manipulation and locomotion,” in Conference on
+Robot Learning (CoRL), 2022.
+[4] G. Pan, Q. Ben, Z. Yuan et al., “Roboduet: Learning a cooperative
+policy for whole-body legged loco-manipulation,” 2024. [Online].
+Available: https://arxiv.org/abs/2403.17367
+[5] O. X.-E. Collaboration, A. O’Neill, A. Rehman et al., “Open X-
+Embodiment: Robotic learning datasets and RT-X models,” https://
+arxiv.org/abs/2310.08864, 2023.
+[6] M. Kim, K. Pertsch, S. Karamcheti et al., “Openvla: An open-source
+vision-language-action model,” arXiv preprint arXiv:2406.09246, 2024.
+[7] Y. Niu, Y. Zhang, M. Yu et al., “Human2locoman: Learning versatile
+quadrupedal manipulation with human pretraining,” in Robotics:
+Science and Systems (RSS), 2025.
+[8] Z. Wu, Y. Zhou, X. Xu, Z. Wang, and H. Yan, “ MoManipVLA:
+Transferring Vision-language-action Models for General Mobile
+Manipulation ,” in 2025 IEEE/CVF Conference on Computer Vision
+and Pattern Recognition (CVPR).
+Los Alamitos, CA, USA: IEEE
+Computer Society, Jun. 2025, pp. 1714–1723. [Online]. Available:
+https://doi.ieeecomputersociety.org/10.1109/CVPR52734.2025.00167
+[9] P. Wu, Y. Shentu, Z. Yi, X. Lin, and P. Abbeel, “Gello: A general,
+low-cost, and intuitive teleoperation framework for robot manipulators,”
+2023.
+[10] A. A. Team, J. Aldaco, T. Armstrong et al., “Aloha 2: An enhanced low-
+cost hardware for bimanual teleoperation,” ArXiv, vol. abs/2405.02292,
+2024. [Online]. Available: https://api.semanticscholar.org/CorpusID:
+269605618
+[11] Z. Fu, T. Z. Zhao, and C. Finn, “Mobile aloha: Learning bimanual
+mobile manipulation with low-cost whole-body teleoperation,” in
+Conference on Robot Learning (CoRL), 2024.
+[12] X. Cheng, J. Li, S. Yang, G. Yang, and X. Wang, “Open-television:
+Teleoperation with immersive active visual feedback,” arXiv preprint
+arXiv:2407.01512, 2024.
+[13] Z. Zhao, L. Yu, K. Jing, and N. Yang, “Xrobotoolkit: A cross-platform
+framework for robot teleoperation,” in International Symposium on
+System Integration, 2026.
+[14] A. Khazatsky, K. Pertsch, S. Nair et al., “DROID: A large-scale in-the-
+wild robot manipulation dataset,” in Proceedings of Robotics: Science
+and Systems, 2024.
+[15] C. Zhou, C. Peers, Y. Wan, R. Richardson, and D. Kanoulas,
+“TeLeMan: Teleoperation for legged robot loco-manipulation using
+wearable imu-based motion capture,” 2022. [Online]. Available:
+https://arxiv.org/abs/2209.10314
+[16] D. Seidel, A. Schmidt, X. Luo et al., “Toward space exploration on
+legs: Iss-to-earth teleoperation experiments with a quadruped robot,”
+in 2024 IEEE Conference on Telepresence, 2024, pp. 10–15.
+[17] Y. T. Tefera, I. Sarakoglou, S. N. Deore et al., “Robot teleoperativo:
+Collaborative cybernetic systems for immersive remote teleoperation,”
+in 2024 IEEE Conference on Telepresence, 2024, pp. 1–4.
+[18] X. J. Z. X. J. Z. Y. Gao and K. Hashimoto, “Human–robot interaction
+using dynamic hand gesture for teleoperation of quadruped robots with
+a robotic arm,” Electronics, 2025.
+[19] C. Chi, Z. Xu, C. Pan et al., “Universal manipulation interface: In-
+the-wild robot teaching without in-the-wild robots,” in Proceedings of
+Robotics: Science and Systems (RSS), 2024.
+[20] H. Ha, Y. Gao, Z. Fu, J. Tan, and S. Song, “UMI on legs: Making
+manipulation policies mobile with manipulation-centric whole-body
+controllers,” in Proceedings of the 2024 Conference on Robot Learning,
+2024.
+[21] Nintendo, “Joy-con controllers,” Nintendo Switch Support, 2026,
+accessed: 2026-08-13. [Online]. Available: https://www.nintendo.com/
+my/support/switch/controller/joycon.html
+[22] G. Turrisi, A. Bratta, G. Minelli et al., “Binwalker: Development and
+field evaluation of a quadruped manipulator platform for sustainable
+litter collection,” in 2026 IEEE/ASME International Conference on
+Advanced Intelligent Mechatronics (AIM), 2026, pp. 1–8.
+[23] Y. Nistic`o, J. C. V. Soares, L. Amatucci, G. Fink, and C. Semini,
+“Muse: A real-time multi-sensor state estimator for quadruped robots,”
+IEEE Robotics and Automation Letters, vol. 10, no. 5, pp. 4620–4627,
+2025.
+[24] A. De Luca and R. Mattone, “Sensorless robot collision detection and
+hybrid force/motion control,” in Proc. IEEE Int. Conf. Robotics and
+Automation, 2005, pp. 999–1004.
+[25] J. G. W. Wildenbeest, D. A. Abbink, C. J. M. Heemskerk, F. C. T.
+van der Helm, and H. Boessenkool, “The impact of haptic feedback
+quality on the performance of teleoperated assembly tasks,” IEEE
+Transactions on Haptics, vol. 6, no. 2, pp. 242–252, 2013.
+[26] C. Cuan, A. M. Okamura, and M. Khansari, “Leveraging haptic
+feedback to improve data quality and quantity for deep imitation
+learning models,” IEEE Transactions on Haptics, vol. 17, no. 4, pp.
+984–991, 2024.
+[27] D. A. Lawrence, “Stability and transparency in bilateral teleoperation,”
+IEEE Transactions on Robotics and Automation, vol. 9, no. 5, pp.
+624–637, 1993.
+[28] M. Franken, S. Stramigioli, S. Misra, C. Secchi, and A. Macchelli,
+“Bilateral telemanipulation with time delays: A two-layer approach
+combining passivity and transparency,” IEEE Transactions on Robotics,
+vol. 27, no. 4, pp. 741–756, 2011.
+[29] B. Hannaford and J.-H. Ryu, “Time-domain passivity control of haptic
+interfaces,” IEEE Transactions on Robotics and Automation, vol. 18,
+no. 1, pp. 1–10, 2002.
+[30] F. Ferraguti, C. Secchi, and C. Fantuzzi, “A tank-based approach to
+impedance control with variable stiffness,” in Proc. IEEE Int. Conf.
+Robotics and Automation, 2013, pp. 4948–4953.
+[31] R. Cad`ene, S. Aliberts, F. Capuano et al., “Lerobot: An open-source
+library for end-to-end robot learning,” ArXiv, vol. abs/2602.22818,
+2026. [Online]. Available: https://api.semanticscholar.org/CorpusID:
+286082457
+[32] E. J. Hu, yelong shen, P. Wallis et al., “LoRA: Low-rank
+adaptation of large language models,” in International Conference
+on Learning Representations, 2022. [Online]. Available: https:
+//openreview.net/forum?id=nZeVKeeFYf9

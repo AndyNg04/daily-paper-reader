@@ -1,0 +1,329 @@
+Title: REM: What to Store, When to Recall, What to Forget in Experience Memory for Coding Agents
+
+URL Source: https://arxiv.org/pdf/2610.27377v1
+
+Published Time: Wed, 21 Oct 2026 00:28:02 GMT
+
+Number of Pages: 16
+
+Markdown Content:
+# REM: What to Store, When to Recall, What to Forget in Experience Memory for Coding Agents 
+
+Xinyi Lisa Chen 1∗‡ Pedro Herrero-Vidal 2∗† Xiaohan Chen 2 Xiaojing Yu 2
+
+Cris Liu 2 Bingqing Song 2 Bin Xu 2 Suleiman A. Khan 2 You-Lin Chen 2†
+
+> 1
+
+Yale University 2Amazon 
+
+xinyi.lisa.chen@yale.edu {phvidal, chxh, yyxjing, licris}@amazon.com {bingqiso, binxu, suleimkh, cyoulin}@amazon.com 
+
+## Abstract 
+
+Large language model (LLM) agents now autonomously complete long-horizon tasks, such as repository-level coding, through hundreds of think-act steps, yet the experience each run produces is rarely reused on the next. Prior memory systems concentrate on retrieval, finding the most relevant past trajectory. Retrieval cannot observe the running agent, so it cannot decide whether the agent needs an experience, at which point, or for how long. We introduce REM (Reusable Experience Memory), a framework that manages the memory lifecycle from inside the agent’s think-act loop through three explicit decisions. What to store: each completed trajectory is consolidated into a phase-structured document, two orders of magnitude smaller than the trajectory. When to recall: the document is injected at the start of the task; the costlier implementation record is withheld until an in-loop gate detects the agent struggling. What to forget: the record is evicted after a single exposure. On repository-level bug fixing (SWE-ContextBench Lite), REM retrieves the related trajectory more accurately than every state-of-the-art memory system (68.7% vs. 55.6% match@1) and improves, in every replicate, end-task resolution (27.6% vs. 24.9%) at 17% lower cost. Injecting the same experience as a summary or raw trajectory, even when oracle-retrieved, does not. Ablating any of the three decisions reduces resolution. Altogether, these results demonstrate that the bottleneck in experience reuse is not retrieval fidelity but how experience is stored and governed across its lifecycle, opening a control-theoretic perspective on agent memory. 
+
+## 1 Introduction 
+
+LLM agents now run unattended for hours, solving exploratory tasks such as repository-level coding [Jimenez et al., 2024] and text-to-SQL [Yu et al., 2018] through hundreds of think-act steps. Each run produces a detailed trace of exploration, dead ends, and an eventual solution, and a growing ecosystem of memory layers [Chhikara et al., 2025, Zhu et al., 2026] and experience-reuse frameworks [Shinn et al., 2023, Zhao et al., 2024, Wang et al., 2024, 2023] promises to make that experience compound. In practice it rarely does. Most work targets the middle of the lifecycle: retrieving the most relevant past trajectory. Three findings from this literature suggest retrieval is not where reuse fails. First, agents use only a fraction 
+
+> *These authors contributed equally to this work.
+> †Corresponding authors.
+> ‡Work done while an intern at Amazon. 40th Conference on Neural Information Processing Systems (NeurIPS 2026). Workshop: Continual Learning for Enterprise AI Agents (CLEA). arXiv:2610.27377v1 [cs.AI] 19 Oct 2026
+
+of the context they receive, and retrieval alone is insufficient because they must actively interpret what they are given [Zhu et al., 2026]. Second, irrelevant or poorly placed context degrades performance, as models are distracted by irrelevant material and use long contexts unevenly by position [Shi et al., 2023, Liu et al., 2024]. Third, abstraction transfers better than detail: Hu et al. [2026] report negative transfer from detailed trajectories, concentrated on the hard cases where guidance is most needed. These findings share a cause: retrieval cannot observe the state of the running agent, so what happens to a retrieved experience once it enters a long-running loop is left unmanaged. This is most consequential where an agent runs repeatedly against an evolving codebase, its accumulated experience a standing asset whose compounding is the long-run aim of continual learning for agents [Hu et al., 2026]. We take one step toward that aim, reusing a fixed pool of past runs within a single new run, and find the state of the receiving agent decisive: naively recalled memories leave resolution unchanged even when an oracle supplies the correct experience, and the same memory that helps mid-capability agents costs the strongest ones (§5.5), while agents reference only about a quarter of the identifiers in a raw trajectory and half of those in a prose summary (§5.3). We introduce REM (Reusable Experience Memory), which manages the memory lifecycle from inside the agent’s think-act loop, where the agent’s state is observable (Figure 1), through three explicit decisions. What to store: each trajectory is consolidated into one phase-structured document 
+
+organized by the four phases shared by diagnostic work, localize , understand , fix , and verify . It is two orders of magnitude smaller than the trajectory and serves as both the retrieval unit and the injected context, so stored tokens are spent once. When to recall: the document is injected at task start, while the trajectory’s implementation record , far costlier and more distracting, is withheld until an in-loop node observes the agent struggling. What to forget: the record is evicted after a single exposure, while the document stays in context for the whole run. Every stage is a swappable policy slot, and the extraction schema, the only domain-specific artifact, is discovered automatically from example trajectories (§3.3). We evaluate on SWE-ContextBench Lite [Zhu et al., 2026], judging memory by end-task resolution rather than retrieval accuracy alone. This work presents the following main contributions. • From which to when . The value of a recalled experience depends on the state of the receiving agent, which makes agent memory a control problem, not a lookup problem. • REM. A framework that governs the full memory lifecycle from inside the agent’s loop—phased consolidation, a two-tier read path, struggle-gated recall, and one-shot eviction—with an automati-cally discovered extraction schema, its only domain-specific artifact (§3). • State-of-the-art retrieval; improved resolution at lower cost. The phased document is the most accurate retrieval unit on SWE-ContextBench Lite by a 13-point margin, and REM improves resolution in every replicate while cutting cost 17%, whereas start-of-run summaries and raw trajectories do not improve resolution, even with an oracle (§5.2, §5.1). • Decision-level ablations. Isolating each lifecycle decision shows the stored form drives the gains, while gating and eviction keep a costly second tier from doing harm, and a utilization analysis links the effect to how much injected context agents actually use (§5.4, §5.3). 
+
+## 2 Related work 
+
+Agent memory and experience reuse. Self-improvement frameworks store verbal reflections, distilled insights, workflows, or skill libraries and read them back on later tasks [Shinn et al., 2023, Zhao et al., 2024, Wang et al., 2024, 2023], while production memory layers shred histories into factual items or chunks behind a search interface [Chhikara et al., 2025]. How well experience transfers depends on how it is stored, with abstract procedural memories transferring more reliably than detailed trajectories [Hu et al., 2026]. These stored units sit at the extremes of granularity, either isolated facts that lose connective structure or whole trajectories that bury the identifying tokens, and their recall is eager, delivered at the start of the next task. Structured representations of experience have also been proposed, as distilled reasoning strategies [Ouyang et al., 2026], context-aware guidelines selected for the agent’s current state [Fu et al., 2024], and subtask-level memories aligned with software-engineering workflows [Shen et al., 2026]. REM instead consolidates each trajectory into one phase-structured document that is both the retrieval unit and the injected context, discovers its extraction schema automatically, and evaluates it on the resolution and cost of the receiving run against the memory systems benchmarked on the same tasks. 2Read path (at task start)   
+
+> ? ?
+> ✕
+> ? ?
+> ✕
+> ? ?
+> ✕
+> past trajectories LLM schema extraction
+> 1 Localize 2 Understand 3 Fix pattern 4 Verify
+> phased structured docs
+> 100 ×smaller
+> experience pool
+> Automatic schema discovery from ~ example trajectories
+> domain setup
+> coding: files, functions… SQL: tables, columns…
+> ⚙
+> Write path (after episode ends)
+> ACT OBSERVE
+> Running agent loop
+> New task
+> cosine top-5 similar
+> most related
+> phased doc
+> THINK
+> In-loop recall node (during the run)
+> mount at beginning struggle signal
+> implementation record
+> Raw edits + verifications from most related trajectory inject when struggling
+> evict after one exposure evict once seen LLM rerank
+
+# REM : Reusable Experience Memory 
+
+> 9
+
+Figure 1: REM manages the memory lifecycle in three stages around the agent’s think-act loop. Left: the write path consolidates each completed trajectory into a phase-structured document (localize , understand , fix pattern , verify ); the extraction fields come from a domain module discovered automatically from example trajectories. Top right: the read path retrieves candidates by cosine similarity, reranks with one LLM call, and injects the top document at the start of the run. Bottom right: the in-loop recall node recalls the implementation record on a struggle signal and evicts it after one exposure. 
+
+Deciding when to retrieve and what to keep. Adaptive retrieval learns whether a query needs retrieval at all [Asai et al., 2024], and context-curation policies learn to insert and delete material from an agent’s working context under a budget [Zhang et al., 2026]. Concurrent work casts memory operations as a learned control policy over when to retrieve, inject, and forget [Jiang et al., 2026]. The machinery for deciding whether to retrieve is well developed; what happens to retrieved experience after it enters a long-running loop is not. REM addresses that second half, the handling of experience after injection, with the simplest sufficient mechanism, an in-loop gate that withholds costly detail until the run shows struggle and evicts it after one exposure, and reports what each decision is worth in end-task resolution and cost. 
+
+Context sensitivity and evaluation. Language models are degraded by irrelevant input and use long contexts unevenly by position [Shi et al., 2023, Liu et al., 2024], so injected experience is not free. Agentic-coding benchmarks have moved from patch correctness [Jimenez et al., 2024] toward measuring reuse, and SWE-ContextBench reports that correctly selected summaries help while unfiltered context does not, concluding that agents must interpret what they receive [Zhu et al., 2026]. We take that as the starting point and quantify uptake directly, measuring which injected identifiers a run references and whether that predicts resolution. 
+
+## 3 An experience memory for coding agents 
+
+3.1 Why a store needs a lifecycle policy 
+
+Reusing a trajectory is not mainly about finding it. One repository-level run produces tens of thousands of tokens, most recording abandoned paths. Stored raw, a trajectory fails twice: as a retrieval unit its few identifying tokens are diluted by exploration noise, and as injected context its size displaces the new agent’s own reasoning. Shattering it into factoids removes the noise but also the structure that makes a trajectory a solution. The first decision, what to store , is therefore the choice of a form that keeps the structure of a solution while discarding the search that produced it. 3The other two decisions cannot be made by the store. Whether injected context helps depends on the state of the receiving agent: one that has already localized the defect gains little and can be derailed, whereas one that has exhausted its hypotheses stands to gain. That state is invisible at retrieval time and changes as the run proceeds, so injection must be decided while the agent works, by a component inside the loop, the second decision, when to recall . Once injected, context left in place biases every later turn toward another run’s solution, so the policy must also say when to remove it, the third decision, what to forget .
+
+3.2 Framework overview 
+
+REM wraps the loop with one stage per decision (Figure 1, Algorithm 1 in Appendix A): the write path consolidates finished trajectories into phased documents, the read path retrieves the document most related to a new task, and the in-loop node decides when the implementation record is injected and removed. The pipeline is designed for any domain whose work follows localize , understand , fix ,and verify , such as debugging code, text-to-SQL repair, or incident response; the domain enters only through a swappable module of extraction fields (§3.3). 
+
+Write path. Each stored trajectory is a transcript of 55K–170K tokens. We flatten it to text, keeping user text, assistant text, and tool-call inputs while dropping tool results, which shrinks it roughly fifteenfold with no truncation. One LLM call extracts a schema of typed fields (for coding: files, functions, root cause, fix approach, tests), and a deterministic renderer lays them out as a four-phase document averaging 270 tokens, more than two orders of magnitude smaller than the transcript. In memory terms this is consolidation from an episodic trace into a semantic one: the solution’s structure survives while the exploration noise does not. 
+
+Read path. We embed the pool and the new task’s problem statement with an off-the-shelf text-embedding model, pass the five nearest documents by cosine similarity to one LLM rerank call, and inject the selected document. The reranker never abstains; an unparseable reply falls back to the nearest document by cosine similarity. The stage is deliberately simple: our hypothesis is that structuring what is stored matters more than how it is searched. 
+
+Recall node: two tiers, a struggle gate, eviction. The 270-token document is injected at the start of the run to orient the agent. The implementation record , the raw edits and verifications from the same trajectory capped at 12K characters, is injected only on demand, the first time the agent fails a validation , our simplest observable evidence that its own approach is not working (edits to test files are filtered so self-written tests do not count as struggle). After one exposure the record is evicted and does not persist in the cached prefix; the phased document, by contrast, stays in context for the whole run. §5.4 ablates both halves, comparing eager against gated injection and eviction against persistence. 
+
+3.3 Automated schema discovery and measurement 
+
+The extraction schema is the memory’s only domain-specific artifact, and a meta-loop learns it from a few example trajectories (nine trajectories from the experience pool, none of them an evaluation task): an LLM writes a candidate prompt, an LLM judge scores each extraction from 1 to 5 on coverage, specificity, discriminability, conciseness, and structural consistency, and weak dimensions are revised for up to five iterations. Porting to a new domain therefore needs example trajectories, not prompt engineering, and the discovered schema matches or exceeds the hand-written one (§5.2; Appendix G). 
+
+Measurement. To test whether agents engage with what they receive, an offline probe extracts 
+
+identifiers (file paths and CamelCase or snake_case names of at least four characters, minus a stoplist) from the exact injected text and records which appear in the agent’s own text or tool-call inputs, excluding tool results and discounting identifiers the paired no-memory run already surfaced. We report coverage , the share of injected identifiers a run references; substring matching establishes presence rather than causal use, so we read it as mechanism evidence. Resolution contrasts are paired by task and tested with the two-sided exact McNemar test, pooled over replicates; a per-task Wilcoxon signed-rank test on resolve counts leads to the same conclusions (Appendix E); utilization measures use Cohen’s d and the two-sided Mann-Whitney test. With 99 tasks per condition we read 4300 400 500 600 700 800 
+
+> cost-weighted tokens per task (thousands)
+> 22 23 24 25 26 27 28
+> resolution rate (%)
+
+Figure 2: Every configuration that injects the phased document matches or exceeds no-memory resolution, and the retrieved ones do so at lower cost; summaries and raw trajectories, even oracle ones, fall below it. Resolution against cost per task (Sonnet 4.5); up and to the left is preferable. Cost is weighted by token type (fresh ×1, cache write ×1.25, cache read ×0.1, output 
+
+×5, the agent model’s relative list prices [Anthropic, 2026]). Blue: phased document (diamond: document alone; triangle: document and implementation record). Gray: summary or raw trajectory. Hollow: oracle. Black, dashed: no memory. Filled blue points and no memory are three-replicate means; hollow and gray points are single runs. a single contrast as directional and report per-replicate counts for every multi-replicate condition (Table 11); full temporal measures are in Appendix F. 
+
+## 4 Experimental setup 
+
+Benchmark and agent. SWE-ContextBench Lite [Zhu et al., 2026] supplies 99 repository-level bug-fixing tasks, a pool of 300 solved trajectories, and a label marking the trajectory related to each task, which separates retrieval quality from the effect of the retrieved trajectory. A run is resolved 
+
+when the benchmark’s held-out tests pass on its patch. Every condition runs the same agent on all 99 tasks, built on the Strands framework with six tools ( bash , read , write , edit , grep , glob ) in a per-task Docker container, capped at 100 turns and a wall-clock limit. Conversation history is never truncated, so injected-context effects are not confounded with history eviction. Claude Sonnet 4.5 is the agent unless stated; §5.5 varies it across five models. 
+
+Outcome measures. Resolution is intention-to-treat over all 99 tasks, so a run ending without an applicable patch counts as unresolved. Match@1 is the fraction of tasks whose top-ranked trajectory is the labeled one, comparable to the benchmark’s reported top-1 rate [Zhu et al., 2026]. Treating the label as uniquely correct understates retrieval quality, so resolution is primary and match@1 secondary. 
+
+Conditions. A condition is one memory configuration; all share the agent and differ only in what enters context and when. No memory supplies the problem statement alone. Start-of-run conditions inject once: Wrong summary (an unrelated summary), Free summary /Free trajectory (the agent browses and selects), and Oracle summary /Oracle trajectory (the labeled trajectory as summary or raw transcript). Holding the labeled trajectory fixed, Oracle phased document varies its stored form, with the same fields as REM’s document plus cautionary guidance and test commands ( ∼540 tokens). REM injects the retrieved document (hand-written schema; the discovered schema is compared on retrieval in §5.2) and applies the recall policy of §3.2; its ablations inject the record eagerly, on struggle, or never, and evict or pin it. REM, no-memory, and the recall ablations were run three times on Sonnet 4.5 (pooled 297 task-runs, exact McNemar); other conditions were run once and read as directional. Tasks are treated as independent, which is imperfect when several share a repository. Per-condition accounting is in Appendix E; two tasks have no oracle run because their labeled trajectory is absent from the benchmark’s released pool. 5Method Stored unit Candidates Match@1                         
+
+> Free trajectory †raw trajectory ( ∼105K tok) self-selected 22.2% Supermemory managed chunks ( ∼30 tok) 15 23.2% Mem0 extracted facts ( ∼12 tok) 325.3% Free summary †trajectory summary ( ∼373 tok) self-selected 35.4% OpenViking indexed file chunks ( ∼246 tok) 338.4% LangMem extracted memory items ( ∼48 tok) 10 55.6% REM, hand-written schema phased document ( ∼270 tok) 566.7%
+> REM, discovered schema phased document ( ∼305 tok) 568.7%
+
+Table 1: The phase-structured document is the most accurate retrieval unit, ahead of every existing memory system. Match@1 over the 99 tasks, after reranking for REM. Numbers for existing systems from Zhu et al. [2026], under each system’s own retrieval configuration; our token counts are approximated as one token per four characters. †From our runs, agent searches the pool. 
+
+## 5 Results 
+
+5.1 REM resolves more tasks at lower cost Start-of-run summaries and trajectories do not move resolution. The five summary and trajec-tory conditions resolve 22–24 of 99 tasks against 23 for no memory in the same replicate (24.9% over three; Figure 2), including the oracle conditions that receive the labeled trajectory, so relevance alone does not help. The benchmark’s oracle-summary gain (34.3% vs. 26.3%; Zhu et al., 2026) does not reproduce under our agent (23.2% vs. 23.2%). The phased form is the exception: the same oracle trajectory rendered as a phased document resolves 26 in a single run (Figure 2; Table 7), consistent with the stored form, not relevance, driving the gain (§5.2–5.4). Cost still moves: a raw oracle transcript raises cost-weighted tokens per task from 452K to 768K and shortens runs from 70 to 50 turns, with unappliable patches up from 7 to 11, so the agent trades its own exploration for the transcript without resolving more. 
+
+REM improves resolution and cost at once. It resolves 27.6% against 24.9% without memory (+2.7 points, +11% relative), with per-replicate counts of 27, 29, 26 exceeding no-memory’s 23, 26, 25 in every replicate; against the strongest summary or trajectory condition the margin is 3.4 points. Of 297 paired task-runs, 20 resolve under REM that fail without memory and 12 the reverse. At 99 tasks this paired difference is not significant (exact McNemar p = 0 .22 ), so we rest the resolution claim on its consistency across every replicate rather than on a single contrast, and treat the robust wins as the retrieval margin (§5.2), which far exceeds the few-point run-to-run noise, and the cost reduction. Cost falls 17%, from 452K to 374K tokens per task, with six fewer turns, mean wall-clock time down from 11.9 to 8.8 minutes, and unappliable patches down from 7 to 4 (Appendix C). Every retrieved phased-document configuration matches or improves on no memory in both respects, and the document alone already resolves 26.9% at essentially REM’s cost (Figure 2; §5.4). Correct content injected at the start as a summary or trajectory does not raise resolution, whereas the phased document yields both, with or without the recall policy: what converts experience into resolved tasks is the form in which it is stored and the management of its lifecycle, not the relevance of what is retrieved. 
+
+5.2 REM retrieves the related trajectory more accurately than existing state-of-the-art systems 
+
+We score the phased document as a retrieval unit against the four state-of-the-art memory systems benchmarked on SWE-ContextBench Lite and the two agent self-search settings, by match@1 over the same 99 problem statements. Among these existing systems, match@1 tracks neither the stored-unit size nor the candidate budget (Table 1): LangMem leads at 55.6% from ten candidates, Supermemory reaches 23.2% from fifteen, and self-search over raw trajectories is weakest at 22.2%. REM attains 68.7% match@1, 13.1 points above the strongest existing system and at least 30 above every other, a margin far larger than the few-point run-to-run variation at 99 tasks. Both stages contribute: cosine similarity selects the labeled trajectory for 62.6% of tasks, already 7 points above LangMem before any rerank, and the rerank raises this to 68.7%, realizing 87% of first-stage recall 6Injected form Tokens Injected Referenced Coverage                                     
+
+> Wrong summary ∼380 8.9 0.3 3.4% Free trajectory ∼105K 67.7 17.9 26.7% Oracle trajectory ∼111K 67.7 18.1 27.2% Oracle summary ∼390 9.3 4.3 45.7% Free summary ∼373 9.3 4.8 52.5% Oracle phased document ∼540 12.4 7.8 64.7% REM phased document ∼270 11.0 7.5 69.1%
+> Resolved vs. unresolved, d(p)+0 .10 (0.84) +0 .18 (0.10) +0 .20 ∗(0.03)
+
+Table 2: The phased document is read more completely than any other stored form, and coverage tracks resolution. Tokens are the stored unit’s size, approximated as one token per four characters; the agent’s file reader returned about half of each oracle trajectory ( ∼54K). Identifiers injected/referenced are per-run means; coverage is their ratio (Sonnet 4.5). The final row is the standardized mean difference between resolved and unresolved runs (two-sided Mann-Whitney p), pooled over the four start-of-run conditions ( n = 91 resolved, 284 unresolved); ∗p < 0.05 . REM row is a mean over three replicates; others are one. (Appendix D). It also needs a smaller budget, recovering the labeled trajectory within five candidates for 78.8% of tasks where LangMem needs ten for 73.3%. Replacing the hand-written schema with the discovered one moves match@1 from 66.7% to 68.7%, so the write path needs no manual prompt engineering. The first-stage primitive, cosine similarity over text embeddings, is the same one Mem0 and LangMem use, which places the difference in the stored unit. The size-matched contrast points the same way: OpenViking returns chunks of ∼246 tokens, close to the phased document’s 270, yet reaches 38.4%, suggesting that structure rather than length is what retrieves: factoids of 12–48 tokens discard connective structure and raw trajectories of ∼105K tokens bury the identifying tokens, while a phased document of a few hundred tokens keeps what identifies a run and discards the search that produced it. 
+
+5.3 Agents read the phased document more completely than any other stored form 
+
+To explain REM’s advantage we test whether it comes from more complete use of the injected context, holding the labeled trajectory fixed and varying its stored form (Table 2). Uptake separates the forms sharply. The unrelated summary is nearly ignored at 3.4%, confirming the probe tracks use rather than coincidence. The raw trajectory is referenced least (26.7–27.2%), prose summaries reach 45.7–52.5%, and the phased document reaches 64.7% from an oracle and 69.1% under REM. Two comparisons locate the cause: REM’s phased document is smaller than the oracle summary ( ∼270 vs. 390 tokens) yet read 1.5 × as completely (69.1% vs. 45.7%), so organization, not volume , drives uptake; and the oracle trajectory offers 5.5 times as many identifiers as the oracle phased document at about 200 times the tokens yet returns only 2.3 times as many referenced. Coverage also tracks success: among the four start-of-run forms, resolved runs reference more of what they were given than unresolved runs ( d = +0 .20 , p = 0 .03 ), an association carried by how much of the context a run takes up rather than how much it was given; under REM’s recall policies, which all inject the same phased document, coverage does not separate outcomes ( d = −0.06 , p = 0 .34 ) (Appendix F). Uptake is thus what the write path should maximize, and the phased document maximizes it. 
+
+5.4 Gating on struggle and evicting after use each pay off 
+
+Holding the retrieved document fixed, we vary only the policy for the implementation record (Table 3; Figure 2). Gating beats eager injection : eager resolves 25.3% against 27.6% for REM, a 2.3-point gap that never reverses across replicates (the two tie in the third); the policies disagree on 19 of 297 task-runs and gating resolves 13 of them, while injecting the record in 58% of runs rather than all lowers cost from 423K to 374K tokens. Eviction beats pinning , the most consistent contrast: pinning resolves 24.9% against 27.6% in all three replicates, and since the two policies draw near-identical coverage (50.3% vs. 50.5%), what eviction changes is not how much the agent reads but how long the record shapes later turns. The record’s net contribution is nonetheless small: never injecting it resolves 26.9%, within 0.7 points of REM and tied with it in the first replicate, so the gate and eviction mainly keep a costly second tier from doing harm, while the source of the advantage is the 7Recall policy for the record Injected in Resolution (sd) ∆ (p) Cost tok/task                     
+
+> Never, document only 0% 26.9% (1.5) −0.7(0.82) 374K Eager, at first source edit 100% 25.3% (1.7) −2.3(0.17) 423K On struggle, then pinned 56% 24.9% (1.5) −2.7(0.08) 353K
+> On struggle, then evicted (REM) 58% 27.6% (1.5) —374K
+
+Table 3: Both gating on struggle and evicting after use improve resolution over the other record policies. Every row injects the same retrieved document and varies only the record policy (Sonnet 4.5). Resolution is the mean over three replicates of 99 tasks, sd across replicates in parentheses. ∆
+
+is the difference from REM in points, exact McNemar p over 297 paired task-runs; none reaches 
+
+p < 0.05 at this sample size. Per-replicate counts in Table 11. stored form (§5.2–5.3). The model sweep agrees: the document alone matches or exceeds full REM on three of the four other models (Appendix E), so across agents the record rarely adds to what the document provides. 
+
+5.5 Memory helps agents in a capability band and costs the strongest ones 
+
+Repeating the comparison across five models spanning 20–53% unaided resolution, with memory and policy fixed, the effect’s sign depends on the recipient (Figure 3). The three models at or below 31.3% never lose resolution from the phased document, gaining 4.0, 4.1, and 1.0 points (Sonnet 4.5: first replicate, like the other single runs; 2.0 points over three), whereas the two above 47% lose under every memory condition, by 2.0–9.1 points, with Opus 4.8 falling from 47.5% to 39.4%. Substituting the oracle document preserves the pattern, so the reversal is a property of the recipient, not a retrieval failure: content that orients a mid-capability agent displaces the reasoning of one that would have localized the defect unaided. Within the band, Haiku 4.5 gains 4.0 points from the document alone but only 1.0 with the record added, suggesting a record of another run’s edits is usable only by an agent able to adapt rather than transcribe it. The sweep is one replicate per model, so the claim rests on the sign pattern; an experience memory is an intervention whose sign depends on the recipient, and whether to attach memory should condition on the agent as much as on the memory. 
+
+## 6 Discussion and limitations 
+
+Coding agents produce far more experience than they reuse, and the field’s response has been to build better stores and retrievers, on the assumption that reuse fails because the right run is hard to find. Our results point elsewhere: once an agent is running, what matters is the form its experience was written in, whether it needs that experience now, and how long it should stay in view. Two insights carry beyond REM. First, the stored form determines how much experience is used: the same run, at the same token cost, is read far more completely when organized by the phases of the work, and what separates a successful run from a failed one is how much of what it received it takes up. Second, more memory is not better memory: the gains from delaying and withdrawing costly context came from avoiding harm, and the same content that helped mid-capability agents cost the strongest ones several points. Because REM treats memory as a set of swappable policy slots rather than a fixed store, its lessons are not tied to our implementation. The stored form is decoupled from the search algorithm, so a phased document can front existing retrievers; the recall and eviction decisions are model-agnostic and apply to any agent with an observable think-act loop; and because the extraction schema is discovered rather than hand-written, the pipeline extends to other diagnostic domains, such as text-to-SQL repair or incident response, from example trajectories rather than new engineering. Cast as a control policy over three decisions, an experience memory becomes something one can measure, price, and improve one decision at a time. These three decisions are exactly the operations a continually learning agent must eventually automate over its own growing experience—what to consolidate, when to surface it, and what to retire—so a mechanism that measures each in isolation is a prerequisite for memory that safely compounds. In practice, REM cuts cost-weighted tokens by 17%, mean wall-clock time from 11.9 to 8.8 minutes per task, and unappliable patches from 7.0 to 4.0 (Table 4). Injecting a ∼270-token document rather 8Figure 3: Memory helps agents in a capability band and costs the strongest ones. Resolution by memory condition for five agent models, one replicate each (the first for Sonnet 4.5). Phased doc injects the retrieved document; REM adds the struggle-gated, evicted record; Pinned keeps that record; Oracle doc substitutes the labeled trajectory’s document. Shading marks no-memory rates at or below which the phased document does not reduce resolution. than the raw run also shrinks what re-enters the agent’s context, reducing the exposure of credentials or personal data captured in agent traces. And because the effect of memory depends on the recipient (§5.5), a short no-memory pilot per agent model indicates when to attach it. 
+
+Limitations. REM sets a new state of the art for experience reuse on SWE-ContextBench Lite, improving both retrieval and end-task resolution while lowering cost, and it does so with deliberately simple components, which leaves several promising directions open. REM performs single-pass 
+
+reuse from a fixed pool; letting an agent’s own completed runs re-enter the store, with staleness and contradiction handled, is the natural path toward memory that compounds over time and, ultimately, toward continual learning for agents [Hu et al., 2026]. The struggle signal is a single hand-written observable, so a calibrated trigger drawing on richer signals, such as repeated failed edits or lack of progress, that spends a bounded budget of disturbance on runs that would have succeeded unaided is a clear next step. Eviction removes the record itself, but the agent’s own response to it remains in the history, so a stricter variant could also prune that response. The utilization probe establishes presence by substring match rather than causal use, inviting richer attribution. Most conditions beyond REM and its ablations were run once, so several secondary contrasts are directional and invite further replication. Retrieval numbers for existing systems are those reported by the benchmark under each system’s own configuration, so a re-run through a shared embedder and reranker would further isolate the stored unit. Every task’s labeled trajectory comes from the same repository as the task (99 of 99), and we did not measure how closely its patch resembles the gold fix, nor how stored fixes age as a codebase evolves. And while we evaluate end-to-end on repository-level coding, the automatically discovered schema already ports to text-to-SQL (Appendix G), so validating the full pipeline in a second domain is an immediate opportunity. 
+
+## 7 Conclusion 
+
+We recast experience memory for long-running agents as a control problem rather than a lookup problem: a policy over three decisions—what to store, when to recall, and what to forget—each of which can be measured, priced, and replaced independently, and each of which we show is worth something on its own. REM realizes this view with a single phase-structured store, a struggle-gated recall, and one-shot eviction, and attains state-of-the-art retrieval and improved end-task resolution at lower cost on a public benchmark. 9Acknowledgments and Disclosure of Funding 
+
+We thank Jiayuan Zhu for providing details on the SWE-ContextBench dataset and paper [Zhu et al., 2026], and the anonymous CLEA reviewers and area chair for comments that improved this paper. 
+
+Author disclosure statement. The authors declare no competing interests or conflict of interest. 
+
+Funding information. All work was performed while the authors were employed at Amazon, on in-house infrastructure. The views expressed in this article are solely the authors’ and may not necessarily reflect Amazon’s viewpoint. 
+
+## References 
+
+Anthropic. Claude API pricing. https://docs.anthropic.com/en/docs/about-claude/ pricing , 2026. Accessed October 2026. Akari Asai, Zeqiu Wu, Yizhong Wang, Avirup Sil, and Hannaneh Hajishirzi. Self-RAG: Learning to retrieve, generate, and critique through self-reflection. In International Conference on Learning Representations , 2024. Prateek Chhikara, Dev Khant, Saket Aryan, Taranjeet Singh, and Deshraj Yadav. Mem0: Building production-ready AI agents with scalable long-term memory. arXiv preprint arXiv:2504.19413 ,2025. Yao Fu, Dong-Ki Kim, Jaekyeom Kim, Sungryull Sohn, Lajanugen Logeswaran, Kyunghoon Bae, and Honglak Lee. AutoGuide: Automated generation and selection of context-aware guidelines for large language model agents. arXiv preprint arXiv:2403.08978 , 2024. Qisheng Hu, Quanyu Long, and Wenya Wang. When continual learning moves to memory: A study of experience reuse in LLM agents. arXiv preprint arXiv:2604.27003 , 2026. Eric Hanchen Jiang, Zhi Zhang, Yuchen Wu, Levina Li, Dong Liu, Xiao Liang, Rui Sun, Yubei Li, Edward Sun, Haozheng Luo, Zhaolu Kang, Aylin Caliskan, Kai-Wei Chang, and Ying Nian Wu. Memory as a controlled process: Learned adaptive memory management for LLM agents. arXiv preprint arXiv:2607.13591 , 2026. Carlos E. Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir Press, and Karthik Narasimhan. SWE-bench: Can language models resolve real-world GitHub issues? In International Conference on Learning Representations (ICLR) , 2024. Nelson F. Liu, Kevin Lin, John Hewitt, Ashwin Paranjape, Michele Bevilacqua, Fabio Petroni, and Percy Liang. Lost in the middle: How language models use long contexts. Transactions of the Association for Computational Linguistics , 12, 2024. Siru Ouyang, Jun Yan, I-Hung Hsu, Yanfei Chen, Ke Jiang, Zifeng Wang, Rujun Han, Long T. Le, Samira Daruki, Xiangru Tang, Vishy Tirumalashetty, George Lee, Mahsan Rofouei, Hangfei Lin, Jiawei Han, Chen-Yu Lee, and Tomas Pfister. ReasoningBank: Scaling agent self-evolving with reasoning memory. In International Conference on Learning Representations (ICLR) , 2026. Kangning Shen, Jingyuan Zhang, Chenxi Sun, Wencong Zeng, and Yang Yue. Structurally aligned subtask-level memory for software engineering agents. arXiv preprint arXiv:2602.21611 , 2026. Freda Shi, Xinyun Chen, Kanishka Misra, Nathan Scales, David Dohan, Ed H. Chi, Nathanael Schärli, and Denny Zhou. Large language models can be easily distracted by irrelevant context. In 
+
+International Conference on Machine Learning (ICML) , 2023. Noah Shinn, Federico Cassano, Ashwin Gopinath, Karthik Narasimhan, and Shunyu Yao. Reflexion: Language agents with verbal reinforcement learning. In Advances in Neural Information Processing Systems (NeurIPS) , 2023. Guanzhi Wang, Yuqi Xie, Yunfan Jiang, Ajay Mandlekar, Chaowei Xiao, Yuke Zhu, Linxi Fan, and Anima Anandkumar. Voyager: An open-ended embodied agent with large language models. arXiv preprint arXiv:2305.16291 , 2023. 10 Zora Zhiruo Wang, Jiayuan Mao, Daniel Fried, and Graham Neubig. Agent workflow memory. arXiv preprint arXiv:2409.07429 , 2024. Tao Yu, Rui Zhang, Kai Yang, Michihiro Yasunaga, Dongxu Wang, Zifan Li, James Ma, Irene Li, Qingning Yao, Shanelle Roman, Zilin Zhang, and Dragomir Radev. Spider: A large-scale human-labeled dataset for complex and cross-domain semantic parsing and text-to-sql task. In 
+
+Proceedings of the 2018 Conference on Empirical Methods in Natural Language Processing (EMNLP) , 2018. Yuxiang Zhang, Jiangming Shu, Ye Ma, Xueyuan Lin, Shangxi Wu, and Jitao Sang. Memory as action: Autonomous context curation for long-horizon agentic tasks. arXiv preprint arXiv:2510.12635 ,2026. Andrew Zhao, Daniel Huang, Quentin Xu, Matthieu Lin, Yong-Jin Liu, and Gao Huang. ExpeL: LLM agents are experiential learners. In Proceedings of the AAAI Conference on Artificial Intelligence ,2024. Jiayuan Zhu, Junde Wu, Minhao Hu, Shengda Zhu, Jiazhen Pan, Weixiang Shen, Yijun Yang, Fenglin Liu, Jianye Hao, Yueming Jin, Qirong Ho, and Min Xu. Swe context bench: A benchmark for context learning in coding. arXiv preprint arXiv:2602.08316 , 2026. 11 A Algorithm 
+
+Algorithm 1 REM Framework. ⊕ concatenates context, ∅ is empty context; the three commented lines are the three lifecycle decisions. 
+
+Require: trajectory pool T , task q, struggle signal S, agent policy π, turn budget N
+
+Write path ▷ offline, once per trajectory  
+
+> 1:
+
+P ← ∅  
+
+> 2:
+
+for τ ∈ T do  
+
+> 3:
+
+d ← RENDER (EXTRACT (FLATTEN (τ ))) , r ← RECORD (τ ) ▷ what to store  
+
+> 4:
+
+P ← P ∪ { (d, EMBED (d), r )} 
+
+> 5:
+
+end for Read path ▷ once, at task start  
+
+> 6:
+
+C ← TOP K(d,e,r )∈P cos( EMBED (q), e ) 
+
+> 7:
+
+(d⋆, r ⋆) ← RERANK (q, C)
+
+Recall node ▷ in-loop, every turn  
+
+> 8:
+
+h0 ← ∅ , g ← FALSE 9: for t = 1 to N do  
+
+> 10:
+
+if ¬g and S(o1: t−1) then  
+
+> 11:
+
+ρ ← r⋆, g ← TRUE ▷ when to recall  
+
+> 12:
+
+else  
+
+> 13:
+
+ρ ← ∅ ▷ what to forget : r⋆ is never re-injected  
+
+> 14:
+
+end if  
+
+> 15:
+
+ct ← q ⊕ d⋆ ⊕ ht−1 ⊕ ρ ▷ d ⋆ persists, ρ does not  
+
+> 16:
+
+(at, o t) ← π(ct), ht ← ht−1 ⊕ (at, o t) 
+
+> 17:
+
+if at = HALT then break  
+
+> 18:
+
+end for 
+
+## B Injection mechanics 
+
+The retrieved phased document is placed in a file that the task prompt instructs the agent to read first; the agent reads it as its first action in every run, and it remains in the history thereafter. The implementation record (raw edits and verifications from the related trajectory) is capped at 12,000 characters. The struggle trigger fires on the run’s first genuinely failed validation, a test or check whose result carries a failure, with edits to test files filtered so the agent’s own test-writing does not count. In the default (evicting) policy the record appears once, in the turn after the trigger, and is absent afterward; the persistent variant pins it for the rest of the run, and the eager variant attaches it at the first source edit. 
+
+## C End-task outcomes by condition 
+
+Condition Resolved / 99 ITT Cost tok/task Turns Min PatchNA 
+
+No memory 23, 26, 25 24.9% 452K 70.4 11.9 7.0 Wrong summary † 23 23.2% 431K 72.0 14.4 7Free trajectory † 22 22.2% 637K 66.3 13.1 11 Free summary † 24 24.2% 484K 68.6 13.8 10 Oracle summary † 23 23.2% 378K 67.4 13.7 6Oracle trajectory † 24 24.2% 768K 49.9 9.5 11 REM 27, 29, 26 27.6% 374K 64.6 8.8 4.0 
+
+Table 4: End-task outcomes (Sonnet 4.5). Resolved counts per replicate; ITT is their mean over all 99 tasks. Cost, turns, minutes, and PatchNA (patch does not apply) are means over replicates. †One replicate; other rows three. 12 D Retrieval details 
+
+Pool documents and the query are embedded with Amazon Titan Text Embeddings v2, and the five nearest by cosine similarity go to one LLM rerank call asking for the single candidate most likely related by shared root cause, area of code, or fix pattern, constrained to a candidate index. Table 5 separates the two stages for both schemas. First-stage recall bounds the rerank, and conversion reports the fraction realized. The discovered schema has lower first-stage recall yet higher match@1, because its documents rerank more reliably and none of its replies were unparseable. The discovered-schema pool holds 267 of the 300 documents, because 33 extractions failed on API rate limits; the 8 tasks whose labeled document is among them count as misses in its 68.7%. 
+
+Extraction schema Cosine top-1 Gold in top-5 Match@1 Conversion Parse fail. 
+
+Hand-written 65.7% 83.8% 66.7% 79.6% 5Discovered 62.6% 78.8% 68.7% 87.2% 0
+
+Table 5: Retrieval by stage on the 99 tasks. Cosine top-1 is first-stage accuracy, gold in top-5 is first-stage recall at the rerank budget, match@1 is post-rerank accuracy, conversion is match@1 over gold-in-top-5, and parse failures fell back to the cosine top-1. 
+
+## E Full run summaries 
+
+Tables 6–10 report per-condition accounting behind every resolution rate, one table per agent model: resolved counts, evaluated patches, intention-to-treat and precision rates, mean wall clock, assistant turns, cost-weighted tokens per instance (fresh ×1, cache write ×1.25, cache read ×0.1, output ×5), and the failure breakdown of runs without an evaluated patch. All main-text rates are the ITT column. Every oracle condition has no run for two of the 99 tasks ( scikit-learn-25365 and -25763 ), whose labeled trajectory ( scikit-learn-26323 ) is absent from the benchmark’s released pool of 300; over the 97 evaluable tasks oracle rates are 0.5–1.0 points higher (Sonnet 4.5: oracle summary 23.7%, oracle trajectory 24.7%, oracle phased document 26.8%), which leaves every comparison in the text unchanged. condition res/patch/N ITT prec. min turns tok/inst failures No memory 20/88/99 20.2% 22.7% 9.5 71.1 444,070 error 8, max_turns 3 Oracle phased document 23/91/99 23.2% 25.3% 10.6 72.1 442,141 error 6 REM, document only 24/93/99 24.2% 25.8% 10.2 68.3 381,828 error 4, max_turns 2 REM, gate without eviction 24/96/99 24.2% 25.0% 10.0 66.6 385,833 error 2, max_turns 1 REM 21/92/99 21.2% 22.8% 9.7 68.7 419,678 error 3, max_turns 4 Table 6: Full run summary, Haiku 4.5 ( claude-haiku-4-5 ). condition res/patch/N ITT prec. min turns tok/inst failures No memory 23/97/99 23.2% 23.7% 14.5 71.5 452,536 max_turns 1, no_patch 1 Wrong summary 23/95/99 23.2% 24.2% 14.4 72.0 430,526 max_turns 2, no_patch 2 Free trajectory 22/94/99 22.2% 23.4% 13.1 66.3 636,529 context_overflow 3, max_turns 2 Free summary 24/98/99 24.2% 24.5% 13.8 68.6 484,142 max_turns 1 Oracle summary 23/97/99 23.2% 23.7% 13.7 67.4 378,265 none Oracle trajectory 24/90/99 24.2% 26.7% 9.5 49.9 767,810 context_overflow 3, error 1, max_turns 3 Oracle phased document 26/96/99 26.3% 27.1% 10.1 74.5 462,790 max_turns 1 REM, document only 27/99/99 27.3% 27.8% 9.1 65.7 375,712 none REM, eager record 23/98/99 23.2% 23.5% 7.9 60.1 426,743 error 1 REM, gate without eviction 25/98/99 25.3% 25.3% 7.3 62.6 356,285 error 1 REM 27/96/99 27.3% 27.3% 7.7 65.1 378,583 error 1, max_turns 1, no_patch 1 Table 7: Full run summary, Sonnet 4.5 ( claude-sonnet-4-5 ). First replicate; three-replicate means for REM and its recall ablations are in Tables 4 and 3. Table 11 reports the same accounting for the three replicates behind every multi-replicate number, with the mean the body cites. The no-memory condition ranges 23–26 resolved and REM 26–29, which is why single contrasts are read as directional. A per-task Wilcoxon signed-rank test on resolve 13 condition res/patch/N ITT prec. min turns tok/inst failures No memory 31/99/99 31.3% 31.3% 14.6 56.7 279,947 none Oracle phased document 32/94/99 32.3% 34.0% 15.2 56.6 296,278 error 1, max_turns 2 REM, document only 32/97/99 32.3% 33.0% 13.2 50.5 230,611 max_turns 2 REM, gate without eviction 29/98/99 29.3% 29.6% 14.5 51.9 248,034 max_turns 1 REM 31/98/99 31.3% 31.6% 13.8 49.9 242,595 max_turns 1 Table 8: Full run summary, Opus 4.6 ( claude-opus-4-6 ). condition res/patch/N ITT prec. min turns tok/inst failures No memory 47/95/99 47.5% 49.5% 17.0 24.5 129,623 error 4 Oracle phased document 42/93/99 42.4% 45.2% 16.9 32.5 191,712 error 1, timeout 3 REM, document only 39/98/99 39.4% 39.8% 17.0 25.6 140,603 error 1 REM, gate without eviction 40/98/99 40.4% 40.8% 17.0 25.9 137,940 max_turns 1 REM 40/97/99 40.4% 41.2% 16.7 24.4 136,395 error 2 Table 9: Full run summary, Opus 4.8 ( claude-opus-4-8 ). counts (0–3 per task) leads to the same conclusions as the pooled McNemar test: REM against no memory p = 0 .21 (McNemar 0.22 ), document only 0.53 (0.82 ), eager record 0.15 (0.17 ), and gate without eviction 0.06 (0.08 ). 
+
+## F Utilization by condition 
+
+Table 12 reports the full utilization probe per condition (Sonnet 4.5), adding the temporal measures Table 2 omits. Coverage denominators scale with injected size, so comparisons are cleanest within groups receiving the same amount, which is why REM’s policies are separated from the start-of-run conditions. Table 13 tests coverage against resolution and, because a share can move either way, its two component quantities separately. Among the start-of-run forms the association is carried by how many identifiers were referenced; under REM’s recall policies neither quantity separates the outcomes. 
+
+## G Schema discovery details 
+
+The meta-loop runs four steps per iteration: an LLM writes or revises a structuring prompt (six to ten named fields with types, rules requiring exact names, and a JSON template), the candidate runs over a validation set, an LLM judge scores each extraction from 1 to 5 on coverage, specificity, discriminability, conciseness, and structural consistency, and the loop stops when every dimension reaches a mean of 4.0 or after five iterations. Bootstrap, revision, and judging use Claude Sonnet 4, and trajectories are truncated to 15K characters for the meta-prompt. For repository-level coding the loop converged on its first iteration, with means over eight extractions of 4.12 (coverage), 4.00 (specificity), 4.75 (discriminability), 4.38 (conciseness), and 4.50 (structural consistency); the prompt is ∼1.7K characters and defines eight fields. Discriminability, scored highest, matters most for a store whose documents must be told apart at retrieval time, and the discovered schema has the higher match@1 and better rerank conversion (Appendix D). Table 14 sets the discovered fields against the hand-written ones: three coincide, the discovered schema consolidates the code-structure and test fields, drops files merely read and the catch-all identifier list, and adds three fields describing the problem, spending fewer fields on where the fix landed and more on what the failure looked like. Running the same loop unchanged on text-to-SQL trajectories converged on the first iteration (means of 5.0 for coverage, specificity, discriminability, and structural consistency, 4.8 for conciseness) and produced a ten-field schema covering the database, schemas and tables, columns, SQL errors and data-quality problems, analytical approach, answer, query patterns, and business context. None of the coding fields survive, which is intended, since the pipeline’s only domain-specific artifact is the schema. 14 condition res/patch/N ITT prec. min turns tok/inst failures No memory 52/98/99 52.5% 53.1% 25.3 49.0 330,975 no_patch 1 Oracle phased document 50/94/99 50.5% 53.2% 28.0 54.1 364,212 error 1, max_turns 1, timeout 1 REM, document only 50/98/99 50.5% 51.0% 26.3 50.6 326,477 max_turns 1 REM, gate without eviction 43/98/99 43.4% 43.9% 24.2 46.7 301,082 error 1 REM 47/98/99 47.5% 48.0% 25.3 47.3 303,257 no_patch 1 Table 10: Full run summary, Sonnet 5 ( claude-sonnet-5 ). condition res/patch/N ITT PatchNA min turns tok/inst No memory, replicate 1 23/97/99 23.2% 8 14.5 71.5 452,536 replicate 2 26/95/99 26.3% 6 10.5 69.0 442,914 replicate 3 25/98/99 25.3% 7 10.8 70.7 459,158 
+
+mean 24.7/96.7/99 24.9% 7.0 11.9 70.4 451,536 
+
+REM, document only, replicate 1 27/99/99 27.3% 7 9.1 65.7 375,712 replicate 2 28/98/99 28.3% 3 10.0 65.6 373,133 replicate 3 25/98/99 25.3% 5 10.1 65.2 372,660 
+
+mean 26.7/98.3/99 26.9% 5.0 9.7 65.5 373,835 
+
+REM, eager record, replicate 1 23/98/99 23.2% 7 7.9 60.1 426,743 replicate 2 26/99/99 26.3% 4 11.0 61.3 428,311 replicate 3 26/99/99 26.3% 6 9.2 59.7 414,308 
+
+mean 25.0/98.7/99 25.3% 5.7 9.4 60.4 423,121 
+
+REM, gate without eviction, replicate 1 25/98/99 25.3% 4 7.3 62.6 356,285 replicate 2 26/99/99 26.3% 4 11.3 62.1 344,551 replicate 3 23/97/99 23.2% 7 9.7 63.0 359,318 
+
+mean 24.7/98.0/99 24.9% 5.0 9.4 62.6 353,385 
+
+REM, replicate 1 27/96/99 27.3% 4 7.7 65.1 378,583 replicate 2 29/99/99 29.3% 4 9.9 66.6 387,842 replicate 3 26/97/99 26.3% 4 8.7 62.1 356,402 
+
+mean 27.3/97.3/99 27.6% 4.0 8.8 64.6 374,276 
+
+Table 11: Per-replicate accounting for the three-replicate conditions (Sonnet 4.5). Every replicate runs all 99 tasks. Columns: resolved/patches/instances, ITT rate, count of runs whose patch does not apply, and mean minutes, turns, and cost-weighted tokens per instance. Mean rows are the values the body reports. 
+
+Condition n Coverage Window Dead weight First infl. 
+
+REM, phased document only 3×99 69.1% 38.8 35.3% 4.1 REM, gate and evict 3×99 50.3% 42.9 27.2% 4.8 REM, gate without eviction 3×99 50.5% 42.1 28.1% 4.3 REM, eager record 3×99 38.8% 44.9 19.1% 3.8 Oracle phased document 97 64.7% 45.6 35.7% 2.1 Free summary 97 52.5% 28.2 52.8% 3.6 Oracle summary 97 45.7% 27.4 51.9% 5.1 Oracle trajectory 97 27.2% 36.6 19.3% 4.0 Free trajectory 97 26.7% 44.5 23.0% 5.0 Wrong summary 99 3.4% 0.5 96.3% 8.7 Table 12: Identifier utilization per condition (Sonnet 4.5). Window is the span in turns from first to last reference, dead weight the fraction of the run after the last reference, and first influence the turn of the first reference. REM rows are means over three replicates; start-of-run rows are one. 15 Grouping Quantity Resolved Unresolved d MW p
+
+Start-of-run forms coverage 0.423 0.378 +0 .20 0.03 
+
+identifiers referenced 12.9 11.0 +0 .18 0.10 identifiers injected 39.7 36.2 +0 .10 0.84 REM recall policies coverage 0.511 0.527 −0.06 0.34 identifiers referenced 12.4 12.7 −0.02 0.42 identifiers injected 28.8 28.3 +0 .02 0.76 Table 13: Coverage against resolution, with its two component quantities tested separately. Coverage is identifiers referenced over injected. Start-of-run forms pool the oracle and free summary and trajectory conditions ( n = 91 resolved, 284 unresolved); REM recall policies pool the four phased conditions over three replicates ( n = 311 resolved, 868 unresolved). d is the standardized mean difference; MW p is two-sided Mann-Whitney. Runs without an evaluation verdict are excluded (13 start-of-run, 9 REM); start-of-run forms also exclude the two tasks without a labeled trajectory in the pool.              
+
+> Hand-written Discovered
+> files_modified files_modified root_cause root_cause fix_approach fix_approach functions_changed ,classes_involved related_functions test_names ,test_commands test_cases files_read ,key_identifiers ——bug_description ,repository_info ,error_messages
+
+Table 14: Extraction fields, hand-written against discovered, for repository-level coding. Rows pair fields serving the same purpose; the last two list fields present in only one schema. 16

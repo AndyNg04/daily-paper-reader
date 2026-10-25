@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-24</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-25</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 26 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 21 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>9</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>17</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>3</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>18</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-24 17:54:45 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-25 18:32:36 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-24 论文日报出炉：共梳理 26 篇论文，分为精读 9 篇、速读 17 篇，聚焦大模型安全、记忆使用与智能体可靠性等议题。</p>
-<p>最值得关注的是大模型安全相关行为的探测与引导，以及面向记忆使用的人类偏好奖励建模，两篇推荐论文均获 9.0/10。</p>
-<p>建议先读这两篇高分论文的摘要，再按兴趣速览电商智能体静默工具错误韧性评估或养老场景人机交互研究。</p>
+<p>2026-10-25 日报已完成：共梳理 21 篇论文，安排精读 3 篇、速读 18 篇，聚焦大模型协作、智能体记忆与安全护栏。</p>
+<p>最值得关注的是两篇获评 9.0/10 的精读：后训练如何放大大模型协作中的“记忆诅咒”，以及如何将临床判断转化为心理健康聊天机器人的可检查规则。</p>
+<p>建议先读这两篇的核心问题与结论，再按兴趣速览编程智能体记忆管理、分布式多智能体训练或多模态 GUI 智能体。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">9 篇</strong>
+    <strong class="dpr-home-dashboard-count">3 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Probing and Steering for Safety-Relevant Behaviours in Large Language Models">Probing and Steering for Safety-Relevant Behaviours in Large Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="Memory-Aware Reward Modeling: Learning Human Preferences for LLM Memory Use">Memory-Aware Reward Modeling: Learning Human Preferences for LLM Memory Use</span></li><li><span class="dpr-home-dashboard-paper-title" title="CoWriter: Guiding Methodological and Synergetic Human-LLM Co-Authoring">CoWriter: Guiding Methodological and Synergetic Human-LLM Co-Authoring</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Coopshift: Post-Training Amplifies The Memory Curse In LLM Cooperation">Coopshift: Post-Training Amplifies The Memory Curse In LLM Cooperation</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Clinical Judgment to Checkable Rules: Clinician-Led Guardrails for Mental-Health Chatbots">From Clinical Judgment to Checkable Rules: Clinician-Led Guardrails for Mental-Health Chatbots</span></li><li><span class="dpr-home-dashboard-paper-title" title="LocoPilot: Single-Operator Bilateral Teleoperation for Loco-Manipulation Policy Learning">LocoPilot: Single-Operator Bilateral Teleoperation for Loco-Manipulation Policy Learning</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>4</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -93,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">17 篇</strong>
+    <strong class="dpr-home-dashboard-count">18 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Multimodal Interaction Estimation for Contact-Aware Adaptive Impedance Control">Multimodal Interaction Estimation for Contact-Aware Adaptive Impedance Control</span></li><li><span class="dpr-home-dashboard-paper-title" title="RITE: Evaluating End-to-End Resilience to Silent Tool Errors in E-Commerce Agentic Systems">RITE: Evaluating End-to-End Resilience to Silent Tool Errors in E-Commerce Agentic Systems</span></li><li><span class="dpr-home-dashboard-paper-title" title="Navigating human-robot interaction challenges in private and residential aged care homes">Navigating human-robot interaction challenges in private and residential aged care homes</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Train Locally, Learn Together: Distributed Multi-Agent Training via ADMM">Train Locally, Learn Together: Distributed Multi-Agent Training via ADMM</span></li><li><span class="dpr-home-dashboard-paper-title" title="Focused Omni-Modal GUI Agents">Focused Omni-Modal GUI Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="REM: What to Store, When to Recall, What to Forget in Experience Memory for Coding Agents">REM: What to Store, When to Recall, What to Forget in Experience Memory for Coding Agents</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>5</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>4</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
 </section>
 </div>
 
