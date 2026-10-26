@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-25</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-26</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 21 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 35 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>3</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>18</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-25 18:32:36 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-26 19:53:47 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-25 日报已完成：共梳理 21 篇论文，安排精读 3 篇、速读 18 篇，聚焦大模型协作、智能体记忆与安全护栏。</p>
-<p>最值得关注的是两篇获评 9.0/10 的精读：后训练如何放大大模型协作中的“记忆诅咒”，以及如何将临床判断转化为心理健康聊天机器人的可检查规则。</p>
-<p>建议先读这两篇的核心问题与结论，再按兴趣速览编程智能体记忆管理、分布式多智能体训练或多模态 GUI 智能体。</p>
+<p>2026-10-26 论文日报已完成：收录 35 篇，分为精读 15 篇、速读 20 篇，聚焦 AI 智能体的交互、协作与记忆。</p>
+<p>今日优先看两篇 9.0 分精读：智能体短暂等待时的交互设计，以及大模型社会模拟从架构敏感性到稳健性审计的问题。</p>
+<p>建议先选更感兴趣的一篇精读，再从 8.0 分速读中了解多智能体协作绕过预定流程的风险，或智能体记忆管理这一方向。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">3 篇</strong>
+    <strong class="dpr-home-dashboard-count">15 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Coopshift: Post-Training Amplifies The Memory Curse In LLM Cooperation">Coopshift: Post-Training Amplifies The Memory Curse In LLM Cooperation</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Clinical Judgment to Checkable Rules: Clinician-Led Guardrails for Mental-Health Chatbots">From Clinical Judgment to Checkable Rules: Clinician-Led Guardrails for Mental-Health Chatbots</span></li><li><span class="dpr-home-dashboard-paper-title" title="LocoPilot: Single-Operator Bilateral Teleoperation for Loco-Manipulation Policy Learning">LocoPilot: Single-Operator Bilateral Teleoperation for Loco-Manipulation Policy Learning</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Too Long to Watch, Too Short to Leave: Designing for Agent Micro-Waits">Too Long to Watch, Too Short to Leave: Designing for Agent Micro-Waits</span></li><li><span class="dpr-home-dashboard-paper-title" title="The Butterfly Effect in LLM Social Simulations: From Architecture Sensitivity to Robustness Audits">The Butterfly Effect in LLM Social Simulations: From Architecture Sensitivity to Robustness Audits</span></li><li><span class="dpr-home-dashboard-paper-title" title="CARL: Chat Assisted Reinforcement Learning">CARL: Chat Assisted Reinforcement Learning</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>7</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>3</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>2</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -93,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">18 篇</strong>
+    <strong class="dpr-home-dashboard-count">20 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Train Locally, Learn Together: Distributed Multi-Agent Training via ADMM">Train Locally, Learn Together: Distributed Multi-Agent Training via ADMM</span></li><li><span class="dpr-home-dashboard-paper-title" title="Focused Omni-Modal GUI Agents">Focused Omni-Modal GUI Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="REM: What to Store, When to Recall, What to Forget in Experience Memory for Coding Agents">REM: What to Store, When to Recall, What to Forget in Experience Memory for Coding Agents</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="From Acceptance and Avoidance to Affective Viscosity: Designing Social Agents Intermediating in Human Relationships">From Acceptance and Avoidance to Affective Viscosity: Designing Social Agents Intermediating in Human Relationships</span></li><li><span class="dpr-home-dashboard-paper-title" title="The Helpful Agent Problem: When Emergent Cooperation Among LLM Agents Bypasses Intended Workflows">The Helpful Agent Problem: When Emergent Cooperation Among LLM Agents Bypasses Intended Workflows</span></li><li><span class="dpr-home-dashboard-paper-title" title="Agentic Memory Management Is the Next Frontier of Information Retrieval">Agentic Memory Management Is the Next Frontier of Information Retrieval</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>4</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>10</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>5</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
 </section>
 </div>
 

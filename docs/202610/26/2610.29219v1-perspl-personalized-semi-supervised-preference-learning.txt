@@ -1,0 +1,961 @@
+Title: PerSPL: Personalized Semi-supervised Preference Learning
+
+URL Source: https://arxiv.org/pdf/2610.29219v1
+
+Published Time: Thu, 22 Oct 2026 00:41:45 GMT
+
+Number of Pages: 23
+
+Markdown Content:
+# PerSPL: Personalized Semi-supervised Preference Learning 
+
+Xiaoan Xu 1, Tingzhou Wei 1, Juncheng Dong 1
+
+Korel Gundem 2, Ethan X. Fang 1, Zhengling Qi 21Duke University 2George Washington University 
+
+## Abstract 
+
+Personalized reward models require user-specific preference comparisons, but collecting such feedback is costly and provides only limited supervision for each user. At the same time, large pools of responses can be generated without user identities or preference labels, yet existing personalized reward models leave this data unused. Directly learning from these responses is difficult because pairwise objectives constrain relative scores within a prompt, whereas pseudo-labeling indi-vidual responses requires scores that are comparable across prompts for the same user. We propose PerSPL (Personalized Semi-supervised Preference Learning), a backbone-agnostic framework that uses pair-mean score centering to stabilize this cross-prompt score coordinate and iteratively turns unlabeled responses into user-specific training signals. Against seven representative baselines across four benchmarks—PersonalLLM, HelpSteer2, Reddit TLDR, and Chatbot Arena— PerSPL achieves the highest reported mean accuracy among the evaluated methods for both seen and unseen users. The two latter benchmarks provide real-user preference comparisons in summarization and open-domain chatbot interaction, respectively. These results indicate that unlabeled responses can provide additional supervision for personalized reward modeling when per-user preference labels are scarce. 
+
+## 1 Introduction 
+
+Large language models are expected to serve users with different goals, values, and communication preferences. The best response for one user may therefore not be the best for another Bakker et al. [2022], Durmus et al. [2023], Kirk et al. [2024], Ryan et al. [2025]. Alignment pipelines commonly learn what people prefer by asking them to compare two responses to the same prompt. A reward model learns to assign higher scores to preferred responses, and these scores guide model training or response selection Christiano et al. [2017], Ouyang et al. [2022], Bai et al. [2022]. Most reward models, however, pool all comparisons and learn a single, population-wide notion of a good response. When users disagree systematically, this aggregate reward can obscure their differences and poorly reflect individual preferences. Personalized reward models instead make the score depend on the user and their prior feedback Poddar et al. [2024], Chen et al. [2025], Bose et al. [2025], Cai et al. [2026]. Personalizing the score creates a more demanding data requirement. A population model can pool judgments from all annotators, whereas a personalized model must learn about each user from that user’s limited feedback. Every preference label requires the user to inspect and compare responses, so even seen users provide only short histories and a new user must be modeled from a handful of examples. Responses themselves are easier to obtain because they can be generated or collected without additional user feedback. This creates an opportunity to supplement scarce per-user labels with a much larger, shared pool of unpaired responses. Existing personalized reward models improve learning from sparse comparisons by sharing information across users Poddar et al. [2024], Chen et al. [2025], Bose et al. [2025], Cai et al. [2026], but they do not use this pool as additional supervision. 
+
+Preprint. arXiv:2610.29219v1 [cs.LG] 21 Oct 2026 Figure 1: Overview of P ER SPL. A small set of labeled comparisons identifies each user’s preferences, while pair-mean score centering makes reward scores more comparable across prompts. A calibrator fitted separately for each user assigns pseudo-labels to confident responses from a shared unpaired pool and discards ambiguous ones. The reward model is then trained iteratively on both labeled and pseudo-labeled data. 
+
+What is missing is a way to turn the same unpaired response into potentially different training signals for different users. Pairwise supervision alone does not determine how to pseudo-label individual responses across prompts. It requires a preferred response to score above the rejected response for the same prompt, but it does not fix where either score lies relative to scores for other prompts. Shifting both scores for a prompt by the same amount preserves the pairwise prediction while changing these cross-prompt comparisons. This ambiguity is irrelevant when ranking responses to the same prompt. It matters for an unpaired example, which contains one response and must be judged against a threshold fitted across prompts. Reliable pseudo-labeling therefore requires comparable scores across prompts for each user. Existing semi-supervised preference-learning methods use unlabeled data to train a population-wide reward or policy He et al. [2024], Kim et al. [2024], Lee et al. [2025]. However, these methods do not provide this user-specific score comparability. We address these challenges with PerSPL (Personalized Semi-supervised Preference Learning), which combines cross-prompt score stabilization with user-specific pseudo-labeling. To make scores more comparable across prompts, PerSPL encourages the two scores in each labeled pair to have mean zero, a mechanism we call pair-mean score centering. It then fits a per-user mapping from reward scores to preference probabilities, so the same response can receive different pseudo-labels across users. PerSPL retains confident pseudo-labels and iteratively trains on them alongside labeled data, extracting additional supervision without collecting new user feedback. Figure 1 shows how labeled and unpaired data interact in this process. We make three contributions: • Personalized learning from unpaired responses. We formulate semi-supervised personalized reward modeling, in which limited per-user comparisons are supplemented by a shared pool of responses without user identities or preference labels. PerSPL converts this pool into user-specific supervision for seen users and for new users given a small labeled support set. • Score centering for cross-prompt pseudo-labeling. We identify a score-coordinate ambiguity that prevents pairwise reward models from directly pseudo-labeling individual responses across 2prompts. We introduce pair-mean centering to address this ambiguity, connect it theoretically to cross-prompt and single-response risk, and show experimentally that it enables unpaired training to improve personalized reward learning. • Evaluation across complementary personalization settings. Against seven representative base-lines, PerSPL achieves the highest reported mean seen- and unseen-user accuracy among the evaluated methods in every primary setting across four benchmarks, including real-user preferences from Reddit TLDR and Chatbot Arena. Controlled generator-shift experiments show that the overall unlabeled-data benefit persists across all tested mixtures. 
+
+## 2 Related Work 
+
+Personalized reward modeling. Existing personalized reward models address per-user feed-back scarcity through architectural sample efficiency, falling into the three paradigms identified by MRM Cai et al. [2026]: (1) personalized input methods that condition a shared reward on user-specific signals such as personas or learned embeddings Zhao et al. [2023], induced personas Ryan et al. [2025], in-context preferences Singh et al. [2025], or a user-specific latent Poddar et al. [2024]; (2) personalized parameter methods that add user-specific modules over a shared backbone Li et al. [2024], Chen et al. [2025], Bose et al. [2025], deliberately keeping the per-user parameter count small to remain tractable on tens of pairs; and (3) meta-learning methods that learn an adaptable initialization for few-shot inner-loop updates Cai et al. [2026], with related downstream work on heterogeneous direct alignment at the policy level Shirali et al. [2025], Zhang et al. [2024]. All three paradigms attack per-user scarcity through architecture, sharing the implicit assumption that the only available signal is each user’s labeled preference pairs. In contrast, PerSPL attacks per-user scarcity at the data level, turning each user’s unpaired responses into pseudo-labeled supervision. 
+
+Semi-supervised preference learning under limited feedback. A separate line, semi-supervised reward modeling, leverages unlabeled data to mitigate annotation cost, but in the homogeneous -reward setting. SSRM He et al. [2024] self-trains on unlabeled paired responses, SPA Kim et al. [2024] iteratively generates responses from the current policy and DPO-self-labels them, and SSPO Lee et al. [2025] extends pseudo-labeling to unpaired SFT responses around a global threshold KDE-estimated from labeled data (see also Park et al. [2022]). Each method learns one population-wide reward model or policy and applies one global pseudo-labeling rule, with no mechanism for cross-user preference variation. PerSPL is purpose-built for personalized reward modeling with unpaired data, a problem these homogeneous-reward methods cannot address; we therefore omit them as empirical baselines. 
+
+## 3 Problem Setup 
+
+Personalized preference learning. For a user u, prompt x, and response y, a personalized reward model assigns a scalar score rθ (x, y, u ). Among responses to the same prompt, the model predicts that the user prefers the one with the higher score. Each labeled comparison (x, y +, y −) records that user u prefers y+ to y− for the same prompt. Writing r± = rθ (x, y ±, u ), the Bradley–Terry model assigns the preference probability and loss 
+
+Pr( y+ ≻ y− | x, u ) = σ(r+ − r−), LBT = − log σ(r+ − r−), (1) where σ(t) = (1 + e−t)−1.For each user u, DuL denotes the labeled comparisons available for that user. For a seen user, these comparisons are available during joint training. For a previously unseen user, they form the small support set used at adaptation, and evaluation uses disjoint comparisons. Thus, we study few-shot personalization, where every user provides some preference feedback, rather than zero-shot personalization. All users also share an unpaired pool DU of prompt–response examples (x, y ). Each example contains one response to a prompt and has neither a preference label nor a user identity. We focus on the regime in which this shared response pool is much larger than the labeled comparison set available for any individual user. Our goal is to use the shared pool to improve personalized ranking for both seen and unseen users without collecting additional user feedback. Because an unpaired example has no alternative response, using it requires interpreting its score relative to responses from other prompts. 
+
+Cross-prompt score ambiguity. The BT loss constrains the score difference between two responses to the same prompt. It does not constrain their common score location. For any prompt–user offset 3c(x, u ), the transformed reward function 
+
+r′(x, y, u ) = rθ (x, y, u ) + c(x, u ) (2) produces the same preference probability and BT loss. This invariance is harmless for same-prompt ranking because the offset cancels, but it changes how a score compares with responses from other prompts and whether it crosses a pseudo-labeling threshold. The pairwise objective therefore does not identify the cross-prompt score coordinate required for single-response pseudo-labeling. The usual held-out metric cannot reveal this ambiguity. For held-out comparison i, let r± 
+
+> i
+
+=
+
+rθ (xi, y ± 
+
+> i
+
+, u ). PairAcc measures whether the preferred response beats its paired alternative, whereas GlobalAcc diagnoses the cross-prompt ordering relevant to single-response pseudo-labeling: 
+
+PairAcc u = Pr( r+ 
+
+> i
+
+> r − 
+
+> i
+
+), GlobalAcc u = Pr( r+ 
+
+> i
+
+> r − 
+
+> j
+
+), (3) where i and j are independently sampled held-out comparisons for the same user. PairAcc evaluates the target same-prompt ranking task. GlobalAcc is a diagnostic of whether preferred and rejected responses remain ordered across prompts. It requires comparability within each user, not across users. For example, consider two prompts with reward scores 
+
+xa : ( r+ 
+
+> a
+
+, r − 
+
+> a
+
+) = (101 , 100) , xb : ( r+ 
+
+> b
+
+, r − 
+
+> b
+
+) = (1 , 0) .
+
+Both same-prompt decisions are correct, so PairAcc is 1, but the comparison r+ 
+
+> b
+
+= 1 < r − 
+
+> a
+
+= 100 
+
+fails and GlobalAcc is 3/4. Centering each pair around zero maps both score pairs to (0 .5, −0.5) ,preserving PairAcc and yielding GlobalAcc = 1 in this example. This contrast motivates the centering mechanism in Section 4.1. 
+
+## 4 PerSPL: Personalized Semi-supervised Preference Learning 
+
+PerSPL turns the shared unpaired pool DU into user-specific training data through cross-prompt score centering, per-user calibration and pseudo-labeling, and iterative self-training. Figure 1 shows their interaction, and Appendix A.3 gives the full training procedure. 
+
+4.1 Pair-mean score centering 
+
+The Problem Setup shows that pairwise supervision leaves the common score location of each labeled pair unidentified. Using the rewards r+ and r− defined in the Problem Setup, the BT loss depends only on their difference. PerSPL supplies a training signal for their mean with 
+
+Lreg = E
+
+" r+ + r−
+
+2
+
+2#
+
+, (4) where the expectation is over users and their labeled comparisons. This penalty acts directly on pair centers rather than output-coordinate margins. Because both are produced by the same reward model, training can still change them jointly. Appendix B characterizes this score-space role through cross-prompt risk, an illustrative Gaussian model, a one-sided fixed-budget analysis, and real-data diagnostics. 
+
+4.2 Per-user calibration and pseudo-labeling 
+
+With this centering signal, PerSPL learns how each user’s reward scores relate to their observed preferences. For each labeled pair in DuL, we assign target 1 to the chosen-response reward and target 0 to the rejected-response reward. We fit a non-decreasing isotonic regressor fu : R → [0 , 1] 
+
+to these labeled rewards with the Pool-Adjacent-Violators algorithm Zadrozny and Elkan [2002], Niculescu-Mizil and Caruana [2005]. Thus, fu(r) is a monotone empirical estimate of the probability that a score r appears on the chosen side of user u’s comparisons. The fit is a stop-gradient target and also defines the per-user score anchor 
+
+δu = inf {s : fu(s) ≥ 12 }. (5) For an unpaired response, write r = rθ (x, y, u ) and choose τ ∈ (1 /2, 1) . PerSPL assigns z = 1 if 
+
+fu(r) > τ , assigns z = 0 if fu(r) < 1 − τ , and otherwise abstains. The retained triples (x, y, z )
+
+form DuP , the pseudo-labeled set for user u. Their average pointwise loss is 
+
+Lunlabel = −E[z log σ(r − δu) + (1 − z) log σ(δu − r)] , (6) where the expectation is over users and their admitted responses. Only confident responses contribute to this loss; all original comparisons remain in the labeled objective. 44.3 Iterative self-training 
+
+Because pseudo-labels depend on the current reward model, PerSPL alternates between training the model and updating the pseudo-labels. Within each outer iteration, every DuP remains fixed while the model trains for a fixed number of inner epochs using 
+
+L(k) =
+
+Llabel + λr Lreg , k = 1 ,αLlabel + (1 − α)Lunlabel + λr Lreg , k > 1, α ∈ [0 , 1] , (7) where Llabel is the average BT loss from Eq. (1) over the labeled comparisons. The first iteration uses only labeled comparisons to produce the initial reward model and calibrators; subsequent iterations combine them with the current pseudo-labeled set. After each inner epoch, PerSPL refits fu and δu using only the current rewards on DuL, so the calibration fit itself uses only labeled examples. At the end of each outer iteration, PerSPL applies 
+
+fu ◦ rθ to DU and replaces every DuP using the confidence rule above. The reward model is randomly reinitialized before the next iteration. Algorithm 1 specifies the minibatch sampling, update order, and complete schedule. 
+
+## 5 Experiments 
+
+Our primary evaluation compares PerSPL with seven representative baselines on four benchmarks spanning synthetic and real responses and simulated and real users. We then use ablations and controlled studies to examine the contribution of unlabeled training, its interaction with pair-mean centering, and its behavior under different label budgets, preference noise, and response-distribution shift. 
+
+5.1 Datasets 
+
+The four benchmarks separate response realism from user realism. PersonalLLM Zollo et al. [2024] uses synthetic responses and Dirichlet-sampled simulated users. HelpSteer2 Wang et al. [2024] uses human-rated responses with simulated users defined by weights over rating attributes. Reddit TLDR Stiennon et al. [2020] contains real users and human preferences on summaries. Chatbot Arena Chiang et al. [2024] contains real users and human preferences over open-domain chatbot responses. PersonalLLM uses αdiv ∈ { 0.001 , 0.01 , 0.1}, while HelpSteer2 uses αdiv ∈ { 0.01 , 0.1}.Appendix A.1 gives the complete construction and split definitions. 
+
+5.2 Baselines and Evaluation Protocol Baselines and architecture. We compare against a homogeneous Bradley–Terry reward model ( BT ), personalized-input methods ( GPO , VPL ), personalized-parameter methods ( PAL , LoRe ), and the meta-learning method MRM with its RPO objective Zhao et al. [2023], Poddar et al. [2024], Chen et al. [2025], Bose et al. [2025], Cai et al. [2026]. Each baseline uses its released implementation and a benchmark-level configuration shared across seeds. PerSPL uses the same reward-head architecture as LoRe, providing an architecture-controlled comparison between the two methods. Both operate on the same frozen 4,096 -dimensional final-token representation; PerSPL learns a low-rank linear basis and simplex-valued user weights. The default PerSPL configuration uses λr = 0 .01 across benchmarks; ablations explicitly mark deviations. Dataset construction, the exact reward head, optimizer settings, and stage-specific configurations for the main results are reported in Appendix A, including Table 5. 
+
+Evaluation protocol. Seen users are trained jointly, whereas each unseen user is adapted only from its designated support set. All test comparisons are held out. To ensure consistent comparisons, methods use the same assigned splits, labeled budgets, and seed identities. Methods defined on frozen features (Skywork V2, BT, GPO, LoRe, MRM, and PerSPL) use the same cached 4,096 -dimensional representations; VPL and PAL retain the native GPT-2 and OPT-350M backbones prescribed by their released implementations. The supervised baselines receive the same labeled comparisons, while PerSPL additionally receives DU , whose responses carry neither user identities nor preference labels. We report within-prompt pairwise accuracy separately for seen and unseen users. Unless noted, results are mean ± population standard deviation ( ddof =0) over five matched seeds, while the controlled shift study uses ten. Appendix Table 11 additionally reports paired-bootstrap 95% confidence intervals obtained from 20,000 resamples of the matched seed-level differences. VPL 5Table 1: Full baseline comparison on PersonalLLM, HelpSteer2, Reddit TLDR, and Chatbot Arena. We report pairwise preference accuracy (%) on seen and unseen users as mean ± std over five matched seeds. PersonalLLM and HelpSteer2 use αdiv =0 .1; Reddit TLDR uses 100 or 150 labeled examples per seen user; Chatbot Arena uses 25 /12 labeled pairs per seen/unseen user. On Chatbot Arena, VPL/PAL use their released pooled-pair evaluators; the remaining methods macro-average user accuracies. Best per column is in bold.                                                            
+
+> PersonalLLM HelpSteer2 Reddit TLDR Chatbot Arena
+> αdiv =0 .1αdiv =0 .1100 examples/seen user 150 examples/seen user 25 /12 labels Method Seen Unseen Seen Unseen Seen Unseen Seen Unseen Seen Unseen Skywork V2 81.6 ±1.6 82.4 ±1.4 67.0 ±0.3 67.4 ±0.3 64.5 ±0.8 64.6 ±0.8 64.5 ±0.8 64.6 ±0.8 80.3 ±1.4 76.9 ±1.4 BT 88.8 ±3.2 89.0 ±3.8 63.0 ±3.7 63.2 ±3.8 63.2 ±4.8 64.3 ±3.8 64.4 ±3.5 65.2 ±3.1 80.3 ±2.0 78.1 ±3.0 VPL 89.6 ±1.2 89.8 ±1.2 59.6 ±0.7 59.6 ±0.6 57.0 ±0.8 56.9 ±1.3 57.6 ±1.5 57.0 ±1.6 64.9 ±3.1 61.9 ±6.3 GPO 89.1 ±6.7 89.6 ±6.8 65.8 ±2.6 66.4 ±2.3 63.8 ±2.5 64.6 ±2.7 65.7 ±1.7 65.9 ±1.3 79.4 ±1.7 77.7 ±1.4 PAL 84.7 ±1.4 85.2 ±1.5 57.1 ±1.4 56.9 ±1.0 56.9 ±1.6 56.4 ±1.2 57.1 ±1.8 57.5 ±1.8 58.4 ±3.0 58.4 ±3.0 LoRe 94.6 ±0.5 94.0 ±0.9 69.6 ±0.8 70.1 ±1.0 65.3 ±1.5 68.4 ±0.4 65.2 ±0.6 67.7 ±1.0 81.3 ±2.1 78.4 ±2.1 MRM 91.6 ±0.6 92.0 ±0.5 70.7 ±0.3 70.9 ±0.4 70.0 ±1.0 69.8 ±0.6 70.0 ±1.1 69.6 ±0.7 80.7 ±1.4 77.2 ±1.6
+> PerSPL 95.7 ±0.2 95.5 ±0.2 71.6 ±0.3 71.2 ±0.8 70.7 ±1.2 70.1 ±0.6 70.9 ±0.9 70.3 ±0.7 83.0 ±3.0 81.0 ±2.4
+
+follows its released preprocessing by excluding examples above its 1,024-token limit; on Chatbot Arena, it therefore evaluates 555 of the 571 assigned test comparisons in each seed. 
+
+Compute. The PersonalLLM, HelpSteer2, and Reddit TLDR experiments used a mix of eight NVIDIA A100 80GB and five RTX A5000 24GB GPUs and required approximately seven hours of wall-clock time across their runs. Chatbot Arena was run separately on the same cluster; the distribution-shift analysis is excluded from this estimate. 
+
+5.3 Main Results 
+
+Table 1 summarizes the full baseline comparison on PersonalLLM, HelpSteer2, Reddit TLDR, and Chatbot Arena. Among the methods evaluated in each setting, PerSPL has the highest reported mean in every seen-and unseen-user column. On PersonalLLM, it reaches 95 .6 ± 0.1 overall, compared with 94 .3 ± 0.7
+
+for LoRe. On HelpSteer2 and Reddit TLDR, PerSPL has higher mean seen- and unseen-user accuracy than the strongest baseline in every reported setting. The Reddit TLDR and Chatbot Arena results extend this pattern to real users and human preferences in summarization and open-domain dialogue. Complete results across all diversity and label-budget settings appear in Appendix C.1, including Overall accuracy for Chatbot Arena. To assess seed-level uncertainty, we also compute absolute accuracy differences between PerSPL and the baseline with the highest overall mean in each setting. The paired-bootstrap intervals exclude zero for every seen-user and overall comparison and for four of the five unseen-user comparisons; Appendix Table 11 reports the complete estimates. 
+
+5.4 Ablations and Analysis Component ablations. Table 2 reports a 2 × 2 factorial comparison of pair-mean regularization and unpaired training in all four HelpSteer2 and Reddit TLDR settings. Each variant keeps the configuration of the full model and changes only λr, K, or both, in both training phases. With unpaired training off, adding the regularizer changes seen accuracy by between −0.1 and +0 .1 points. Without regularization, adding unpaired training changes seen accuracy by −6.5 to −2.9 points; with regularization, it changes seen accuracy by +0 .5 to +1 .8 points. The resulting interactions range from +3 .4 to +8 .3 points. For seen users, these contrasts show that centering changes the observed contribution of unpaired training from negative to positive. The large drop after removing regularization therefore reflects the interaction between centering and unpaired training rather than a standalone regularization gain. Appendix C.3 reports paired intervals for the component comparisons. 
+
+Centering diagnostics. Figure 2 illustrates how pair-mean centering changes the chosen and rejected reward distributions on PersonalLLM, pooled over seen users. Its direct score-space action is on pair centers; shared parameters determine the learned centers and margins jointly. Appendix B characterizes this geometry and the labeled-only regularization path. Moderate centering reduces within-user pair-mean variation and cross-prompt loss while preserving held-out pairwise fit. 6Table 2: Component ablations on HelpSteer2 ( αdiv ∈ { 0.1, 0.01 }) and Reddit TLDR ( 100 or 150 labeled examples per seen user), forming a regularization × unpaired-training factorial comparison. Each variant changes only λr , K, or both, in both training phases; all other hyperparameters equal those of the full model. We report seen and unseen accuracy (%), mean ± std over five seeds. Best per column in bold.                                                         
+
+> HelpSteer2 Reddit TLDR
+> αdiv =0 .1αdiv =0 .01 100 examples/seen user 150 examples/seen user Objective Seen Unseen Seen Unseen Seen Unseen Seen Unseen
+> PerSPL (Llabel +Lunlabel +Lreg )71.6 ±0.3 71.2 ±0.8 66.0 ±0.4 65.0 ±0.7 70.7 ±1.2 70.1 ±0.6 70.9 ±0.9 70.3 ±0.7
+> Llabel +Lunlabel (λr=0 )66.5 ±0.5 69.7 ±0.9 62.5 ±1.2 63.2 ±0.5 63.7 ±1.1 68.6 ±0.7 62.5 ±2.1 62.5 ±1.4
+> Llabel +Lreg (K=1 )70.9 ±0.6 71.0 ±0.5 65.5 ±0.4 64.6 ±0.8 69.4 ±1.4 69.5 ±1.0 69.1 ±1.0 70.3 ±0.7
+> Llabel only ( λr=0 , K =1 )70.9 ±0.6 71.1 ±0.7 65.4 ±0.3 64.5 ±0.9 69.5 ±1.3 69.7 ±1.1 69.0 ±1.3 69.6 ±0.7 0510 15 20 25
+> Predicted reward
+> 0.000 0.025 0.050 0.075 0.100 0.125
+> Density
+> λr= 0
+> −10 −5 05
+> Predicted reward
+> 0.00 0.05 0.10 0.15 0.20
+> λr= 0.01
+> Chosen Rejected Overlap
+
+Figure 2: Reward distributions of chosen and rejected responses on PersonalLLM ( αdiv = 0 .01 ), pooled over all 
+
+100 seen users and evaluated on their held-out test pairs ( 1,000 per user). Both panels use a labeled-only reward head trained identically except for pair-mean regularization ( λr = 0 vs. λr = 0 .01 ). Without regularization, the chosen and rejected distributions overlap substantially. With λr = 0 .01 , they are centered near zero and show less overlap. Appendix B provides the corresponding score-space analysis and regularization-path diagnostics. 
+
+Noise and label-budget sweeps. We compare PerSPL with the strongest baseline, MRM, while varying preference noise and the labeled budgets of seen and unseen users on HelpSteer2 ( αdiv = 0 .01 ,Fig. 3). 
+
+Preference noise. We apply a label flip ratio from 0 to 0.5 uniformly across users (Fig. 3a). Both methods become less accurate as the noise increases, while PerSPL remains ahead throughout the tested range. The gap is largest at high noise, reaching 5.07 points at a 0.4 flip ratio and 6.69 points at 0.5.
+
+Labeled pairs per seen user. Across 50 , 100 , and 200 labeled pairs per seen user (Fig. 3b), PerSPL improves as more labels become available and remains 0.81 –1.08 points above MRM. The gain therefore persists across the displayed seen-user label budgets. 
+
+Labeled pairs per unseen user. Holding the seen-user budget fixed at 50 pairs and varying the unseen-user support set from 10 to 50 (Fig. 3c), PerSPL improves from 65 .51% to 66 .03% . Its gain over MRM increases from 0.81 to 1.33 points, supporting transfer to new users across the tested adaptation budgets. 
+
+Hyperparameter sensitivity. A controlled one-at-a-time sweep of the iso-confidence threshold 
+
+τ , learning rate η, and labeled-loss weight α on HelpSteer2 ( αdiv = 0 .01 ) shows that accuracy is stable across the tested τ and α values. The main learning rate η = 0 .01 is also stable to nearby choices. Full sweep curves and quantitative comparisons are provided in Appendix C.4; this post-hoc diagnostic does not determine the main configurations. 
+
+5.5 Controlled Response-distribution Shift 
+
+We test whether unlabeled responses remain useful when their generators differ from those represented in the labeled comparisons. Clean-label PersonalLLM is close to ceiling (Table 1), leaving little room to measure the additional contribution of unlabeled data. We therefore use a fixed 0.2 symmetric label-flip rate to create a non-saturated setting. The labeled data and flip rate remain fixed across 70 0.1 0.2 0.3 0.4 0.5        
+
+> Label flip ratio
+> 0.50 0.60 0.70
+> Test accuracy
+> (a) Preference noise
+> 50 100 200
+> Labeled pairs per seen user
+> 0.640 0.650 0.660 0.670
+> (b) Seen-user labeled-set size
+> 10 20 30 40 50
+> Labeled pairs per unseen user
+> 0.640 0.645 0.650 0.655 0.660 0.665
+> (c) Unseen-user labeled-set size
+> PerSPL Best baseline (MRM)
+
+Figure 3: Performance under preference noise and varying label budgets on HelpSteer2 ( αdiv = 0 .01 ). PerSPL is compared with the strongest baseline, MRM. (a) Test accuracy as the label flip ratio increases. (b) Test accuracy with 50 –200 labeled pairs per seen user. (c) Test accuracy with 10 –50 labeled pairs per unseen user while fixing the seen-user budget at 50 . Shaded bands show ±1 standard deviation over five seeds. Table 3: Controlled generator shift on PersonalLLM with a 0.2 symmetric label-flip rate (overall accuracy, ten matched seeds). The matched regularized labeled-only reference is 81 .49 ± 0.79 .OOD fraction ρ PerSPL Gain over labeled-only [95% CI] 0 84 .70 ± 1.09 +3 .21 [2.58, 3.82] 0.25 84 .55 ± 1.02 +3 .07 [2.31, 3.73] 0.50 83 .63 ± 1.12 +2 .14 [1.32, 2.90] 0.75 82 .71 ± 0.89 +1 .22 [0.57, 1.84] 1 82 .15 ± 0.67 +0 .66 [0.10, 1.18] 
+
+all conditions and for the labeled-only reference, so label noise changes the task difficulty without changing the response-shift comparison. We vary only the generator composition of the unlabeled pool, which follows (1 − ρ)Pin + ρP out .The six in-domain generators and two held-out generators are disjoint, and the labeled and unpaired pools do not overlap. We compare PerSPL with the same regularized labeled-only model over ten matched seeds. Because this experiment uses corrupted labels, its absolute accuracies are not directly comparable with the clean-label PersonalLLM row in Table 1. Across the tested mixtures, PerSPL’s overall gain over the labeled-only reference ranges from 0.66 to 3.21 points (Table 3), and every paired interval is above zero. The overall benefit therefore persists even when the unlabeled pool consists entirely of the tested held-out generators. This evidence is specific to the controlled generator shift studied here. Appendix C.3 reports the generator identities and seen/unseen breakdown. 
+
+## 6 Conclusion 
+
+We introduced PerSPL to turn a shared pool of responses without user or preference labels into user-specific supervision. The method combines pair-mean score centering, per-user isotonic calibration, confidence filtering, and iterative self-training. Against seven representative baselines across four benchmarks, PerSPL has the highest reported mean accuracy among the evaluated methods for both seen and unseen users. Paired-bootstrap intervals support its overall gains in every evaluated HelpSteer2 and Reddit TLDR setting and on Chatbot Arena, which supplies real-user open-domain preferences. The controlled generator-shift study further defines the scope of the unlabeled-data benefit. Across all tested mixtures, the overall gain over regularized labeled-only training ranges from 0.66 to 3.21 points, with every paired interval above zero. This evidence applies to the tested generators. Per-user calibration requires a labeled anchor, so the current setting studies few-shot rather than zero-shot personalization. Active selection and shift-aware calibration are natural next steps. 8References 
+
+Yuntao Bai, Andy Jones, Kamal Ndousse, Amanda Askell, Anna Chen, Nova DasSarma, Dawn Drain, Stanislav Fort, Deep Ganguli, Tom Henighan, et al. Training a helpful and harmless assistant with reinforcement learning from human feedback. arXiv preprint arXiv:2204.05862 , 2022. 1 Michiel Bakker, Martin Chadwick, Hannah Sheahan, Michael Tessler, Lucy Campbell-Gillingham, Jan Balaguer, Nat McAleese, Amelia Glaese, John Aslanides, Matt Botvinick, et al. Fine-tuning language models to find agreement among humans with diverse preferences. Advances in neural information processing systems , 35:38176–38189, 2022. 1 Avinandan Bose, Zhihan Xiong, Yuejie Chi, Simon Shaolei Du, Lin Xiao, and Maryam Fazel. Lore: Personalizing llms via low-rank reward modeling. arXiv preprint arXiv:2504.14439 , 2025. 1, 3, 5, 23 Hongru Cai, Yongqi Li, Tiezheng Yu, Fengbin Zhu, Wenjie Wang, Fuli Feng, and Wenjie Li. One adapts to any: Meta reward modeling for personalized llm alignment. arXiv preprint arXiv:2601.18731 , 2026. 1, 3, 5, 11, 23 Daiwei Chen, Yi Chen, Aniket Rege, Zhi Wang, and Ramya Korlakai Vinayak. Pal: Sample-efficient personalized reward modeling for pluralistic alignment. In The Thirteenth International Conference on Learning Representations , 2025. 1, 3, 5, 23 Wei-Lin Chiang, Lianmin Zheng, Ying Sheng, Anastasios N. Angelopoulos, Tianle Li, Dacheng Li, Hao Zhang, Banghua Zhu, Michael I. Jordan, Joseph E. Gonzalez, and Ion Stoica. Chatbot arena: An open platform for evaluating llms by human preference. arXiv preprint arXiv:2403.04132 ,2024. 5, 11, 20, 23 Paul F Christiano, Jan Leike, Tom Brown, Miljan Martic, Shane Legg, and Dario Amodei. Deep reinforcement learning from human preferences. Advances in neural information processing systems , 30, 2017. 1 Esin Durmus, Karina Nguyen, Thomas I Liao, Nicholas Schiefer, Amanda Askell, Anton Bakhtin, Carol Chen, Zac Hatfield-Dodds, Danny Hernandez, Nicholas Joseph, et al. Towards measuring the representation of subjective global opinions in language models. arXiv preprint arXiv:2306.16388 ,2023. 1 Cristina Garbacea, Heran Wang, and Chenhao Tan. Personalized benchmarking: Evaluating llms by individual preferences. In Findings of the Association for Computational Linguistics: ACL 2026 ,pages 639–675, 2026. 11, 20, 23 Yifei He, Haoxiang Wang, Ziyan Jiang, Alexandros Papangelis, and Han Zhao. Semi-supervised reward modeling via iterative self-training. In Findings of the Association for Computational Linguistics: EMNLP 2024 , pages 7365–7377, 2024. 2, 3 Dongyoung Kim, Kimin Lee, Jinwoo Shin, and Jaehyung Kim. Spread preference annotation: Direct preference judgment for efficient llm alignment. arXiv preprint arXiv:2406.04412 , 2024. 2, 3 Hannah R Kirk, Alexander Whitefield, Paul Röttger, Andrew Bean, Katerina Margatina, Juan Ciro, Rafael Mosquera, Max Bartolo, Adina Williams, He He, et al. The prism alignment dataset: What participatory, representative and individualised human feedback reveals about the subjective and multicultural alignment of large language models. Advances in Neural Information Processing Systems , 37:105236–105344, 2024. 1 Seonggyun Lee, Sungjun Lim, Seojin Park, Soeun Cheon, and Kyungwoo Song. Semi-supervised preference optimization with limited feedback. arXiv preprint arXiv:2511.00040 , 2025. 2, 3 Xinyu Li, Ruiyang Zhou, Zachary C Lipton, and Liu Leqi. Personalized language modeling from personalized human feedback. arXiv preprint arXiv:2402.05133 , 2024. 3 Alexandru Niculescu-Mizil and Rich Caruana. Predicting good probabilities with supervised learning. In Proceedings of the 22nd international conference on Machine learning , pages 625–632, 2005. 4 9Long Ouyang, Jeffrey Wu, Xu Jiang, Diogo Almeida, Carroll Wainwright, Pamela Mishkin, Chong Zhang, Sandhini Agarwal, Katarina Slama, Alex Ray, et al. Training language models to follow instructions with human feedback. Advances in neural information processing systems , 35:27730– 27744, 2022. 1 Jongjin Park, Younggyo Seo, Jinwoo Shin, Honglak Lee, Pieter Abbeel, and Kimin Lee. Surf: Semi-supervised reward learning with data augmentation for feedback-efficient preference-based reinforcement learning. arXiv preprint arXiv:2203.10050 , 2022. 3 Sriyash Poddar, Yanming Wan, Hamish Ivison, Abhishek Gupta, and Natasha Jaques. Personalizing reinforcement learning from human feedback with variational preference learning. Advances in Neural Information Processing Systems , 37:52516–52544, 2024. 1, 3, 5, 23 Michael J Ryan, Omar Shaikh, Aditri Bhagirath, Daniel Frees, William Barr Held, and Diyi Yang. Synthesizeme! inducing persona-guided prompts for personalized reward models in llms. In 
+
+Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers) , pages 8045–8078, 2025. 1, 3 Ali Shirali, Arash Nasr-Esfahany, Abdullah Alomar, Parsa Mirtaheri, Rediet Abebe, and Ariel Procaccia. Direct alignment with heterogeneous preferences. arXiv preprint arXiv:2502.16320 ,2025. 3 Anikait Singh, Sheryl Hsu, Kyle Hsu, Eric Mitchell, Stefano Ermon, Tatsunori Hashimoto, Archit Sharma, and Chelsea Finn. Fspo: Few-shot optimization of synthetic preferences personalizes to real users. arXiv preprint arXiv:2502.19312 , 2025. 3 Nisan Stiennon, Long Ouyang, Jeffrey Wu, Daniel Ziegler, Ryan Lowe, Chelsea Voss, Alec Radford, Dario Amodei, and Paul F Christiano. Learning to summarize with human feedback. Advances in neural information processing systems , 33:3008–3021, 2020. 5, 11, 23 Zhilin Wang, Yi Dong, Olivier Delalleau, Jiaqi Zeng, Gerald Shen, Daniel Egert, Jimmy J Zhang, Makesh N Sreedhar, and Oleksii Kuchaiev. Helpsteer 2: Open-source dataset for training top-performing reward models. Advances in Neural Information Processing Systems , 37:1474–1501, 2024. 5, 11, 23 Bianca Zadrozny and Charles Elkan. Transforming classifier scores into accurate multiclass probabil-ity estimates. In Proceedings of the eighth ACM SIGKDD international conference on Knowledge discovery and data mining , pages 694–699, 2002. 4 Yifan Zhang, Ge Zhang, Yue Wu, Kangping Xu, and Quanquan Gu. Beyond bradley-terry models: A general preference model for language model alignment. arXiv preprint arXiv:2410.02197 , 2024. 3Siyan Zhao, John Dang, and Aditya Grover. Group preference optimization: Few-shot alignment of large language models. arXiv preprint arXiv:2310.11523 , 2023. 3, 5, 23 Thomas P Zollo, Andrew Wei Tung Siah, Naimeng Ye, Ang Li, and Hongseok Namkoong. Person-alllm: Tailoring llms to individual preferences. arXiv preprint arXiv:2409.20296 , 2024. 5, 10, 23 
+
+## A Experimental Details 
+
+This appendix documents the dataset construction, data splits, model architecture, and training configurations used for the main results. 
+
+A.1 Dataset Construction Details PersonalLLM. PersonalLLM Zollo et al. [2024] provides a controllable benchmark with model-generated responses and simulated users. Each user is constructed by sampling a Dirichlet (αdiv )
+
+weight vector over 10 RewardBench reward heads, and pairwise preferences are generated by the corresponding weighted reward. We use 100 seen and 100 unseen users, 9,402 training prompts, and 1,000 held-out test prompts at three diversity levels αdiv ∈ { 0.001 , 0.01 , 0.1}. Smaller αdiv 
+
+yields sharper, more heterogeneous user weights and thus a harder personalization regime. The 10 Table 4: Dataset and evaluation settings for the primary results in Table 1. Label budgets distinguish the histories of seen users from the support sets used to adapt unseen users. Dataset Preference source Users (seen/unseen) Main setting Labeled pairs (seen/unseen) |D U |                           
+
+> PersonalLLM reward-model scores 100 /100 αdiv = 0 .145 /95,000
+> HelpSteer2 human attribute ratings 50 /50 αdiv = 0 .150 /10 50 ,000
+> Reddit TLDR human comparisons 20 /20 100 or 150 labels 100 or 150 /50 149 ,632
+> Chatbot Arena human comparisons 19 /19 active users 25 /12 3,166
+
+unpaired pool DU is built from source-dataset response candidates with their chosen and rejected labels removed, so no preference signal leaks from DU into training. 
+
+Reddit TLDR. Reddit TLDR Stiennon et al. [2020] provides real human preferences on summary quality and serves as our fully real benchmark. Following the MRM benchmark protocol Cai et al. [2026], we use 20 seen and 20 unseen users, with 100 or 150 labeled pairs per seen user and 50 
+
+support pairs per unseen user. Evaluation comparisons are disjoint from these support sets. The unpaired pool DU consists of the remaining users’ summaries with their preference labels stripped, so the unlabeled signal is drawn from the same response distribution as the labeled set without overlapping preferences. 
+
+HelpSteer2. HelpSteer2 Wang et al. [2024] is the real-human multi-attribute counterpart to Personal-LLM, replacing LLM-judge reward heads with human attribute ratings. The dataset supplies ∼7Kprompt–response pairs annotated by humans on five attributes (helpfulness, correctness, coherence, complexity, verbosity) on a 0–4 scale. We construct personalized users by sampling Dirichlet (αdiv )
+
+weight vectors over the five attributes; each user’s preference between two responses is determined by their attribute-weighted score. We use 50 seen and 50 unseen users, 50 labeled pairs per seen user, and 10–50 support pairs per unseen user. Remaining prompt–response pairs (with attribute scores stripped) form DU . We sweep αdiv ∈ { 0.01 , 0.1}.
+
+Chatbot Arena. We use the Chatbot Arena Conversations dataset Chiang et al. [2024] and follow Personalized Benchmarking Garbacea et al. [2026] in restricting attention to active users. We then remove ties, split each user’s ordered comparisons into an 80% training pool and a held-out 20% test set, and retain the 38 users with at least 25 training comparisons. Seen users receive 25 labeled pairs and unseen users 12; all methods use identical assigned splits and budgets. The held-out test set is used only for evaluation. The remaining 3,166 training-pool comparisons form the unpaired response pool after preference labels and user identities are removed. 11 A.2 Implementation Details Frozen representation and personalized reward head. Following the architecture-controlled setup used for the LoRe comparison, we tokenize each prompt–response sequence to at most 2,048 
+
+tokens and cache the final-token hidden representation from Skywork-Reward-V2-Llama-3.1-8B. The resulting d = 4 ,096 dimensional representations remain frozen for PerSPL, LoRe, BT, GPO, and MRM; Skywork V2 uses its pretrained scalar head directly. VPL and PAL instead use the native GPT-2 and OPT-350M backbones in their released code. PerSPL learns a linear basis V ∈ Rd×B
+
+and user logits wu ∈ RB . With πu = softmax( wu), the reward head is ru(e) = e⊤V π u/T , where 
+
+T = 100 . During seen-user training, V and the seen-user logits are optimized jointly. For an unseen user, we copy and freeze the learned basis V and fit only that user’s logits from the designated support comparisons. 
+
+Baseline implementations. We use the released implementations on the same assigned data splits and preserve each method’s native architecture. A single benchmark-level configuration is fixed across matched seeds. Appendix F lists the official baseline implementations and their licenses. 
+
+Optimization and reporting. We use Adam with zero weight decay and a one-cycle cosine learning-rate schedule. The peak learning rate is η in Table 5; the warm-up fraction is 0.3, the initial division factor is 25 , and the final division factor is 10 ,000 . Each optimizer step samples two users, four labeled comparisons per user (two on Chatbot Arena), and, after the first outer iteration, up to 16 
+
+pseudo-labeled responses per user. Pseudo-label refreshes score 1,000 candidates per user from 
+
+DU (up to 100 on Chatbot Arena). All main configurations use λr = 0 .01 and per-user isotonic calibration. We run matched seeds {42 , 43 , 44 , 45 , 46 } and report the saved last-epoch checkpoint at the specified budget; no epoch is selected separately for an individual seed. Reported standard deviations use the population convention ( ddof =0) over the executed seeds. 
+
+Table 5: PerSPL hyperparameters for the main results in Table 1. Here B is the basis rank, η is the peak learning rate, α is the labeled-loss weight in Eq. (7), and τ is the pseudo-label confidence threshold. Parameters shared by all rows are given in the text. Setting B η α τ
+
+# PersonalLLM ( αdiv = 0 .1) 2 0.03 0.6 0.9 HelpSteer2 ( αdiv = 0 .1) 5 0.01 0.7 0.6 Reddit TLDR (100/seen) 2 0.03 0.7 0.8 Reddit TLDR (150/seen) 2 0.03 0.7 0.8 Chatbot Arena (25/12) 2 0.3 0.8 0.8 
+
+A single configuration is shared by all five seeds within each row. Appendix C.4 reports a one-at-a-time sensitivity analysis around the main configuration. 12 A.3 PerSPL Training Procedure 
+
+The full PerSPL training procedure is given in Algorithm 1. 
+
+Algorithm 1 PerSPL: Personalized Semi-supervised Preference Learning 
+
+Require: Labeled sets {D uL}u∈U , shared unpaired set DU , reward model rθ, confidence threshold 
+
+τ > 1/2, weights λr and α, outer iterations K, inner epochs E 
+
+> 1:
+
+Initialize DuP ← ∅ for every u ∈ U  
+
+> 2:
+
+for k = 1 , . . . , K do  
+
+> 3:
+
+Reinitialize θ ∼ Init( ·) 
+
+> 4:
+
+for epoch e = 1 , . . . , E do  
+
+> 5:
+
+for each mini-batch step t do  
+
+> 6:
+
+Sample Ut ⊂ U and BuL ⊂ D uL for each u ∈ U t 
+
+> 7:
+
+Compute Llabel and Lreg on {B uL} using Eqs. (1) and (4)  
+
+> 8:
+
+if k = 1 then  
+
+> 9:
+
+L ← L label + λr Lreg  
+
+> 10:
+
+else  
+
+> 11:
+
+Sample BuP ⊂ D uP for each u ∈ U t and compute Lunlabel using Eq. (6)  
+
+> 12:
+
+L ← αLlabel + (1 − α)Lunlabel + λr Lreg  
+
+> 13:
+
+end if  
+
+> 14:
+
+Update θ with one Adam step on L 
+
+> 15:
+
+end for  
+
+> 16:
+
+for each user u ∈ U do  
+
+> 17:
+
+Cu ← { (rθ (x, y +, u ), 1) , (rθ (x, y −, u ), 0) : ( x, y +, y −) ∈ D uL} 
+
+> 18:
+
+Fit isotonic regressor fu on Cu and set δu ← inf {s : fu(s) ≥ 1/2} 
+
+> 19:
+
+end for  
+
+> 20:
+
+end for  
+
+> 21:
+
+for each user u ∈ U do  
+
+> 22:
+
+DuP ← ∅  
+
+> 23:
+
+for each (x, y ) ∈ D U do  
+
+> 24:
+
+q ← fu(rθ (x, y, u ))  
+
+> 25:
+
+if q > τ then  
+
+> 26:
+
+DuP ← D uP ∪ { (x, y, 1) } 
+
+> 27:
+
+else if q < 1 − τ then  
+
+> 28:
+
+DuP ← D uP ∪ { (x, y, 0) } 
+
+> 29:
+
+end if  
+
+> 30:
+
+end for  
+
+> 31:
+
+end for  
+
+> 32:
+
+end for 
+
+## B Theory and Diagnostics for Pair-Mean Centering 
+
+This appendix characterizes the score-space role of pair-mean centering and its effect on labeled-only reward-head training. We first relate pair means to cross-prompt risk. We then use an idealized Gaussian setting to exhibit how center covariance can change the optimized scoring direction. Finally, we derive the one-sided response of a fixed-budget Adam checkpoint and measure it on real data. The factorial ablation in Section 5.4 separately measures how centering interacts with iterative unpaired training. 
+
+B.1 Pair-mean geometry and cross-prompt risk 
+
+Fix one user and draw a labeled pair (X+, X −). Let 
+
+d = r(X+) − r(X−), m = r(X+) + r(X−)2 , ℓ(z) = log(1 + e−z ). (8) The paired risk is LBT = Eℓ(d) and the pair-mean penalty is RM = Em2. Let ( ed, em) be an independent pair from the same user. The cross-prompt logistic risk is 
+
+Lcross = Eℓ
+
+
+
+r(X+) − r( eX−)
+
+
+
+= Eℓ d + ed
+
+2 + m − em
+
+!
+
+. (9) 13 This risk is a smooth surrogate for GlobalAcc. It compares a chosen response and a rejected response drawn from different pairs. 
+
+Proposition 1 (Cross-prompt control by pair means) . If the scores have finite second moments, then 
+
+Lcross ≤ LBT + 14 Var( m) ≤ LBT + 14 RM . (10) 
+
+The inequality allows arbitrary dependence between m and d within a pair. Proof. Set a = ( d + ed)/2 and z = m − em. Since ℓ′′ ≤ 1/4,
+
+ℓ(a + z) ≤ ℓ(a) + ℓ′(a)z + 18 z2. (11) Exchanging the two sampled pairs keeps a fixed and changes the sign of z. The expected linear term is therefore zero, including when m and d are dependent within a pair. Convexity gives Eℓ(a) ≤ LBT ,while independence across the two draws gives Ez2 = 2 Var( m). The second inequality follows from Var( m) ≤ Em2.
+
+Why penalize the pair mean? The implemented second moment decomposes as 
+
+RM = Em2 = Var( m) + ( Em)2. (12) It therefore controls the dispersion term in Eq. (10) and selects zero as the common score anchor. Writing a score pair as (m + d/ 2, m − d/ 2) makes the direct action explicit: m2 penalizes the common score component without directly penalizing the contrast d. It is therefore a simple pair-local quadratic signal for the score component absent from the BT objective. Shared model parameters still determine the learned centers and margins jointly. The same coordinates relate centering to individual-response classification. For this fixed user, let 
+
+b ∈ R be a score threshold shared across prompts. Draw Y uniformly from {− 1, +1 }, and set 
+
+X = X+ when Y = +1 and X = X− otherwise. Define the balanced single-response logistic risk 
+
+Lsingle (b) = Eℓ(2 Y (r(X) − b)) = 12 Eℓ 2( r(X+) − b) + ℓ 2( b − r(X−))  . (13) This population risk is an analysis surrogate for classifying one response as chosen or rejected; it is not an additional training objective. The factor two places its margin on the BT scale: when m = b,both logistic arguments equal d. In general, the two arguments are d ± 2( m − b). Convexity and the same smoothness argument used above therefore give 
+
+LBT ≤ Lsingle (b) ≤ LBT + 12 E(m − b)2. (14) Equation (10) shows that pair-center dispersion controls the gap between within-pair BT risk and cross-prompt ranking risk. Equation (14) gives the analogous link to single-response classification around a shared threshold b. Thus the midpoint penalty controls a score component that within-pair BT comparisons do not explicitly constrain, but that both cross-prompt and single-response decisions use. 
+
+Scope of the score ambiguity. An additive prompt offset cancels in same-prompt selection, including best-of-N , but remains when a shared threshold compares responses across prompts. Pair-mean centering supplies an explicit location signal for this second setting, and GlobalAcc measures the resulting cross-prompt ordering. 
+
+B.2 An illustrative Gaussian model 
+
+We next use an idealized Gaussian setting to illustrate in closed form how center covariance can change the optimized scoring direction. It provides a concrete regime where the midpoint penalty improves single-response decisions. For a linear scorer rβ (x) = β⊤x, write 
+
+C = X+ + X−
+
+2 , D = X+ − X−, X± = C ± D
+
+2 . (15) Then m = β⊤C, so for any distribution with E∥C∥2 < ∞, the penalty defined above becomes 
+
+RM (β) = E(β⊤C)2 = β⊤Qcβ, Qc = E[CC ⊤]. (16) Thus pair-mean centering is a data-dependent quadratic penalty on sensitivity to directions shared within a pair. 14 Assumption 2 (Gaussian center–contrast model) . For one user, 
+
+C ∼ N (0 , Σc), D ∼ N (s, Σd), C ⊥ D, (17) 
+
+where C and D are independent, Σc and Σd are positive-definite covariance matrices, and s̸ = 0 is the mean contrast. 
+
+The condition E[C] = 0 isolates covariance-driven variation in pair centers. If E[C] = μc̸ = 0 , the implemented penalty instead uses Σc + μcμ⊤ 
+
+> c
+
+, and the local sign depends on the combined covariance and anchor geometry. Proposition 1 does not require either the Gaussian or mean-zero condition. Let LBT (β) = Eℓ(β⊤D). For a pair-mean coefficient λ ≥ 0, define 
+
+βλ = arg min 
+
+> β
+
+LBT (β) + λ β ⊤Σcβ , (18) and write βBT for the solution at λ = 0 . For the balanced single-response task defined above, the zero-threshold accuracy of the linear scorer is 
+
+Acc single (β) = Pr( Y β ⊤X > 0) . (19) Below, v ∥ w means that v is a positive scalar multiple of w.
+
+Theorem 3 (Local single-response accuracy improvement under the Gaussian model) . Under As-sumption 2, the direction maximizing Acc single is (4Σ c + Σ d)−1s. The solutions in Eq. (18) satisfy 
+
+βλ ∥
+
+
+
+Σd + 2λJ(βλ) Σc
+
+−1
+
+s, J(β) = Eℓ′′ (β⊤D) > 0. (20) 
+
+If ΣcΣ−1 
+
+> d
+
+s is not proportional to s, then 
+
+ddλ Acc single (βλ)
+
+> λ=0
+
+> 0, 0 ≤ LBT (βλ) − LBT (βBT ) = O(λ2). (21) Thus, for small positive λ, the midpoint penalty yields a first-order gain in single-response accuracy while incurring at most a second-order increase in paired BT risk. The nonalignment condition distinguishes a directional correction from a pure rescaling. If ΣcΣ−1 
+
+> d
+
+s is proportional to s, the penalty preserves the BT direction to first order. Otherwise, it moves the optimized direction toward higher single-response accuracy. 
+
+Proof. Gaussian integration by parts gives 
+
+∇LBT (β) = J(β)Σ dβ − a(β)s, a(β) = −Eℓ′(β⊤D) > 0. (22) The first-order condition for Eq. (18) yields Eq. (20). Assumption 2 also gives 
+
+Acc single (β) = Φ β⊤s
+
+pβ⊤(4Σ c + Σ d)β
+
+!
+
+, (23) where Φ is the standard normal cumulative distribution function. Its maximizing direction follows from the generalized Rayleigh quotient. It remains to determine the initial direction of change. Define u = Σ −1/2 
+
+> d
+
+s and B = Σ −1/2 
+
+> d
+
+ΣcΣ−1/2 
+
+> d
+
+.For β(t) ∥ (Σ d + tΣc)−1s, direct differentiation of the signal-to-noise ratio gives 
+
+ddt log β(t)⊤s
+
+pβ(t)⊤(4Σ c + Σ d)β(t) t=0 
+
+= 4 (u⊤u)( u⊤B2u) − (u⊤Bu )2
+
+(u⊤u)( u⊤u + 4 u⊤Bu ) . (24) By Cauchy–Schwarz, this derivative is positive exactly when the stated nonalignment condition holds. Along the regularized path, t = 2 λ/J (βλ) has derivative 2/J (βBT ) > 0 at zero, which proves the first statement in Eq. (21). The gradient of LBT vanishes at βBT , so its Taylor expansion along the same path is O(λ2). Nonnegativity follows because βBT minimizes LBT .15 Population-path illustration. We evaluate the two-dimensional center–contrast model in Assump-tion 2 under three settings: unequal center variance: s = (1 , 1) ⊤, Σc = diag(9 , 1) , Σd = I2,
+
+misaligned covariance axes: s = (1 , −0.5) ⊤, Σc =
+
+2 11 3
+
+
+
+, Σd =
+
+ 1.5 −0.2
+
+−0.2 0.8
+
+
+
+,
+
+direction-preserving control: s = (0 .8, −0.3) ⊤, Σc = 4 I2, Σd = I2.
+
+The first two settings satisfy the nonalignment condition in Theorem 3; the control does not. We solve the population objective in Eq. (18) by Gauss–Hermite quadrature along a fine grid near λ = 0 . For a common horizontal scale, let λ⋆ denote the coefficient satisfying 2λ⋆/J (βλ⋆ ) = 4 . By Eq. (20), this gives βλ⋆ ∥ (4Σ c + Σ d)−1s, the single-response-optimal direction. Its values are 0.4688 , 0.4748 , and 
+
+0.4980 in the three settings, respectively. Figure 4 focuses on the local regime 10 −6 ≤ λ/λ ⋆ ≤ 10 −3
+
+required by the theorem. 10 −6 10 −5 10 −4 10 −3          
+
+> Relative regularization, λ/λ⋆
+> 10 −4
+> 10 −3
+> 10 −2
+> 10 −1
+> ΔAcc single  (percentage points)
+> slope 1
+> Control: Delta Acc single = 0
+> (a) First-order accuracy gain
+> 10 −6 10 −5 10 −4 10 −3
+> Relative regularization, λ/λ⋆
+> 10 −10
+> 10 −8
+> 10 −6
+> 10 −4
+> LBT (βλ) −  LBT (β0)
+> slope 2
+> (b) Second-order paired-risk cost
+> Unequal center variance Misaligned covariance axes Direction-preserving control
+
+Figure 4: Direct visualization of Theorem 3 along the population regularization path. On log–log axes, the two nonaligned settings have a locally linear single-response accuracy gain (left; slope 1), while the paired BT excess risk is locally quadratic (right; slope 2). The direction-preserving control has exactly zero accuracy gain and is therefore shown only in the risk panel. Here λ⋆ is the coefficient whose population direction is single-response optimal; only the small-λ neighborhood covered by the theorem is plotted. 
+
+The two panels expose the theorem’s asymmetric local tradeoff: moving away from the BT solution changes single-response accuracy at first order but BT risk only at second order. The control clarifies that regularization alone is not sufficient; the gain requires the nonalignment condition that rotates the scoring direction. 
+
+B.3 Turning on centering under a fixed training budget 
+
+The Gaussian calculation concerns an optimized population model. PerSPL instead returns the Adam checkpoint after a fixed training budget. We analyze the local dependence of this checkpoint on the centering coefficient. Fix the initialization, minibatch sequence, learning-rate schedule, and Adam hyperparameters. At step t, let 
+
+gt(λ) = ∇Bt(θt(λ)) + λ∇Rt(θt(λ)) , (25) where Bt is the minibatch BT loss and Rt is the corresponding pair-mean penalty. With first and second moments μt and νt, Adam updates 
+
+μt+1 = β1μt + (1 − β1)gt, νt+1 = β2νt + (1 − β2)g⊙2 
+
+> t
+
+, (26) 
+
+¯μt+1 = μt+1 
+
+1 − βt+1 1
+
+, ¯νt+1 = νt+1 
+
+1 − βt+1 2
+
+,θt+1 = θt − ηt
+
+¯μt+1 
+
+√¯νt+1 + ϵ , (27) where ⊙ denotes coordinatewise multiplication and the square root and division are also coordinate-wise, 0 ≤ β1 < 1, 0 < β 2 < 1, ϵ > 0, and μ0 = ν0 = 0 . A superscript 0 denotes the trajectory at 
+
+λ = 0 .16 Proposition 4 (One-sided effect of turning on centering under Adam) . Fix a finite training horizon 
+
+K. Suppose Bt, Rt, and the evaluation target T are twice continuously differentiable near the unregularized parameter trajectory, and θ0 is independent of λ. Define Ht = ∇2Bt(θ0 
+
+> t
+
+) and 
+
+qt = ∇Rt(θ0 
+
+> t
+
+). For any quantity xt(λ) along the training path, write 
+
+˙xt = dx t(λ)
+
+dλ λ=0 +
+
+.
+
+These right derivatives exist. Starting from ˙θ0 = ˙ μ0 = ˙ ν0 = 0 , they satisfy 
+
+˙gt = Ht ˙θt + qt, (28) 
+
+˙μt+1 = β1 ˙μt + (1 − β1) ˙ gt, ˙νt+1 = β2 ˙νt + 2(1 − β2)g0 
+
+> t
+
+⊙ ˙gt.
+
+The bias-corrected derivatives are ˙¯μt+1 = ˙ μt+1 /(1 − βt+1 1 ) and ˙¯νt+1 = ˙ νt+1 /(1 − βt+1 2 ). For each coordinate i, the parameter tangent obeys 
+
+˙θt+1 ,i = ˙θt,i − ηt
+
+
+
+˙¯μt+1 ,i 
+
+q
+
+¯ν0 
+
+> t+1 ,i
+
++ ϵ
+
+− ¯μ0 
+
+> t+1 ,i
+
+˙¯νt+1 ,i 
+
+2
+
+q
+
+¯ν0
+
+> t+1 ,i
+
+(
+
+q
+
+¯ν0 
+
+> t+1 ,i
+
++ ϵ)2
+
+, ¯ν0 
+
+> t+1 ,i
+
+> 0,
+
+˙¯μt+1 ,i 
+
+ϵ , ¯ν0 
+
+> t+1 ,i
+
+= 0 ,
+
+(29) 
+
+As the centering coefficient approaches zero from the right, λ ↓ 0,
+
+T (θK (λ)) = T (θ0 
+
+> K
+
+) − λA 0+  
+
+> K, Adam
+
++ o(λ), (30) 
+
+A0+  
+
+> K, Adam
+
+= −∇ T (θ0 
+
+> K
+
+)⊤ ˙θK . (31) 
+
+Consequently, A0+  
+
+> K, Adam
+
+> 0 is sufficient for the evaluation target to decrease for all sufficiently small λ > 0.Proof. Suppose the state has a right derivative through step t. Differentiating Eq. (25) gives ˙gt =
+
+Ht ˙θt + qt. Differentiating Eq. (26) gives the remaining recursions in Eq. (28). It remains to differentiate the normalized Adam direction. If ¯ν0 
+
+> t+1 ,i
+
+> 0, ordinary differentiation gives the first branch of Eq. (29). If ¯ν0 
+
+> t+1 ,i
+
+= 0 , the nonnegative second-moment recursion and its zero initialization imply that the unregularized gradients of coordinate i have been zero through step 
+
+t. Its first moment is also zero. Smoothness and the induction hypothesis therefore give 
+
+¯μt+1 ,i (λ) = λ ˙¯μt+1 ,i + o(λ), ¯νt+1 ,i (λ) = O(λ2).
+
+For λ ↓ 0,
+
+¯μt+1 ,i (λ)
+
+p¯νt+1 ,i (λ) + ϵ = λ ˙¯μt+1 ,i 
+
+ϵ + o(λ),
+
+which proves the second branch. Equation (27) now gives ˙θt+1 , completing the induction. Finally, a one-sided expansion of T gives T (θK (λ)) = T (θ0 
+
+> K
+
+) + λ∇T (θ0 
+
+> K
+
+)⊤ ˙θK + o(λ), which proves Eqs. (30)–(31). The recurrence traces each midpoint gradient qt through the subsequent curvature and Adam moment updates. Equation (31) then gives the exact initial change in a smooth evaluation target. Its sign is determined by the data, representation, and training path. The matched one-sided runs below estimate this quantity for the Adam training path used by PerSPL. 
+
+B.4 Real-data checks 
+
+We isolate the effect of centering on labeled-only reward heads. We use HelpSteer2 with 50 seen users, rank five, and 50 labeled pairs per user, and Reddit TLDR with 20 seen users, rank two, and 150 labeled pairs per user. Every setting uses seeds 42–46 and last-epoch checkpoints. 
+
+Regularization path. We evaluate the same matched training path at two scales. To measure the initial effect of centering, we first train with Adam at λr ∈ { 0, 10 −8, 10 −7} while holding the 17 initialization, minibatch sequence, and training horizon fixed. For a positive coefficient λr, the matched forward difference is 
+
+bA0+ 
+
+> K, Adam
+
+(λr ) = T (θK (0)) − T (θK (λr )) 
+
+λr
+
+. (32) The held-out pairs are deterministically divided into two halves, with at most 256 pairs per user in each half. We set T to Lcross on the primary held-out half and repeat the measurement on the disjoint half. Table 6 reports these slopes together with the corresponding changes in pair-mean variation. 
+
+Table 6: Matched one-sided differences at λr = 0 for the actual fixed-budget Adam training path. The primary and disjoint columns estimate bA0+  
+
+> K, Adam
+
+on two held-out splits; the final column reports the reduction in held-out within-user pair-mean variance per unit λr . Entries are means ± paired 95% t intervals over five seeds. Positive values denote improvement. Dataset λr
+
+Primary alignment Disjoint alignment 
+
+Var( m) reduction per unit λr
+
+HelpSteer2 10 −8 402 .3 ± 115 .7 393 .6 ± 108 .0 4265 .8 ± 1339 .4
+
+HelpSteer2 10 −7 396 .1 ± 115 .6 387 .1 ± 108 .1 4203 .4 ± 1345 .2
+
+Reddit TL;DR 10 −8 178 .5 ± 136 .9 184 .7 ± 115 .9 1821 .3 ± 1384 .0
+
+Reddit TL;DR 10 −7 173 .7 ± 137 .6 179 .8 ± 118 .2 1782 .5 ± 1390 .6
+
+The primary held-out alignment is positive for every seed, dataset, and positive coefficient. At 
+
+λr = 10 −8, bA0+  
+
+> K, Adam
+
+is 402 .3 ± 115 .7 on HelpSteer2 and 178 .5 ± 136 .9 on Reddit. The disjoint-half estimates are 393 .6 ± 108 .0 and 184 .7 ± 115 .9, respectively. Increasing the coefficient to 10 −7 gives primary-half estimates of 396 .1 ± 115 .6 and 173 .7 ± 137 .6. Thus the mean primary-half slopes change by 1.6% and 2.8% across the two coefficients. Held-out Var( m) also decreases for every seed and coefficient. These slopes characterize the neighborhood of zero. To measure finite changes, we extend the same matched path to λr ∈ { 0, 10 −4, 10 −3, 3×10 −3, 10 −2, 3×10 −2, 10 −1, 1}. Held-out pairs are split deterministically into the same two halves. Shaded regions in Figure 5 show paired 95% t intervals over the five seeds. 010 −4   
+
+> 10 −3
+> 3×10 −3
+> 10 −2
+> 3×10 −2
+> 10 −1
+> 1
+> Pair-mean coefficient λr
+> 0.00 0.05 0.10 0.15 0.20
+> Lcross (0) −  Lcross (λr)
+> (a) Cross-prompt logistic loss
+> HelpSteer2 Reddit TL;DR
+> 010 −4
+> 10 −3
+> 3×10 −3
+> 10 −2
+> 3×10 −2
+> 10 −1
+> 1
+> Pair-mean coefficient λr
+> −0.08 −0.06 −0.04 −0.02 0.00
+> LBT (0) −  LBT (λr)
+> (b) Paired BT loss
+
+Figure 5: Real-data regularization paths for labeled-only reward heads. Panels (a) and (b) report the reductions in held-out cross-prompt logistic loss and paired BT loss, respectively, relative to the matched λr = 0 model. Solid lines show means and shaded regions show paired 95% t intervals over five seeds. Positive values denote lower loss. 
+
+This diagnostic sweep isolates the effect of λr; all main comparisons use the fixed coefficient 
+
+λr = 0 .01 reported in Section 5.2. At this coefficient, held-out PairAcc changes by −0.02 ± 0.14 points on HelpSteer2 and 0.00 ± 0.36 
+
+points on Reddit. This is consistent with the penalty acting on a cross-prompt score coordinate rather than directly changing same-prompt comparisons. Precision among the highest-confidence 10% of candidate pseudo-labels rises by 2.16 ± 0.29 points on HelpSteer2. The corresponding 18 held-out-response proxy on Reddit changes by −1.18 ± 3.67 points, with an interval containing zero. All intervals are paired 95% intervals over five seeds. Figure 5(a) reports the held-out cross-prompt loss reduction Lcross (0) − Lcross (λr ) relative to the matched λr = 0 model. Positive values therefore indicate improved cross-prompt ranking. All 70 nonzero-λr seed comparisons are positive. At λr = 0 .1, the mean reductions are 0.159 on HelpSteer2 and 0.093 on Reddit. Figure 5(b) examines whether centering compromises held-out pairwise prediction. It reports 
+
+LBT (0) − LBT (λr ), so positive values indicate lower loss and negative values indicate higher loss. At λr = 0 .01 , the mean gains are 0.0064 on HelpSteer2 and 0.0021 on Reddit. For comparison, the values at λr = 1 are −0.0664 and −0.0778 . At λr = 10 −8, the per-unit BT-loss reductions are 
+
+35 .4 ± 28 .6 and −55 .2 ± 39 .9, respectively; after multiplication by λr, both are absolute changes below 10 −6. Both datasets therefore improve at the coefficient used in the paper. Together, these results characterize pair-mean centering at three levels. The distribution-free bounds identify the score component used by cross-prompt and single-response decisions. The Gaussian model gives a concrete regime in which this component changes the optimized direction favorably. The Adam recurrence and matched runs establish the initial and finite effects along the actual labeled-only training path. Table 2 supplies the complementary full-procedure evidence: centering has little standalone effect on PairAcc, but changes the observed contribution of iterative unpaired training from negative to positive. 19 C Additional Results and Robustness Analyses 
+
+C.1 Full Per-dataset Results 
+
+We report full pairwise preference accuracy (%) on each benchmark for every method, including the per-dataset Overall column (per-seed average of seen and unseen accuracy) that is omitted from Table 1 for space. All numbers are mean ± std over five random seeds. The seen/unseen entries here match Table 1 on the matched settings ( αdiv =0 .1 for PersonalLLM and HelpSteer2; 100 and 150 
+
+labeled examples/seen user for Reddit TLDR; 25 /12 for Chatbot Arena). We additionally report the harder diversity levels ( αdiv ∈ { 0.001 , 0.01 } for PersonalLLM, αdiv =0 .01 for HelpSteer2) and the Reddit baselines omitted from Section 5.3 for space (Skywork-Reward V1, SynthesizeMe variants, and MRM with a V1 backbone). Best per column is in bold. 
+
+Table 7: Full PersonalLLM results across αdiv ∈ { 0.001 , 0.01 , 0.1} (45 pairs/seen user). Mean ± std over five seeds.                                               
+
+> αdiv =0 .001 αdiv =0 .01 αdiv =0 .1
+> Method Seen Unseen Overall Seen Unseen Overall Seen Unseen Overall Skywork-Reward V2 76.9 ±1.1 76.8 ±2.6 76.8 ±1.7 77.8 ±2.4 76.1 ±1.9 77.0 ±1.7 81.6 ±1.6 82.4 ±1.4 82.0 ±1.2 BT 81.7 ±3.8 81.8 ±4.0 81.7 ±3.8 82.5 ±4.5 81.6 ±4.2 82.0 ±4.2 88.8 ±3.2 89.0 ±3.8 88.9 ±3.4 VPL 82.8 ±1.7 82.6 ±0.9 82.7 ±1.2 83.6 ±2.1 82.9 ±2.0 83.3 ±1.8 89.6 ±1.2 89.8 ±1.2 89.7 ±1.1 GPO 85.4 ±2.2 84.3 ±2.9 84.9 ±2.5 79.4 ±16.1 77.6 ±15.1 78.5 ±15.6 89.1 ±6.7 89.6 ±6.8 89.4 ±6.7 PAL 81.0 ±0.8 80.5 ±0.7 80.8 ±0.6 80.5 ±2.8 79.7 ±2.0 80.1 ±1.9 84.7 ±1.4 85.2 ±1.5 85.0 ±1.1 LoRe 92.7 ±1.0 91.2 ±0.7 91.9 ±0.6 93.0 ±0.8 90.8 ±1.1 91.9 ±0.9 94.6 ±0.5 94.0 ±0.9 94.3 ±0.7 MRM 86.0 ±0.4 86.1 ±1.1 86.0 ±0.7 87.0 ±1.1 85.3 ±0.7 86.1 ±0.7 91.6 ±0.6 92.0 ±0.5 91.8 ±0.4
+> PerSPL 93.1 ±1.0 92.6 ±0.6 92.9 ±0.8 93.7 ±0.5 92.9 ±0.3 93.3 ±0.4 95.7 ±0.2 95.5 ±0.2 95.6 ±0.1
+
+Table 8: Full HelpSteer2 results across αdiv ∈ { 0.01 , 0.1} (50 pairs/seen user). Mean ± std over five seeds. 
+
+αdiv =0 .01 αdiv =0 .1
+
+Method Seen Unseen Overall Seen Unseen Overall Skywork-Reward V2 62.3 ±0.6 62.6 ±0.2 62.5 ±0.3 67.0 ±0.3 67.4 ±0.3 67.2 ±0.1 BT 53.1 ±4.4 53.0 ±4.5 53.1 ±4.4 63.0 ±3.7 63.2 ±3.8 63.1 ±3.7 VPL 55.4 ±1.5 55.3 ±1.3 55.4 ±1.4 59.6 ±0.7 59.6 ±0.6 59.6 ±0.6 GPO 60.3 ±2.1 59.8 ±2.0 60.1 ±2.0 65.8 ±2.6 66.4 ±2.3 66.1 ±2.4 PAL 54.7 ±1.2 54.3 ±0.8 54.5 ±1.0 57.1 ±1.4 56.9 ±1.0 57.0 ±1.2 LoRe 64.5 ±0.4 64.8 ±1.0 64.6 ±0.5 69.6 ±0.8 70.1 ±1.0 69.9 ±0.6 MRM 64.8 ±0.5 64.6 ±0.8 64.7 ±0.6 70.7 ±0.3 70.9 ±0.4 70.8 ±0.2 
+
+PerSPL 66.0 ±0.4 65.0 ±0.7 65.5 ±0.4 71.6 ±0.3 71.2 ±0.8 71.4 ±0.5 C.2 Full Chatbot Arena Results 
+
+Chatbot Arena is evaluated as the fourth main benchmark in Table 1. Following Personalized Benchmarking Garbacea et al. [2026], we restrict attention to active users in the Chatbot Arena Conversations dataset Chiang et al. [2024]. After removing ties, we split each active user’s ordered comparisons into an 80% training pool and a held-out 20% test set. We retain 38 users with at least 25 training comparisons. Each seed randomly assigns 19 users to each of the seen and unseen sets. Seen users receive 25 labeled pairs, while unseen users receive 12 support pairs. Only the training pool supplies labeled, support, or unpaired responses, and all methods use the same assigned splits, budgets, and seeds 42–46. 20 Table 9: Full Reddit TLDR results at 100 and 150 labeled examples/seen user. Mean ± std over five seeds. SynthesizeMe variants are inference-time-personalization methods (no in-domain training); MRM is reported with both Skywork-Reward V1 and V2 backbones. 
+
+100 examples/seen user 150 examples/seen user Method Seen Unseen Overall Seen Unseen Overall Skywork-Reward V1 62.6 ±0.5 62.6 ±0.9 62.6 ±0.9 62.6 ±0.5 62.6 ±0.9 62.6 ±0.9 Skywork-Reward V2 64.5 ±0.8 64.6 ±0.8 64.5 ±0.0 64.5 ±0.8 64.6 ±0.8 64.5 ±0.0 BT 63.2 ±4.8 64.3 ±3.8 63.8 ±4.2 64.4 ±3.5 65.2 ±3.1 64.8 ±3.3 VPL 57.0 ±0.8 56.9 ±1.3 56.9 ±0.5 57.6 ±1.5 57.0 ±1.6 57.3 ±0.7 GPO 63.8 ±2.5 64.6 ±2.7 64.2 ±2.6 65.7 ±1.7 65.9 ±1.3 65.8 ±1.4 PAL 56.9 ±1.6 56.4 ±1.2 56.7 ±1.3 57.1 ±1.8 57.5 ±1.8 57.3 ±1.6 LoRe 65.3 ±1.5 68.4 ±0.4 66.8 ±0.8 65.2 ±0.6 67.7 ±1.0 66.5 ±0.4 SynthesizeMe (ICL) 64.5 ±0.5 64.5 ±0.6 64.5 ±0.4 64.5 ±0.5 64.5 ±0.6 64.5 ±0.4 SynthesizeMe (FT) 64.5 ±0.5 64.4 ±0.6 64.4 ±0.5 64.5 ±0.5 64.4 ±0.6 64.4 ±0.5 MRM (Skywork-Reward V1) 68.2 ±1.3 68.5 ±1.6 68.4 ±1.1 68.6 ±1.0 68.6 ±1.0 68.6 ±0.8 MRM (Skywork-Reward V2) 70.0 ±1.0 69.8 ±0.6 69.9 ±0.4 70.0 ±1.1 69.6 ±0.7 69.8 ±0.4 
+
+PerSPL 70.7 ±1.2 70.1 ±0.6 70.4 ±0.5 70.9 ±0.9 70.3 ±0.7 70.6 ±0.5                                                                              
+
+> Table 10: Full Chatbot Arena results. We report pairwise accuracy (%, mean ±std over five matched seeds); Overall is the per-seed average of seen and unseen accuracy. VPL/PAL use their released pooled-pair evaluators; the other methods macro-average users. All five prespecified seeds are retained. Method Seen Unseen Overall Skywork-Reward V2 80 .33 ±1.40 76 .89 ±1.40 78 .61 ±0.00
+> BT 80 .25 ±2.02 78 .12 ±2.95 79 .19 ±1.12
+> VPL 64 .93 ±3.09 61 .93 ±6.26 63 .43 ±2.23
+> GPO 79 .44 ±1.66 77 .68 ±1.39 78 .56 ±1.12
+> PAL 58 .40 ±2.98 58 .36 ±3.04 58 .38 ±1.50
+> LoRe 81 .27 ±2.08 78 .38 ±2.05 79 .83 ±1.00
+> MRM 80 .69 ±1.44 77 .17 ±1.58 78 .93 ±0.46
+> PerSPL 82 .99 ±2.97 81 .04 ±2.43 82 .01 ±0.64
+
+Skywork V2 is frozen, and the union of seen and unseen users is fixed across seeds. Only the assignment of those users changes, so its per-seed overall accuracy is identical and the reported overall standard deviation is zero. PerSPL has the highest reported mean accuracy for both seen and unseen users. Relative to LoRe, the baseline with the highest overall mean, its paired gains are 1.72 points [0.14, 3.45] for seen users, 2.66 points [1.13, 4.28] for unseen users, and 2.19 points [0.79, 3.20] overall. The brackets give paired-bootstrap 95% confidence intervals from 20,000 resamples of the five matched seed differences. All three intervals exclude zero. 
+
+C.3 Additional Analyses Paired uncertainty. For each comparison in Table 11, we retain the seed pairing between PerSPL and the baseline with the highest overall mean in that setting and draw 20,000 bootstrap resamples of the five paired seed differences. The interval is the 2.5th–97.5th percentile range and is a descriptive summary of variation over the five executed matched seeds.                                      
+
+> Table 11: PerSPL minus the baseline with the highest overall mean in each setting, measured in accuracy percentage points with descriptive paired-bootstrap 95% confidence intervals over five matched seeds. Setting Seen Unseen Overall HelpSteer2 αdiv = 0 .1+0 .91 [0.62, 1.21] +0 .35 [0.04, 0.65] +0 .62 [0.34, 0.93] HelpSteer2 αdiv = 0 .01 +1 .22 [0.57, 2.01] +0 .37 [−0.43 , 1.18] +0 .81 [0.11, 1.62] Reddit, 100/seen +0 .78 [0.28, 1.35] +0 .38 [0.15, 0.60] +0 .56 [0.39, 0.76] Reddit, 150/seen +0 .91 [0.31, 1.51] +0 .74 [0.40, 1.08] +0 .81 [0.48, 1.05] Chatbot Arena, 25/12 +1 .72 [0.14, 3.45] +2 .66 [1.13, 4.28] +2 .19 [0.79, 3.20]
+
+21 Factorial analysis. Across the four settings in Table 2, the regularizer-only change ranges from 
+
+−0.1 to +0 .1 seen-accuracy points. Conditional on centering, adding the unpaired loss changes seen accuracy by +0 .7 [0.25, 1.07] and +0 .5 [0.46, 0.63] on HelpSteer2 ( αdiv = 0 .1 and 0.01 ), and by +1 .3 [0.54, 2.62] and +1 .8 [0.79, 2.81] on Reddit TLDR ( 100 and 150 examples/seen user). Brackets give paired-bootstrap 95% intervals over five matched seeds, and all four seen-user intervals exclude zero. The corresponding unseen-user changes are +0 .2 [−0.10 , 0.47], +0 .4 [−0.13 , 0.95], 
+
++0 .6 [0.06, 1.40], and 0.0 [−0.45 , 0.48]. Without centering, adding unpaired training changes seen accuracy by −4.4, −2.9, −5.8, and −6.5 points in the same four settings. 
+
+Controlled generator shift. For PersonalLLM, the in-domain generators are GPT-4o, Claude 3 Opus, Claude 3 Sonnet, Llama 3 70B, Gemini Pro 1.5, and Mixtral 8x22B; Command R+ and GPT-4 Turbo are held out as the response-generator shift. Labeled and unpaired sets are disjoint, labels have a 0.2 symmetric flip rate, and all rows use ten matched seeds. Table 12 gives the seen/unseen breakdown. 
+
+Table 12: Seen- and unseen-user breakdown for the controlled generator-shift study in Table 3. Overall results and paired gains are reported in the main table. Setting Seen Unseen Labeled only 80 .31 ± 1.37 82 .66 ± 0.67 
+
+ρ = 0 84 .56 ± 1.32 84 .83 ± 1.07 
+
+ρ = 0 .25 84 .44 ± 1.14 84 .66 ± 1.14 
+
+ρ = 0 .50 83 .55 ± 1.15 83 .71 ± 1.38 
+
+ρ = 0 .75 82 .58 ± 1.00 82 .83 ± 1.19 
+
+ρ = 1 81 .85 ± 0.86 82 .45 ± 0.84 
+
+C.4 Hyperparameter Sensitivity Analysis 
+
+To complement the qualitative sensitivity discussion in Section 5.4, we report a controlled one-at-a-time sweep of the iso-confidence threshold τ , learning rate η, and labeled-loss weight α. The sweep is run on HelpSteer2 ( αdiv = 0 .01 ). When one hyperparameter is varied, the other two are held at the main values τ = 0 .6, η = 0 .01 , and α = 0 .7. The training schedule and number of self-training iterations are also fixed. This post-hoc diagnostic does not determine the configurations used in Table 1. Each point is the overall test accuracy averaged across seen and unseen users over five matched seeds; shaded bands show ± one standard deviation. 0.5 0.6 0.7 0.8 0.9                
+
+> Confidence threshold τ
+> 0.60 0.62 0.64 0.66 0.68 0.70
+> Test accuracy
+> (a) Confidence threshold τ
+> 0.003 0.01 0.03 0.1 0.3
+> Learning rate η
+> 0.60 0.62 0.64 0.66 0.68 0.70
+> (b) Learning rate η
+> 0.4 0.5 0.6 0.7 0.8 0.9
+> Labeled-loss weight α
+> 0.60 0.62 0.64 0.66 0.68 0.70
+> (c) Labeled weight α
+> Main configuration
+
+Figure 6: Hyperparameter sensitivity of PerSPL on HelpSteer2 ( αdiv = 0 .01 ). Stars mark the main configuration (τ = 0 .6, η = 0 .01 , α = 0 .7). Overall accuracy changes little across the tested τ and α values and is stable near the main learning rate. 
+
+Findings. The threshold and labeled-loss weight have little effect within the tested ranges (Fig. 6). Across τ ∈ { 0.5, 0.6, 0.7, 0.8, 0.9}, overall accuracy spans only 0.30 percentage points. In particular, 
+
+τ = 0 .5, which effectively removes confidence-based abstention, is 0.19 points below the main 
+
+τ = 0 .6 setting. Across α ∈ { 0.4, . . . , 0.9}, the corresponding range is 0.23 points. The learning rate has a clearer effect. Values η ∈ { 0.006 , 0.01 , 0.02 } remain within 0.30 points of one another, and the main value is 2.75 points above η = 0 .3. Thus, the confidence threshold, labeled/unlabeled loss weighting, and the learning-rate neighborhood used by PerSPL are stable in this setting. 
+
+## D Scope and Limitations 
+
+Labeled anchors and information budgets. Per-user isotonic calibration requires labeled com-parisons for every user to whom the method is applied. Zero-label cold start is therefore out of 22 scope. Our seen-user histories and unseen-user support sets play different roles and must not be conflated: the former learn shared structure, while the latter adapt that structure to a target user. Mining user-generated content could reduce explicit annotation cost, but would introduce privacy and consent issues and would require an evaluation with a matched total information budget. 
+
+Selective pseudo-labeling. Confidence filtering intentionally abstains on ambiguous responses and retains all original labeled comparisons. It can nevertheless overrepresent easy or well-calibrated response regions. We test the all-response alternative and report accuracy, but do not yet measure subgroup-specific pseudo-label precision and coverage; deployment should audit both. 
+
+Distribution shift. The response-shift experiment holds labeled data fixed and varies a mixture of six in-domain and two held-out generators. It does not establish robustness to arbitrary semantic, demographic, adversarial, or temporal shift. Recalibration or abstention may be required when the unlabeled pool is far from the labeled support. 
+
+Architecture and scale. Experiments use a frozen reward-model representation with a learned low-rank reward basis. The findings may change with end-to-end fine-tuning or a much larger personalized backbone; a capacity-matched full-fine-tuning control is not included. The user populations contain at most 200 users, so computational and statistical behavior at production scale remains uncharacterized. 
+
+Language and tasks. The benchmarks are English-language and focus on instruction following, open-domain chatbot comparisons, and summarization. Cross-lingual transfer, multi-turn interaction, code, and long-horizon consequences are not evaluated. 
+
+## E Data and Software 
+
+We rely on four publicly available preference-learning benchmarks and on the released implementa-tions of every baseline we compare against. All assets are used in accordance with their respective licenses and access terms, including the non-commercial restriction of LoRe Bose et al. [2025] (academic research use only). Licenses are listed as reported by each asset’s official source at the time of writing. 
+
+Datasets. We use PersonalLLM Zollo et al. [2024] (dataset card; CC-BY-4.0), HelpSteer2 Wang et al. [2024] (dataset card; CC-BY-4.0), Reddit TLDR Stiennon et al. [2020] (official license; Modified MIT for the human-feedback release, with the underlying filtered Reddit TL;DR corpus separately licensed under CC-BY-4.0), and the gated Chatbot Arena Conversations release Chiang et al. [2024], with active-user filtering motivated by Personalized Benchmarking Garbacea et al. [2026]. Chatbot Arena user prompts are CC-BY-4.0 and model outputs are CC-BY-NC-4.0, and its access terms prohibit attempts to identify users. 
+
+Baseline implementations. We use the official released code for GPO Zhao et al. [2023] (MIT), VPL Poddar et al. [2024] (license not specified), PAL Chen et al. [2025] (Apache-2.0), LoRe Bose et al. [2025] (CC-BY-NC-4.0), and MRM Cai et al. [2026] (MIT). 
+
+Pre-trained reward model. We extract reward-model embeddings from Skywork-Reward-V2-Llama-3.1-8B (Llama 3.1 Community License), which is derived from 
+
+meta-llama/Llama-3.1-8B-Instruct and inherits its license terms. 23

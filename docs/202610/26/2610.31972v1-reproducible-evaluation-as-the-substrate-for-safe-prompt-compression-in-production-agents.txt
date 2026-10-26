@@ -1,0 +1,178 @@
+Title: Reproducible Evaluation as the Substrate for Safe Prompt Compression in Production Agents
+
+URL Source: https://arxiv.org/pdf/2610.31972v1
+
+Published Time: Mon, 26 Oct 2026 00:17:44 GMT
+
+Number of Pages: 8
+
+Markdown Content:
+# Reproducible Evaluation as the Substrate for Safe Prompt Compression in Production Agents 
+
+Prabal Vashisht 
+
+Mx ML DoorDash Inc. 
+
+prabal.vashisht@doordash.com 
+
+Zheng Hu 
+
+Mx ML DoorDash Inc. 
+
+zheng.hu@doordash.com 
+
+Ying Yang 
+
+Mx ML DoorDash Inc. 
+
+ying.yang@doordash.com 
+
+## Abstract 
+
+Evaluating conversational agents that act on live, mutable enterprise data is hard: replayed sessions drift as backend state changes, and a benchmark built today can silently go stale as the data it describes moves on. We present an offline evaluation harness for a production conversational agent that stays reproducible despite the live data it operates on changing, and that can be regenerated on demand once it goes stale. We then use this harness as the fitness function for GEPA-based prompt optimization under a correctness gate that guards against reward hacking. Applied to a production merchant-facing agent, correctness-gated compression shrinks the agent’s full prompt surface by 3.5–7.6% without regressing held-out task correctness, consistently across three independent subject-model families — and for one, correctness measurably improves. 
+
+## 1 Introduction 
+
+Conversational agents increasingly serve as the interface between users and the software systems that support their work — answering questions grounded in live data [Lewis et al., 2020], and, following the shift toward tool-augmented and agentic LLMs [Yao et al., 2023, Schick et al., 2023, Wang et al., 2024], increasingly taking actions on that data rather than only reporting on it. In practice, teams do not build such an agent by handing an optimizer a blank prompt and a training set. They first fix the product spec and tool contracts — required wording, forbidden wording, which tool answers which question [Schluntz and Zhang, 2024] — so the agent’s behavior stays legible and reviewable. Only once this spec-complete agent exists does the natural question become: is it reliable, and is it efficient? This paper is a blueprint for that starting point: given a production agent whose spec and tools are fixed, how do we make its evaluation trustworthy and its prompt leaner, without re-deriving its behavior from scratch? Reliability is harder to establish here than for static NLP tasks: the ground truth an agent is queried against is not fixed — a sales question has a different correct answer daily, and a write action changes the state the next eval run would read. Naive session replay against a live backend therefore produces incomparable results, and scoring a write tool’s text misses the point — what matters is the state it leaves behind. A benchmark can also go stale after the fact, as the entities it describes move on (a menu reprices, a payout settles), drifting from the system it describes independent of any model change. We treat this as routine: because generation and evaluation share one schema, a stale benchmark can be regenerated on demand from current backend state. 
+
+> 40th Conference on Neural Information Processing Systems (NeurIPS 2026). Workshop: Agents in the Wild. arXiv:2610.31972v1 [cs.AI] 22 Oct 2026
+
+Prior work addresses pieces of this. Static benchmarks like ToolLLM [Qin et al., 2024] assume a frozen corpus; interactive-environment benchmarks like AgentBench [Liu et al., 2024], WebArena [Zhou et al., 2024], and τ -bench [Yao et al., 2024] score end state, but inside simulated environments rather than live, drifting production data. Dynabench [Kiela et al., 2021] and LiveBench [White et al., 2025] refresh benchmarks against saturation and contamination, respectively; our staleness instead comes from the referent data moving, which calls for regeneration rather than continual sourcing. LLM-as-judge scoring [Zheng et al., 2023] handles subjective wording but not reproducibility itself, and prompt optimizers — APE [Zhou et al., 2023], DSPy [Khattab et al., 2024], GEPA [Agrawal et al., 2025] — treat their evaluation signal as given rather than addressing what makes it reproducible or fresh. Our harness matches a reproducibility mechanism to each tool’s data shape: staging the clock for reads immutable once settled, freezing the observed payload for current-state-dependent reads, and seed-then-read-back for tools that write. Archetype-stratified generation covers each skill’s capability surface, and deterministic plus LLM-rubric judges [Zheng et al., 2023] score correctness and policy compliance. Because this harness yields a stable scalar signal, it can also serve as GEPA’s [Agrawal et al., 2025] fitness function. Published GEPA use cases grow a minimal seed prompt via reflection; production agents start spec-complete, so optimization must instead compress without regressing. Shorter prompts directly reduce inference latency and serving cost [Jiang et al., 2023], so token count is worth optimizing even once correctness is already met. We use a lexicographic token-count objective that only breaks exact performance ties, never trading correctness for size, guarded by a hard gate against any rule-violating candidate — a prompt-optimization analogue of reward hacking in reinforcement learning [Skalse et al., 2022]. We validate this on a merchant-facing conversational agent already in production: across three independent subject-model families, compression under our gate reduces the agent’s full prompt surface by 3.5–7.6% without regressing held-out task correctness on a confirmatory held-out set — and for one family, correctness measurably improves — evidence that prompt size and task correctness need not trade off against each other. Our contributions: (1) a sandbox that generates and evaluates benchmark data against live production state, matching each tool’s data-mutability to a reproducibility mechanism and scoring write-tools on end state rather than transcript text; (2) a generation strategy that can be re-run at any point to refresh a benchmark once its underlying production data has moved on; and (3) a token-efficiency method that uses this harness as a correctness-gated fitness function for prompt compression. 
+
+## 2 Methodology 
+
+2.1 Preliminaries 
+
+Following GEPA [Agrawal et al., 2025] and the compound AI system framing it builds on [Za-haria et al., 2024], we treat the agent as a compound system Φ = (M, C, X, Y ): modules 
+
+M = ⟨M1, . . . , M |M |⟩, each Mi = ( πi, θ i, X i, Y i) with its own prompt and weights, orchestrated by control flow C.A skills-based agent’s M centers on a core module Mcore , whose prompt πcore is composed from a skill registry S = {s1, . . . , s n} — following the Agent Skills convention [Anthropic, 2025] of packaging instructions and resources under a discoverable name and description — sj = ( Kj , T j )
+
+pairing instruction text Kj with tools Tj . C maintains an active subset A ⊆ S per turn, so the model sees 
+
+πcore = πbase ⊕ [ 
+
+> sj∈A
+
+Kj , TA = [ 
+
+> sj∈A
+
+Tj ,
+
+where πbase is the agent’s system prompt, independent of any skill. It is what our contributions act on: the sandbox is skill-agnostic infrastructure for evaluating safely against production data, and compression jointly rephrases every prompt ( πbase , Kj ) together with the tools’ description text. 
+
+2.2 Sandbox: Reproducible Production State 
+
+A benchmark datapoint is a triple d = ( x, y ⋆, e ): a task x exercising skills A ⊆ S, its ground truth 
+
+y⋆, and the production-state slice e ∈ E needed to reproduce it. Each tool has a mutability class 2μ ∈ { settled , current , write }, mapped to a reproducibility mechanism ρ(μ): stage the clock for settled reads, freeze the payload for current-state reads, or seed-then-read-back for writes — letting e replay identically despite E drifting. 
+
+ρ only covers d’s staged scope A; a call routed outside it hits live, unstaged state, and — unlike a failed seed, hard-gated to 0 — goes unflagged, reading as an ordinary wrong answer. Evaluation runs Mcore against d under ρ(μ): Eval (y, y ⋆) ∈ [0 , 1] for reads, or Eval (epost , e ⋆
+
+> post
+
+) over sandboxed end state for writes, since a write tool is graded on what it leaves behind, not its text. Score is Score (P ; D′) = 1
+
+> |D′|
+
+P 
+
+> d∈D′
+
+Eval (·) for a prompt component P substituted into Mcore and evaluated over datapoints D′.
+
+2.3 Generation: Grounding Datapoints in Achievable Tool-Call Traces 
+
+A task x only tests skills A ⊆ S’s product spec if it’s answerable with TA = S  
+
+> sj∈A
+
+Tj . Two properties gate admission. First, existence : a generator agent, scoped to πcore and TA — exactly what 
+
+Mcore sees on that turn — attempts (x, τ, y ⋆) against a sampled e, captured by applying the same 
+
+ρ(μ) from §2.2 so the state τ observes replays identically at evaluation time, where τ = ( t1, . . . , t r ),
+
+ti ∈ TA, is the trace deriving y⋆. A slot is kept only if τ executes end to end and y⋆ follows from it; otherwise it’s discarded and resampled against a fresh e.Second, sense : since (x, τ, y ⋆) was produced by an agent, not hand-authored, a real trace doesn’t guarantee a good test — x can still be ill-posed, or y⋆ technically derived but not what the spec calls for. A human reviews every surviving datapoint before admission to D, confirming x is well-posed, 
+
+τ reflects the intended capability rather than an incidental path, and y⋆ matches the spec, not just the generator’s phrasing. Archetypes stratify generation across each skill’s capability surface so D
+
+doesn’t collapse onto a few easy shapes. Because generation is this repeatable pipeline over e, not a one-off authoring pass, it can be re-run at any later point u against eu — trace, human review, and all — to produce a fresh D′ once the original goes stale. 
+
+2.4 Correctness-Gated Prompt Compression 
+
+GEPA optimizes one joint candidate c spanning the registry’s textual surface: the base system prompt 
+
+πbase , every skill’s Kj , plus the description text of every tool in S 
+
+> j
+
+Tj . Compressing any one of these alone can only relocate text duplicated elsewhere, not remove it — coordinated rephrasing across the whole surface is what actually shrinks it. Let D = S 
+
+> j
+
+Dj pool datapoints across skills, partitioned into disjoint Dtrain , Dval , and Dtest (§3), and |c|tok be c’s total token count; fitness is 
+
+f (c) = 
+
+0 c violates a mandatory rule (critical gate) Score (c; Dval ) − ϵ · | c|tok /|Dval | otherwise. The gate is a hard zero, not a soft penalty, because compression would otherwise reward deleting a mandatory instruction whenever few datapoints exercise it — a prompt-optimization analogue of reward hacking [Skalse et al., 2022]. ϵ is sized to only break exact Score ties among rule-compliant candidates in the final selection, never trading correctness for size. GEPA edits every component of c each iteration — not one at a time, which can’t coordinate such a move — from Dtrain failures. Mutation parents are sampled from a Pareto frontier that unions candidates non-dominated on a per-datapoint basis with candidates non-dominated on aggregate per-objective scores — giving the search room to explore genuine correctness/size trade-offs before committing. The candidate ultimately reported, though, is whichever maximizes aggregate f over 
+
+Dval alone, so the trade-offs the frontier explores never determine the final answer; a held-out Dtest ,disjoint from both, reports the honest result. Unlike typical GEPA, which grows c from a minimal seed, c starts spec-complete, so every accepted mutation compresses rather than adds. 3Family Tokens (seed →winner) Compression Dtest ∆ (95% CI) Anthropic 36,336 → 33,567 −7.6% +0 .118 [+0 .073 , +0 .164 ]Gemini 36,336 → 34,380 −5.4% +0 .016 [−0.001 , +0 .035 ]OpenAI 36,336 → 35,077 −3.5% +0 .006 [−0.007 , +0 .021 ]
+
+Table 1: GEPA compression results per subject-model family. ∆ is the paired difference (winner 
+
+− seed) on Dtest (n = 196 ), mean of 5 rollouts per datapoint, with a 10,000-sample bootstrap 95% confidence interval. 
+
+## 3 Results 
+
+We apply this harness to a merchant-facing conversational agent in production, optimizing every textual prompt component of the agent — the base system prompt πbase , every skill’s Kj , and the description text of every tool — jointly as one candidate c (§2.4) against the full generated dataset. 
+
+Dataset. Following §2.2–2.3, we generate a train/val split stratified by skill–archetype pair across 10 skills at seed 42: 302 datapoints for training and 99 for validation. A 196-point held-out set Dtest ,disjoint from train and val and also stratified by skill–archetype pair, reports the honest result (§2.4). 
+
+Compression run. We run GEPA independently for three subject-model families — Anthropic (claude-sonnet-4.6 ), Gemini ( gemini-3.7-flash ), and OpenAI ( gpt-5.6-sol ) — each op-timizing the same joint candidate c (system prompt πbase , all ten skill bodies Kj , and shared tool descriptions; 36,336-token seed) at a rollout budget of 800. Fitness follows the f (c) defined in §2.4 (ϵ = 10 −6), with the critical-rule gate checked against every skill’s mandatory rules; candidates are additionally rejected by a no-harm gate that zeroes any candidate whose per-skill mean falls more than 0.02 below the seed’s. The Pareto frontier is hybrid — maintaining non-dominated candidates from two complementary views, per-datapoint performance and aggregate objective scores, rather than either alone — and the module selector is set to all , editing every component within the same reflection step. Seed and winner are each scored on Dtest as the mean of 5 rollouts per datapoint, controlling for sampling noise; Table 1 reports the paired difference with a 10,000-sample bootstrap 95% confidence interval. Only Anthropic’s confidence interval excludes zero: its winner is both 7.6% smaller and a real, statistically distinguishable improvement over its seed. Gemini’s and OpenAI’s intervals include zero — their winners are smaller with no detectable change in quality, not a proven gain. Read together, compression does not cost correctness for any family, and for one it recovers real headroom the seed’s extra tokens did not provide. 
+
+## 4 Conclusion 
+
+We presented an offline evaluation harness that grounds benchmark datapoints in reproducible production state and real tool-call traces, paired with a correctness-gated compression method that treats a compound agent’s entire textual surface as one candidate optimized under a hard gate against reward hacking. Applied to a merchant-facing agent already in production, this let GEPA shrink the agent’s prompt by 3.5–7.6% without regressing held-out correctness on a confirmatory held-out set, across three independent subject-model families (§3) — and for one family, correctness measurably improves — evidence that prompt size and task correctness need not trade off against each other. The gain’s size varies by subject model, so its benefit appears to depend on the model optimized, not solely on the harness. And since our benchmark is a frozen snapshot, we have not yet measured how a compressed candidate’s advantage decays as production drifts, despite the harness being designed to regenerate on demand (§2.3). 4References 
+
+Lakshya A Agrawal, Shangyin Tan, Dilara Soylu, Noah Ziems, Rishi Khare, Krista Opsahl-Ong, Arnav Singhvi, Herumb Shandilya, Michael J Ryan, Meng Jiang, Christopher Potts, Koushik Sen, Alexandros G. Dimakis, Ion Stoica, Dan Klein, Matei Zaharia, and Omar Khattab. Gepa: Reflective prompt evolution can outperform reinforcement learning. arXiv preprint arXiv:2507.19457 , 2025. ICLR 2026 Oral. Anthropic. Equipping agents for the real world with agent skills. Anthropic Engineering Blog, 2025. URL https://www.anthropic.com/engineering/ equipping-agents-for-the-real-world-with-agent-skills .Huiqiang Jiang, Qianhui Wu, Chin-Yew Lin, Yuqing Yang, and Lili Qiu. LLMLingua: Compressing prompts for accelerated inference of large language models. In Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing , 2023. Omar Khattab, Arnav Singhvi, Paridhi Maheshwari, Zhiyuan Zhang, Keshav Santhanam, Sri Vard-hamanan, Saiful Haq, Ashutosh Sharma, Thomas T. Joshi, Hanna Moazam, Heather Miller, Matei Zaharia, and Christopher Potts. Dspy: Compiling declarative language model calls into state-of-the-art pipelines. In International Conference on Learning Representations , 2024. Douwe Kiela, Max Bartolo, Yixin Nie, Divyansh Kaushik, Atticus Geiger, Zhengxuan Wu, Bertie Vidgen, Grusha Prasad, Amanpreet Singh, Pratik Ringshia, Zhiyi Ma, Tristan Thrush, Sebastian Riedel, Zeerak Waseem, Pontus Stenetorp, Robin Jia, Mohit Bansal, Christopher Potts, and Adina Williams. Dynabench: Rethinking benchmarking in nlp. In Proceedings of NAACL-HLT , 2021. Patrick Lewis, Ethan Perez, Aleksandra Piktus, Fabio Petroni, Vladimir Karpukhin, Naman Goyal, Heinrich Küttler, Mike Lewis, Wen-tau Yih, Tim Rocktäschel, Sebastian Riedel, and Douwe Kiela. Retrieval-augmented generation for knowledge-intensive nlp tasks. In Advances in Neural Information Processing Systems , volume 33, pages 9459–9474, 2020. Xiao Liu, Hao Yu, Hanchen Zhang, Yifan Xu, Xuanyu Lei, Hanyu Lai, Yu Gu, Hangliang Ding, Kaiwen Men, Kejuan Yang, Shudan Zhang, Xiang Deng, Aohan Zeng, Zhengxiao Du, Chenhui Zhang, Sheng Shen, Tianjun Zhang, Yu Su, Huan Sun, Minlie Huang, Yuxiao Dong, and Jie Tang. Agentbench: Evaluating llms as agents. In International Conference on Learning Representations ,2024. arXiv:2308.03688. Yujia Qin, Shihao Liang, Yining Ye, Kunlun Zhu, Lan Yan, Yaxi Lu, Yankai Lin, Xin Cong, Xiangru Tang, Bill Qian, Sihan Zhao, Lauren Hong, Runchu Tian, Ruobing Xie, Jie Zhou, Mark Gerstein, Dahai Li, Zhiyuan Liu, and Maosong Sun. Toolllm: Facilitating large language models to master 16000+ real-world apis. In International Conference on Learning Representations , 2024. Spotlight; arXiv:2307.16789. Timo Schick, Jane Dwivedi-Yu, Roberto Dessì, Roberta Raileanu, Maria Lomeli, Luke Zettlemoyer, Nicola Cancedda, and Thomas Scialom. Toolformer: Language models can teach themselves to use tools. In Advances in Neural Information Processing Systems , 2023. arXiv:2302.04761. Erik Schluntz and Barry Zhang. Building effective agents. Anthropic Engineering Blog, Dec. 19, 2024, 2024. URL https://www.anthropic.com/engineering/building-effective-agents .Joar Skalse, Nikolaus Howe, Dmitrii Krasheninnikov, and David Krueger. Defining and characterizing reward hacking. In Advances in Neural Information Processing Systems , 2022. arXiv:2209.13085. Lei Wang, Chen Ma, Xueyang Feng, Zeyu Zhang, Hao Yang, Jingsen Zhang, Zhiyuan Chen, Jiakai Tang, Xu Chen, Yankai Lin, et al. A survey on large language model based autonomous agents. 
+
+Frontiers of Computer Science , 18(6), 2024. arXiv:2308.11432. Colin White, Samuel Dooley, Manley Roberts, Arka Pal, Ben Feuer, Siddhartha Jain, Ravid Shwartz-Ziv, Neel Jain, Khalid Saifullah, Sreemanti Dey, Shubh Agrawal, Sandeep Singh Sandha, Siddartha Naidu, Chinmay Hegde, Yann LeCun, Tom Goldstein, Willie Neiswanger, and Micah Goldblum. Livebench: A challenging, contamination-limited llm benchmark. In International Conference on Learning Representations , 2025. Spotlight; arXiv:2406.19314. 5Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik Narasimhan, and Yuan Cao. React: Synergizing reasoning and acting in language models. In International Conference on Learning Representations , 2023. arXiv:2210.03629. Shunyu Yao, Noah Shinn, Pedram Razavi, and Karthik Narasimhan. τ -bench: A benchmark for tool-agent-user interaction in real-world domains. arXiv preprint arXiv:2406.12045 , 2024. Matei Zaharia, Omar Khattab, Lingjiao Chen, Jared Quincy Davis, Heather Miller, Christopher Potts, James Zou, Michael Carbin, Jonathan Frankle, Naveen Rao, and Ali Ghodsi. The shift from models to compound ai systems. Berkeley Artificial Intelligence Research (BAIR) Blog, Feb. 18, 2024, 2024. URL https://bair.berkeley.edu/blog/2024/02/18/compound-ai-systems/ .Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, et al. Judging llm-as-a-judge with mt-bench and chatbot arena. In Advances in Neural Information Processing Systems ,2023. Datasets and Benchmarks Track; arXiv:2306.05685. Shuyan Zhou, Frank F. Xu, Hao Zhu, Xuhui Zhou, Robert Lo, Abishek Sridhar, Xianyi Cheng, Tianyue Ou, Yonatan Bisk, Daniel Fried, Uri Alon, and Graham Neubig. Webarena: A realistic web environment for building autonomous agents. In International Conference on Learning Representations , 2024. arXiv:2307.13854. Yongchao Zhou, Andrei Ioan Muresanu, Ziwen Han, Keiran Paster, Silviu Pitis, Harris Chan, and Jimmy Ba. Large language models are human-level prompt engineers. In International Conference on Learning Representations , 2023. arXiv:2211.01910. 6A Example Datapoint 
+
+To make the harness’s data format concrete, the listing below reproduces one datapoint from the 
+
+sales skill’s generated dataset (§2.2–2.3), with the store identifier and the generation tool call’s arguments/output redacted.  
+
+> datapoint_id: sales-fcb32a3d tags: [sales] merchant: store_id: <STORE_ID> # synthetic eval-mode test merchant eval_mode: true task: description: > Can you show me my daily revenue trend from April 13 to April 19, 2026 (inclusive of both dates) as a line chart? expected_tool_calls: [query_sales_data, render_chart] environment: as_of_datetime: 2026-04-28T10:59:37-07:00 simulator: kind: single_shot opening_message: > Can you show me my daily revenue trend from April 13 to April 19, 2026 (inclusive of both dates) as a line chart? evaluators: - type: dollar_recall expected_final_response: > Your total revenue from April 13 to April 19, 2026 was $352.28 across 18 orders, with an average order value of $19.57. ... must_have_figures: ["352.28"] score_aggregation: min generation_tool_calls: - name: query_sales_data args: <REDACTED> output: <REDACTED>
+
+The task x is the merchant’s natural-language question together with the merchant context; the expected outcome y∗ is the dollar_recall evaluator’s expected response and required figures; the existence witness τ is the generation_tool_calls trace — here a single real query_sales_data 
+
+call against production data, captured at as_of_datetime . Note that render_chart appears in 
+
+expected_tool_calls but not in the captured trace: only calls that fetch state backing the graded answer are retained as the witness, not every call in the full interaction. 
+
+## B Reward-Hacking Near-Miss 
+
+During search, one intermediate candidate’s only edit was dropping a frozen store_id_handling 
+
+block from sales_skill_body : 
+
+> -## Store ID --- StoreLevel: pass `store_id` from Current Entity. -- BusinessLevel: **omit** `store_id` for business-wide results. Never -use `business_id` as `store_id`. -## request_json Parameters
+
+This candidate’s own no-harm check correctly zeroed it. But a later candidate in the same lineage inherited the deletion and was not caught the same way — the no-harm gate is computed per-iteration against whichever batch is sampled that round, so a rule a given batch never exercises can slip through. Independently, the text-coverage judge checks for the rule’s text anywhere in the candidate, not per-batch — and here it found the same instruction duplicated earlier in the skill body and passed the candidate without checking that the specific copy it needed was the one just deleted. Only a broader diagnostic pass, checking the sales skill specifically, surfaced the drop (0.90 → 0.00) — after the fact, not as part of the standard selection pipeline. This near-miss is exactly the gap the hard 7critical-rule gate (§2.4) closes going forward: unlike the no-harm gate’s batch-dependent sampling or the text-coverage judge’s static, duplicate-blind text check, the critical-rule gate runs deterministically against every candidate’s actual rule compliance, independent of which batch happened to be sampled or which text happens to appear elsewhere in the skill body. 
+
+## C Sample Compression 
+
+Below is a short excerpt from the financials skill body, before and after the Anthropic family’s winning edit, 
+
+Seed: 
+
+## Overview Help merchants with two related financial topics: - **Refunds & adjustments** -- orders where money was returned to the merchant (dispute refunds or adjustment credits) - **Payouts & fees** -- deposit history, payout schedules, commission rates, and fee structure across stores ## Display Rules (MANDATORY) **NEVER output text lists.** Always use frontend tools to display data. - `<TOOL_REFUNDS>` returns pre-formatted table data -> pass directly to the table renderer - Never output markdown tables or plain text lists 
+
+Winner: 
+
+## Overview Help merchants with: **Refunds & adjustments** (money returned to merchant) and **Payouts & fees** (deposit history, schedules, commission rates, fee structure). ## Display Rules (MANDATORY) **NEVER output text lists or markdown tables.** Always use frontend tools. - `<TOOL_REFUNDS>` -> pass table data directly to the table renderer 
+
+The two-bullet Overview collapses into one sentence, and the Display Rules section drops a redundant instruction — “NEVER output text lists” and “Never output markdown tables or plain text lists” 
+
+merge into a single rule — without dropping any distinct constraint — exactly the kind of lossless rewording the harness is designed to reward. 8
