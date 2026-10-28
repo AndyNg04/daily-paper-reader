@@ -48,7 +48,7 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-27</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-28</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
     <strong class="dpr-home-dashboard-count">共 35 篇</strong>
@@ -58,7 +58,7 @@
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-27 20:17:25 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-28 19:40:01 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>10 月 27 日论文日报已更新：35 篇推荐，15 篇精读、20 篇速读，聚焦 AI 智能体与人机协作。</p>
-<p>最值得关注的是开发者如何管理 AI 智能体的职场观察研究（10.0/10），以及 ConMem 对大模型记忆错位的探测与解决思路（9.0/10）。</p>
-<p>建议先读满分职场研究，理解 AI 如何改变开发者角色，再按兴趣速读智能体间的社交工程或用户意图演变相关论文。</p>
+<p>2026-10-28 论文日报已出炉：共筛选推荐 35 篇，精读 15 篇、速读 20 篇。</p>
+<p>今日优先关注两个 9.0 分方向：多语言大模型的鲁棒性与迎合行为辨析，以及通过持续学习实现 sEMG 手势识别的跨用户适配。</p>
+<p>普通读者可先从 8.0 分的“个性化 AI 回复建议对内容创作者私信的影响”入手，再按兴趣深入两篇高分精读。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -83,9 +83,9 @@
     <strong class="dpr-home-dashboard-count">15 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Developers as Managers of AI Agents: A Workplace Shadowing Study">Developers as Managers of AI Agents: A Workplace Shadowing Study</span></li><li><span class="dpr-home-dashboard-paper-title" title="ConMem: Counterfactual Multi-Scenario Probing for Resolving LLM Memory Misalignment">ConMem: Counterfactual Multi-Scenario Probing for Resolving LLM Memory Misalignment</span></li><li><span class="dpr-home-dashboard-paper-title" title="Words Are the Voice of the Mind: Depression Severity Estimation from Social Traces via Mental-Guided Evidence Reasoning">Words Are the Voice of the Mind: Depression Severity Estimation from Social Traces via Mental-Guided Evidence Reasoning</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Disentangling Robustness and Sycophancy in Multilingual LLMs">Disentangling Robustness and Sycophancy in Multilingual LLMs</span></li><li><span class="dpr-home-dashboard-paper-title" title="Cross-User Adaptation for sEMG Gesture Recognition via Continual Learning">Cross-User Adaptation for sEMG Gesture Recognition via Continual Learning</span></li><li><span class="dpr-home-dashboard-paper-title" title="BE-CTDE: Blockchain-Enabled Multi-Agent Reinforcement Learning with Anomaly Detection and Token Economics">BE-CTDE: Blockchain-Enabled Multi-Agent Reinforcement Learning with Anomaly Detection and Token Economics</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>6</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>4</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">interaction <strong>4</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>4</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -96,9 +96,9 @@
     <strong class="dpr-home-dashboard-count">20 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Agent-to-Agent Synthetic Social Engineering on the Web">Agent-to-Agent Synthetic Social Engineering on the Web</span></li><li><span class="dpr-home-dashboard-paper-title" title="IntentDelta: A Human-Constructed Benchmark for Evolving User Intent">IntentDelta: A Human-Constructed Benchmark for Evolving User Intent</span></li><li><span class="dpr-home-dashboard-paper-title" title="IntNet: A Communication-Driven Multi-Agent Reinforcement Learning Framework for Cooperative Autonomous Driving">IntNet: A Communication-Driven Multi-Agent Reinforcement Learning Framework for Cooperative Autonomous Driving</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Contextual Candour: Role-Aware Graduated Disclosure for LLMs over Mixed-Sensitivity Contexts">Contextual Candour: Role-Aware Graduated Disclosure for LLMs over Mixed-Sensitivity Contexts</span></li><li><span class="dpr-home-dashboard-paper-title" title="The Impact of Personalized AI Response Suggestions on Content Creators&#x27; Direct Messaging">The Impact of Personalized AI Response Suggestions on Content Creators&#x27; Direct Messaging</span></li><li><span class="dpr-home-dashboard-paper-title" title="CogArena: Benchmarking Multimodal Agents on Interactive Behavioral Experiments">CogArena: Benchmarking Multimodal Agents on Interactive Behavioral Experiments</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>5</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>4</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>11</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>4</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
 </section>
 </div>
 
