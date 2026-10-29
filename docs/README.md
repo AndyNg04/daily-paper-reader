@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-28</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-29</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 35 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 19 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>10</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>9</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-28 19:40:01 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-29 19:55:10 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-28 论文日报已出炉：共筛选推荐 35 篇，精读 15 篇、速读 20 篇。</p>
-<p>今日优先关注两个 9.0 分方向：多语言大模型的鲁棒性与迎合行为辨析，以及通过持续学习实现 sEMG 手势识别的跨用户适配。</p>
-<p>普通读者可先从 8.0 分的“个性化 AI 回复建议对内容创作者私信的影响”入手，再按兴趣深入两篇高分精读。</p>
+<p>2026-10-29 论文日报出炉：完成 19 篇论文筛选与推荐，精读 10 篇、速读 9 篇。</p>
+<p>最值得关注的两条主线是大模型的迎合行为与信任校准，以及记忆机制进展，对应精读推荐均获 9.0/10。</p>
+<p>建议先从这两篇高分论文入手，再按兴趣速读战略说服、偏好与不完美决策建模，或专用软件操作智能体相关研究。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">15 篇</strong>
+    <strong class="dpr-home-dashboard-count">10 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Disentangling Robustness and Sycophancy in Multilingual LLMs">Disentangling Robustness and Sycophancy in Multilingual LLMs</span></li><li><span class="dpr-home-dashboard-paper-title" title="Cross-User Adaptation for sEMG Gesture Recognition via Continual Learning">Cross-User Adaptation for sEMG Gesture Recognition via Continual Learning</span></li><li><span class="dpr-home-dashboard-paper-title" title="BE-CTDE: Blockchain-Enabled Multi-Agent Reinforcement Learning with Anomaly Detection and Token Economics">BE-CTDE: Blockchain-Enabled Multi-Agent Reinforcement Learning with Anomaly Detection and Token Economics</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Who Is Sycophantic to Whom? Confident LLMs, Human Deference, and the Collapse of Trust Calibration">Who Is Sycophantic to Whom? Confident LLMs, Human Deference, and the Collapse of Trust Calibration</span></li><li><span class="dpr-home-dashboard-paper-title" title="Learning to Remember: Advances in Memory Mechanisms for Large Language Models">Learning to Remember: Advances in Memory Mechanisms for Large Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="Knowing When to Escalate: Disagreement Patterns for Uncertainty-Aware Content Moderation">Knowing When to Escalate: Disagreement Patterns for Uncertainty-Aware Content Moderation</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">interaction <strong>4</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>4</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>4</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -93,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">20 篇</strong>
+    <strong class="dpr-home-dashboard-count">9 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Contextual Candour: Role-Aware Graduated Disclosure for LLMs over Mixed-Sensitivity Contexts">Contextual Candour: Role-Aware Graduated Disclosure for LLMs over Mixed-Sensitivity Contexts</span></li><li><span class="dpr-home-dashboard-paper-title" title="The Impact of Personalized AI Response Suggestions on Content Creators&#x27; Direct Messaging">The Impact of Personalized AI Response Suggestions on Content Creators&#x27; Direct Messaging</span></li><li><span class="dpr-home-dashboard-paper-title" title="CogArena: Benchmarking Multimodal Agents on Interactive Behavioral Experiments">CogArena: Benchmarking Multimodal Agents on Interactive Behavioral Experiments</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Implicit Beliefs as Scalable Process Rewards for Strategic Persuasion">Implicit Beliefs as Scalable Process Rewards for Strategic Persuasion</span></li><li><span class="dpr-home-dashboard-paper-title" title="Jointly Modeling Preferences and Imperfect Decision-Making in Large Language Models">Jointly Modeling Preferences and Imperfect Decision-Making in Large Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="OS-Wizard: Scaling Computer-Using Agents to Specialized Software via Knowledge-Guided Exploration">OS-Wizard: Scaling Computer-Using Agents to Specialized Software via Knowledge-Guided Exploration</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>11</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>4</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>1</strong></span></div>
 </section>
 </div>
 
