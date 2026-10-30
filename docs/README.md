@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-29</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-30</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 19 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 35 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>10</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>9</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-29 19:55:10 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-30 19:28:31 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-29 论文日报出炉：完成 19 篇论文筛选与推荐，精读 10 篇、速读 9 篇。</p>
-<p>最值得关注的两条主线是大模型的迎合行为与信任校准，以及记忆机制进展，对应精读推荐均获 9.0/10。</p>
-<p>建议先从这两篇高分论文入手，再按兴趣速读战略说服、偏好与不完美决策建模，或专用软件操作智能体相关研究。</p>
+<p>2026-10-30 论文日报已出炉：精选 35 篇，15 篇精读、20 篇速读，聚焦模型行为与人机协作。</p>
+<p>最值得关注的是两篇获评 10/10 的精读：追踪开放语言模型在不同训练阶段的迎合行为，以及探讨人机共写中的人类角色、创造力与多样性。</p>
+<p>建议先按兴趣选读其中一篇，再速览智能体记忆攻击或 AI 数学学习伙伴的研究，了解相关安全问题与应用场景。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">10 篇</strong>
+    <strong class="dpr-home-dashboard-count">15 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Who Is Sycophantic to Whom? Confident LLMs, Human Deference, and the Collapse of Trust Calibration">Who Is Sycophantic to Whom? Confident LLMs, Human Deference, and the Collapse of Trust Calibration</span></li><li><span class="dpr-home-dashboard-paper-title" title="Learning to Remember: Advances in Memory Mechanisms for Large Language Models">Learning to Remember: Advances in Memory Mechanisms for Large Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="Knowing When to Escalate: Disagreement Patterns for Uncertainty-Aware Content Moderation">Knowing When to Escalate: Disagreement Patterns for Uncertainty-Aware Content Moderation</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Locating Sycophancy Across Training Stages in Open Language Models">Locating Sycophancy Across Training Stages in Open Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="What Is the Role for Humans in Creative Writing? Creativity and Diversity in Human-AI Collaboration">What Is the Role for Humans in Creative Writing? Creativity and Diversity in Human-AI Collaboration</span></li><li><span class="dpr-home-dashboard-paper-title" title="Improving Group Deliberation through AI-Guided Self-Reflection">Improving Group Deliberation through AI-Guided Self-Reflection</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>4</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -93,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">9 篇</strong>
+    <strong class="dpr-home-dashboard-count">20 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Implicit Beliefs as Scalable Process Rewards for Strategic Persuasion">Implicit Beliefs as Scalable Process Rewards for Strategic Persuasion</span></li><li><span class="dpr-home-dashboard-paper-title" title="Jointly Modeling Preferences and Imperfect Decision-Making in Large Language Models">Jointly Modeling Preferences and Imperfect Decision-Making in Large Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="OS-Wizard: Scaling Computer-Using Agents to Specialized Software via Knowledge-Guided Exploration">OS-Wizard: Scaling Computer-Using Agents to Specialized Software via Knowledge-Guided Exploration</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Is it my preference? Role Grounding Attack against Agent&#x27;s Memory via Social Interaction">Is it my preference? Role Grounding Attack against Agent&#x27;s Memory via Social Interaction</span></li><li><span class="dpr-home-dashboard-paper-title" title="Aligning Autoresearch: Co-Improvement between Agents and Humans">Aligning Autoresearch: Co-Improvement between Agents and Humans</span></li><li><span class="dpr-home-dashboard-paper-title" title="Exploring AI Peer in Collaborative Mathematics Learning">Exploring AI Peer in Collaborative Mathematics Learning</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>5</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>4</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span></div>
 </section>
 </div>
 
