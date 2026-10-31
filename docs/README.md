@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-10-30</span>
+      <span class="dpr-home-dashboard-kicker">2026-10-31</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 35 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 27 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>10</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>17</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-10-30 19:28:31 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-10-31 18:18:43 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>2026-10-30 论文日报已出炉：精选 35 篇，15 篇精读、20 篇速读，聚焦模型行为与人机协作。</p>
-<p>最值得关注的是两篇获评 10/10 的精读：追踪开放语言模型在不同训练阶段的迎合行为，以及探讨人机共写中的人类角色、创造力与多样性。</p>
-<p>建议先按兴趣选读其中一篇，再速览智能体记忆攻击或 AI 数学学习伙伴的研究，了解相关安全问题与应用场景。</p>
+<p>2026-10-31 日报已完成：共筛选推荐 27 篇论文，分为精读 10 篇、速读 17 篇。</p>
+<p>最值得关注的是两篇同获 9.0 分的精读：Immersive Commons 探索共处混合现实中的短暂空间对话设计，TrussTutor-Bench 评测大模型在静力学解题中的准确性、迎合倾向与错误检测能力。</p>
+<p>建议先按兴趣选读这两篇之一，再从智能体记忆、便携式多模态数据采集或 AI 时代的劳动意义中挑一个方向速读拓展。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">15 篇</strong>
+    <strong class="dpr-home-dashboard-count">10 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Locating Sycophancy Across Training Stages in Open Language Models">Locating Sycophancy Across Training Stages in Open Language Models</span></li><li><span class="dpr-home-dashboard-paper-title" title="What Is the Role for Humans in Creative Writing? Creativity and Diversity in Human-AI Collaboration">What Is the Role for Humans in Creative Writing? Creativity and Diversity in Human-AI Collaboration</span></li><li><span class="dpr-home-dashboard-paper-title" title="Improving Group Deliberation through AI-Guided Self-Reflection">Improving Group Deliberation through AI-Guided Self-Reflection</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Immersive Commons: Designing Ephemeral Spatial Dialogue for Co-Located Mixed Reality Environments">Immersive Commons: Designing Ephemeral Spatial Dialogue for Co-Located Mixed Reality Environments</span></li><li><span class="dpr-home-dashboard-paper-title" title="TrussTutor-Bench: Benchmarking large language models on solution accuracy, sycophancy, and error detection in statics">TrussTutor-Bench: Benchmarking large language models on solution accuracy, sycophancy, and error detection in statics</span></li><li><span class="dpr-home-dashboard-paper-title" title="GraspPressure: Understanding Pressure Input With Busy Hands">GraspPressure: Understanding Pressure Input With Busy Hands</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>3</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>3</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -93,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">20 篇</strong>
+    <strong class="dpr-home-dashboard-count">17 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Is it my preference? Role Grounding Attack against Agent&#x27;s Memory via Social Interaction">Is it my preference? Role Grounding Attack against Agent&#x27;s Memory via Social Interaction</span></li><li><span class="dpr-home-dashboard-paper-title" title="Aligning Autoresearch: Co-Improvement between Agents and Humans">Aligning Autoresearch: Co-Improvement between Agents and Humans</span></li><li><span class="dpr-home-dashboard-paper-title" title="Exploring AI Peer in Collaborative Mathematics Learning">Exploring AI Peer in Collaborative Mathematics Learning</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="ReSight: Task-Driven Self-Improving Memory for Embodied Agents">ReSight: Task-Driven Self-Improving Memory for Embodied Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="DEX-PHD: A Dexterous Portable Handheld Device for Multimodal Data Collection">DEX-PHD: A Dexterous Portable Handheld Device for Multimodal Data Collection</span></li><li><span class="dpr-home-dashboard-paper-title" title="What is Work For? Labor, Politics, and Meaning in the Age of AI">What is Work For? Labor, Politics, and Meaning in the Age of AI</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>6</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>5</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>4</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>5</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>3</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>1</strong></span></div>
 </section>
 </div>
 
