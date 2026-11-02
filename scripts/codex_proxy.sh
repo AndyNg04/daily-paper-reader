@@ -12,8 +12,8 @@
 set -euo pipefail
 
 # 版本固定并校验 sha256；新版本由 codex-proxy-update workflow 每周检查、测试后开 PR 升级。
-CPA_VERSION="8.0.7"
-CPA_SHA256="e7323aae94c942c16b1f576e3e4e17111d77cc49455fac13c10824b0a55b6892"
+CPA_VERSION="8.0.51"
+CPA_SHA256="ed2a0383787c62e854436a57225dbe35e9e74df317c896b66665b12f4f2df86c"
 CPA_ASSET="CLIProxyAPI_${CPA_VERSION}_linux_amd64_no-plugin.tar.gz"
 CPA_URL="https://github.com/router-for-me/CLIProxyAPI/releases/download/v${CPA_VERSION}/${CPA_ASSET}"
 
