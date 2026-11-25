@@ -51,14 +51,14 @@
       <span class="dpr-home-dashboard-kicker">2026-11-24</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 0 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 70 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
-    <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>0</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>0</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>2 次</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>50</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-11-24 01:28:20 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-11-25 00:35:44 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,7 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>今日无新推荐，系统未产出可展示论文。</p>
+<p>11 月 24 日论文日报：今日共筛读 70 篇，精读 50 篇、速读 20 篇。</p>
+<p>两篇满分精读值得优先看：一篇探讨危机咨询中人机协作的收益与障碍，另一篇用多轮对话评估大模型是否会强化用户对 AI 的单向情感依附。</p>
+<p>如果你常和 AI 聊天，不妨先读 CoMPASS，看看研究者如何评估 AI 的回应是在提供支持，还是在加深依附。</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -78,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">0 篇</strong>
+    <strong class="dpr-home-dashboard-count">50 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p class="dpr-home-dashboard-empty">今日暂无推荐。</p>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Benefits and Barriers to Human-AI Teaming for Crisis Counseling">Benefits and Barriers to Human-AI Teaming for Crisis Counseling</span></li><li><span class="dpr-home-dashboard-paper-title" title="CoMPASS: A Multi-Turn Benchmark for Measuring LLM Reinforcement of Parasocial Behavior">CoMPASS: A Multi-Turn Benchmark for Measuring LLM Reinforcement of Parasocial Behavior</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Reliance to Overreliance: Taxonomizing and Detecting Relational Risks in AI Companionship">From Reliance to Overreliance: Taxonomizing and Detecting Relational Risks in AI Companionship</span></li></ul>
   </div>
-
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>15</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>14</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>7</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>5</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>3</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>2</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -91,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">0 篇</strong>
+    <strong class="dpr-home-dashboard-count">20 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p class="dpr-home-dashboard-empty">今日暂无推荐。</p>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="MemEmo: Evaluating Emotion in Memory Systems">MemEmo: Evaluating Emotion in Memory Systems</span></li><li><span class="dpr-home-dashboard-paper-title" title="UIAnchor: Anchoring UI Perception and Action Execution for Reliable Service-Composed Mobile Task Automation with GUI Agents">UIAnchor: Anchoring UI Perception and Action Execution for Reliable Service-Composed Mobile Task Automation with GUI Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Vision to Interaction: Evaluating Dynamic Social Intelligence of VLM Agents in ALIVE-World">From Vision to Interaction: Evaluating Dynamic Social Intelligence of VLM Agents in ALIVE-World</span></li></ul>
   </div>
-
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>7</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>4</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>3</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span></div>
 </section>
 </div>
 
