@@ -1,0 +1,2135 @@
+CANDID: Candidate-Driven Intervention for Disciplined Execution in
+Local Computer-Use Agents
+Woongkyu Lee
+Jungwook Choi*
+Hanyang University
+{lwghanyang, choij}@hanyang.ac.kr
+Abstract
+We present CANDID (Candidate-Driven In-
+tervention for Disciplined Execution), an
+execution-control framework designed to en-
+hance the reliability of local computer-use
+agents (CUAs) in resource-constrained settings.
+While local CUAs feature robust baseline pro-
+ficiency in single-step action prediction, they
+frequently fail at critical junctions due to rigid
+action loops or premature DONE decisions.
+Rather than imposing imprecise cognitive loads
+through textual reflection, CANDID repurposes
+parallel test-time scaling into a disciplined,
+execution-level intervention at sparse, failure-
+prone points. We introduce a loop-recovery
+mechanism to filter candidates away from re-
+peated behaviors and a conservative, unani-
+mous DONE gating policy that requires abso-
+lute consensus to terminate. Experiments on
+OSWorld demonstrate that CANDID’s struc-
+tural control significantly improves success
+rates, outperforming feedback-based alterna-
+tives with minimal execution overhead.
+1
+Introduction
+Computer-use
+agents
+(CUAs)
+have
+recently
+emerged as a promising paradigm for autonomous
+interaction with graphical user interfaces (GUIs),
+enabling multimodal agents to execute real-world
+desktop and web tasks by understanding screen-
+shots and executing GUI actions. Recent advances
+in multimodal foundation models (Qin et al., 2025;
+Wang et al., 2025; Xue et al., 2026; Xu et al., 2025;
+Lin et al., 2024) and agentic frameworks (Agashe
+et al., 2024, 2025; Gonzalez-Pumariega et al., 2026;
+Yang et al., 2025) have significantly improved long-
+horizon GUI interaction capabilities across increas-
+ingly realistic environments (Xie et al., 2024; Zhou
+et al., 2024; Bonatti et al., 2024; Deng et al., 2023).
+In particular, modern CUA systems leverage hi-
+erarchical planning (Agashe et al., 2024), mem-
+*Corresponding author.
+ory retrieval (Liu et al., 2025), and test-time scal-
+ing (Yang et al., 2025) strategies to improve execu-
+tion robustness and task success rates.
+Deploying
+CUAs
+under
+local,
+resource-
+constrained settings is practically important,
+and small language model (SLM)-based agen-
+tic systems have been increasingly proposed
+toward this goal (Belcak et al., 2025). Yet such
+deployment remains highly challenging: unlike
+large cloud-based systems that rely on expensive
+multi-agent orchestration (Song et al., 2026; Yang
+et al., 2026; Han et al., 2026) or proprietary
+reasoning models (Anthropic, 2026a; Singh et al.,
+2026), local CUAs operate with limited model
+sizes and weaker multimodal reasoning. Under
+these conditions, simply increasing execution
+horizons or enlarging multimodal histories often
+fails to reliably improve performance. The central
+obstacle is that local agents fail in two coupled
+ways: they fall into repetitive action loops, or
+terminate prematurely before completing the task.
+Moreover, naively scaling the step budget or
+contextual history merely shifts the failure pattern
+between the two, rather than resolving both.
+Prior methods for recovering failed agent trajec-
+tories primarily rely on textual reflection or verifier
+feedback (Shinn et al., 2023; Han et al., 2026),
+where the agent inspects its own recent trajectory,
+generates natural-language feedback, and incorpo-
+rates it before revising its next action. However, we
+argue that such feedback-based approaches provide
+limited benefit for lightweight local CUAs, whose
+reasoning capabilities are often insufficient either
+to generate meaningful textual feedback about the
+failure or to convert given feedback into distinct,
+executable GUI actions. These limitations prevent
+agents from escaping repetitive action loops or im-
+proving termination decisions under ambiguous
+completion states, often causing the model to still
+repeat its failed behavior under a restated rationale.
+To overcome these limitations, we instead build
+1
+arXiv:2611.24977v1  [cs.CL]  17 Nov 2026
+
+
+on a key observation about local CUA behav-
+ior: although they struggle to assess trajectory
+progress, they remain capable of generating mul-
+tiple plausible actions—which we refer to as can-
+didates—from the same interface state. This sug-
+gests that the bottleneck lies not in the availability
+of good candidates, but in committing to one when
+progress or completion is uncertain. We there-
+fore propose CANDID, a candidate-based control
+framework that treats candidate disagreement as
+an execution-control signal, rather than asking the
+model to reflect on its own failure. CANDID in-
+stantiates this principle through two modules: (1) a
+loop-recovery module that identifies repetitive be-
+havior through rule-based detection and selects an
+alternative candidate, and (2) a unanimous DONE
+gating module that accepts termination only when
+all sampled candidates agree. CANDID applies
+this sparse intervention only at these failure-prone
+points, concentrating computation where it is most
+beneficial while keeping overhead low.
+We evaluate CANDID on the OSWorld bench-
+mark (Xie et al., 2024) using multiple local CUA
+models, including Qwen3-VL (Bai et al., 2025)
+and OpenCUA (Wang et al., 2025) variants. Ex-
+perimental results show that CANDID consistently
+improves task success rates across all evaluated
+models, outperforming both feedback-based inter-
+ventions and a test-time scaling baseline. Further
+analyses show that its two control modules address
+complementary failure modes, and that sparse inter-
+vention is more effective than applying candidate
+selection uniformly throughout execution.
+Our contributions are summarized as follows:
+• We identify repetitive action loops and prema-
+ture false success as dominant coupled failure
+modes in local CUAs that cannot be reliably
+resolved through naive execution scaling or
+textual feedback.
+• We propose CANDID, a sparse, candidate-
+based control framework that leverages multi-
+ple candidates generated by the same local
+agent at failure-prone steps, through loop-
+recovery candidate filtering and unanimous
+DONE gating, without modifying the model.
+• We demonstrate that CANDID consistently
+improves task success across multiple local
+CUAs, outperforming feedback-based and
+test-time scaling baselines, and through tar-
+geted ablations we show that these gains
+Figure 1: Operational workflow of a computer-use agent.
+The agent takes the task instruction and a multimodal
+history of h past [screenshot, response] pairs as input to
+generate Python-executable GUI actions up to a maxi-
+mum step budget (s).
+stem specifically from CANDID’s sparse,
+candidate-driven intervention design with
+minimal runtime overhead.
+2
+Background and Motivation
+2.1
+Computer-Use Agents
+Computer-use agents (CUAs) autonomously op-
+erate graphical user interfaces (GUIs) in real OS
+environments, observing screenshots and gener-
+ating executable actions such as clicking, typing,
+scrolling, or keyboard inputs. As illustrated in
+Fig. 1, at each step the agent receives a task in-
+struction, the current screenshot, and a multimodal
+history of previous screenshot–response pairs, and
+predicts the next action in a structured format (e.g.,
+click(x,y) or typewrite(‘Tesla’)). The ac-
+tion is executed in the environment, after which the
+updated screenshot is observed. This interaction
+continues until the agent emits a termination signal
+such as DONE or reaches the step budget s, while
+the history length h controls the number of past
+screenshot–response pairs retained as context.
+2.2
+Failure Modes in Local CUAs
+We analyze the behavioral limitations of local
+CUAs by evaluating Qwen3-VL-30B-A3B and
+OpenCUA-7B on OSWorld under varying step
+budgets s ∈{15, 50, 100} and history depths
+h ∈{0, 1, 4}. As shown in Fig. 2, repetitive ac-
+tion loops and premature false success dominate
+across nearly all settings, while non-loop exhaus-
+2
+
+
+Figure 2: Failure modes of local CUAs on the OSWorld
+benchmark. Stacked bars show task outcomes: suc-
+cess, repetitive action loop, premature false success,
+step budget exhaustion without loops, and other fail-
+ures. (a) Varying recent history depth (h ∈{0, 1, 4})
+with s = 50.
+(b) Varying maximum step budget
+(s ∈{15, 50, 100}) with h = 4.
+Feedback
+Metric
+Rate (%)
+Loop Breaker
+Repeated exact action
+61.5
+Repeated type/target
+64.3
+Failure after recovery
+92.8
+Verifier
+Repeated DONE after rejection
+73.4
+Next action repeats recent target
+44.3
+Failure after rejection
+75.9
+Table 1: Behavioral outcomes after feedback interven-
+tions on Qwen3-VL-30B-A3B. Despite receiving Loop
+Breaker or Verifier feedback, the agent frequently re-
+peats the same behavior or continues to fail, indicating
+that feedback alone offers limited recovery capability.
+tion remains limited except at the tightest budget
+(s = 15). Qwen3-VL is more prone to repetitive
+loops, whereas OpenCUA more often terminates
+prematurely. Increasing the history depth or step
+budget reduces some exhaustion cases but shifts
+failures toward false completion rather than success.
+These results indicate that naive execution scaling
+does not resolve the dominant failure modes—it
+only trades one form of failure for another.
+2.3
+Limitations of Textual Feedback
+Prior autonomous-agent frameworks often use
+prompt-level verification or self-reflection to miti-
+gate execution failures (Han et al., 2026; Pan et al.,
+2024; Shinn et al., 2023). These methods work
+well with proprietary, large-scale reasoning models,
+whose stronger language understanding lets verbal
+feedback translate into corrective actions. Inspired
+by VLAA-GUI (Han et al., 2026), we implement
+two representative self-feedback mechanisms: a
+Figure 3: A local agent can generate valid alternative
+candidate actions at failure-prone states. In (a), the agent
+repeatedly presses Ctrl+V despite an empty clipboard,
+while another candidate types the URL directly. In (b),
+the agent prematurely declares task completion before
+modifying the document, while another candidate con-
+tinues execution by clicking the target text for editing.
+Loop Breaker, which detects repetitive behavior
+and appends a textual recovery reflection, and a
+Verifier, which rejects premature DONE predictions
+and provides corrective feedback.
+However, such textual reflection offers limited
+recovery capability for smaller, local-scale CUA
+models, as verbal critiques often fail to induce a
+distinct executable action once the agent enters a
+localized loop or faces goal ambiguity. As shown
+in Table 1, Loop Breaker feedback frequently leads
+the agent to repeat the same action or target and
+ultimately fail; for instance, after repeatedly at-
+tempting to enable a toggle switch, the reflection
+merely restates the same instruction rather than
+suggesting an alternative action. Similarly, after
+a rejected DONE prediction, the agent regenerates
+DONE or repeats a recent target, again resulting in
+failure. These results highlight the limited effec-
+tiveness of textual feedback for local CUAs.
+2.4
+Generating Failure-Escaping Candidates
+Although local CUAs often remain trapped in repet-
+itive loops or terminate prematurely, these failures
+do not necessarily indicate an inability to generate
+useful executable actions. As illustrated in Fig. 3,
+sampling multiple actions from the same execu-
+tion state can reveal executable alternatives that
+escape the current failure pattern: an agent that
+repeatedly presses Ctrl+V despite an empty clip-
+board may instead generate an action that types
+the URL directly, while an agent that prematurely
+declares completion may generate a continuation
+action that resumes document editing. This sug-
+gests that the bottleneck lies not in generating exe-
+cutable alternatives, but in committing to a single
+3
+
+
+Figure 4: Overview of CANDID, our candidate-based execution-control framework for local computer-use agents.
+CANDID intervenes at two high-risk control points: (a) Loop Recovery: A loop detector monitors the execution
+history for repetitive local behavior and triggers structured candidate generation and filtering to escape the loop.
+(b) Unanimous DONE Gating: When the baseline agent proposes DONE, CANDID samples additional action
+candidates from the same context and executes DONE only when all valid candidates agree on termination.
+action despite disagreement among plausible can-
+didates. This capability is not limited to isolated
+examples: when the agent exhibits repetitive-action
+behavior, all four sampled candidates are distinct
+at the exact-action level in 47.7% of cases, whereas
+complete candidate collapse occurs in only 8.4%
+(Appendix B.1).
+3
+Method
+We propose CANDID, a sparse, candidate-based
+execution-control framework for local CUAs that
+intervenes at failure-prone steps to address two
+coupled failure modes: repetitive action loops and
+premature DONE decisions. Our key intuition is
+that local CUAs can often generate multiple plau-
+sible candidates from the same interface state but
+fail by committing to a single one under uncertain
+execution states. Instead of sampling throughout
+execution, CANDID generates a small set of can-
+didates only at these high-risk points, recovering
+from loops by selecting an alternative candidate
+and preventing premature termination by requiring
+unanimous agreement before accepting DONE.
+3.1
+Loop-Recovery Candidate Selection
+Fig. 4(a) illustrates CANDID’s loop-recovery
+pipeline. At each step, the agent predicts its next
+action from the current screenshot and recent his-
+tory. When the proposed action is identified as a
+potential repetitive loop and confirmed as stagnant,
+CANDID samples alternative candidates, filters out
+those matching the detected loop pattern, and exe-
+cutes one of the remaining candidates.
+Loop detection.
+Judging whether the agent is
+stuck in a loop is itself unreliable: the local CUA
+often cannot assess its own progress, while pure
+rule-based heuristics risk flagging legitimate rep-
+etition as a loop. We therefore use a two-stage
+gate that separates cheap detection from reliable
+confirmation.
+A lightweight rule-based detec-
+tor first compares the proposed action against a
+sliding window of recent actions (governed by
+a window size, a minimum repeat count, and a
+target-coordinate tolerance) and flags repetitive pat-
+terns—for example, repeated scrolling is flagged as
+repeated_targetless_action_type. Only for
+flagged cases does the local model then confirm
+whether the trajectory is genuinely stuck in a loop.
+This confines the model’s harder judgment to the
+rare cases where it is needed, while leaving the
+initial action untouched otherwise. Further details
+and sensitivity analysis are in Appendix A.1 and
+Appendix B.2, respectively.
+Recovery candidate generation.
+Simply re-
+questing a single new action from the same context
+after a loop is confirmed often reproduces the same
+failed action. Instead, once a loop is confirmed, the
+local agent samples a small set of executable can-
+didates (a hyperparameter set to four in our main
+experiments) from the current environment state,
+leveraging its demonstrated ability to produce di-
+verse actions under repeated sampling. These can-
+4
+
+
+didates may include both repeated and alternative
+actions, and are passed to the filtering stage.
+Filtering and selection.
+Before the agent selects
+among candidates, CANDID first narrows the pool
+to reduce selection overhead: malformed or non-
+executable actions are removed, DONE is disallowed
+during loop recovery, candidates matching the de-
+tected loop pattern are excluded, and duplicates are
+merged. If no valid candidate remains, CANDID
+falls back to the original proposal; if exactly one re-
+mains, it is executed directly; otherwise, the agent
+selects among the filtered candidates based on the
+task instruction and recent trajectory.
+3.2
+Unanimous DONE Gating
+Local CUAs frequently misjudge task completion,
+often terminating prematurely (Section 2.2), moti-
+vating a conservative approach to accepting DONE.
+Fig. 4(b) illustrates CANDID’s unanimous DONE
+gating module, which is triggered only when the
+agent proposes DONE. Rather than accepting a sin-
+gle termination prediction, CANDID samples ad-
+ditional candidates from the same context and ac-
+cepts DONE only when all valid candidates agree
+(Case 1); even a single continuation candidate, such
+as WAIT or click, is treated as evidence that the
+task may still be unfinished, in which case termina-
+tion is rejected and all DONE candidates are removed
+(Case 2). This conservative policy uses the agent’s
+own candidate diversity to challenge unsupported
+DONE decisions without relying on an external veri-
+fier. We further show in Section 4.3 that this unani-
+mous policy more effectively suppresses premature
+completions than a majority voting.
+Candidate selection.
+Once DONE candidates are
+removed, the remaining continuation candidates
+are processed for execution. In Case 2, for ex-
+ample, the sampled set contains DONE, WAIT, and
+click; after filtering, only WAIT and click remain
+as continuation candidates, and exact duplicates
+are merged. If a single continuation candidate re-
+mains, it is executed directly; otherwise, the local
+agent selects one from the remaining continuation
+candidates based on the task instruction, current
+screenshot, and recent trajectory. The selector is
+restricted to choosing among the generated candi-
+dates and cannot introduce a new action.
+3.3
+Profiling-Based Auto-Configuration
+The two control modules target distinct failure
+modes and may benefit local CUAs differently.
+Qwen3-VL
+8B
+Qwen3-VL
+30B-A3B
+OpenCUA-7B
+Exact-action
+loop rate
+32.12%
+29.79%
+7.09%
+Unanimity rate
+88.2%
+78.2%
+40.8%
+Avg. unique alts.
+1.23
+1.45
+2.34
+Multi-type events
+1.1%
+4.3%
+23.4%
+Applied control
+Loop
+Loop + DONE
+DONE
+Table 2: Model-specific diagnostics with k=4 resam-
+pled candidates and the resulting control configuration.
+Exact-action loop rate denotes the fraction of steps that
+repeat the preceding action. Avg. unique alts. denotes
+the average number of unique non-DONE alternatives in
+disagreement cases, while multi-type events denotes the
+fraction of disagreements spanning multiple coarse ac-
+tion types.
+Rather than tuning configurations post hoc, we es-
+timate each module’s potential effectiveness using
+rollout diagnostics that are independent of task suc-
+cess, and apply a module only when its target con-
+dition is clearly met. As shown in Table 2, loop re-
+covery targets models with high exact-action loop
+rates (Section 2.2): Qwen3-VL-8B and Qwen3-
+VL-30B-A3B show loop rates roughly four times
+higher than OpenCUA-7B (32.12% and 29.79% vs.
+7.09%) and are assigned loop recovery. Unanimous
+DONE gating instead requires diverse, semantically
+distinct alternatives on disagreement to have any
+effect; OpenCUA-7B shows both lower DONE una-
+nimity (40.8% vs. 78–88%) and far more multi-
+type disagreements (23.4% vs. 1.1–4.3%), and
+Qwen3-VL-30B-A3B shows a smaller but non-
+trivial version of the same pattern, while Qwen3-
+VL-8B shows almost none. We therefore apply
+DONE gating to OpenCUA-7B and Qwen3-VL-30B-
+A3B, but not to Qwen3-VL-8B. These diagnostics
+are computed once before the main evaluation and
+fixed as a single configuration per model.
+4
+Results
+4.1
+Setup
+Benchmark and Evaluation Setting.
+We eval-
+uate our framework primarily on OSWorld (Xie
+et al., 2024), excluding eight Google Drive-related
+tasks and reporting results on 361 tasks across five
+domains. We additionally assess cross-benchmark
+generalization on WindowsAgentArena (Bonatti
+et al., 2024) with 154 tasks, with detailed settings
+and results provided in Appendix B.4. All agents
+use screenshot observations, generate PyAutoGUI-
+style actions, and use four recent screenshots as
+5
+
+
+Model
+Method
+Trials
+Domain Accuracy (%)
+Overall (%)
+Office (117)
+Daily (78)
+Prof. (49)
+Workflow (93)
+OS (24)
+Qwen3-VL-30B-A3B
+(s=50)
+Baseline
+5
+37.43
+48.15
+41.63
+18.25
+36.67
+35.31 ± 0.65
+CANDID
+5
+39.42
+49.76
+46.94
+22.52
+46.67
+38.80 ± 1.24 (+3.49)
+Qwen3-VL-30B-A3B
+(s=100)
+Baseline
+5
+37.54
+48.23
+41.23
+18.78
+36.16
+35.42 ± 1.34
+CANDID
+5
+40.63
+50.59
+48.57
+23.82
+42.93
+39.68 ± 0.77 (+4.26)
+Qwen3-VL-8B
+(s=50)
+Baseline
+5
+32.74
+43.37
+44.49
+14.77
+44.57
+32.82 ± 0.98
+CANDID
+5
+32.58
+46.97
+47.35
+17.32
+48.33
+34.84 ± 1.27 (+2.02)
+Qwen3-VL-8B
+(s=100)
+Baseline
+5
+33.77
+44.17
+45.72
+14.89
+42.50
+33.41 ± 1.29
+CANDID
+5
+34.45
+48.39
+43.45
+17.63
+50.00
+35.42 ± 1.76 (+2.01)
+OpenCUA-7B
+(s=50)
+Baseline
+5
+23.92
+36.31
+44.90
+11.39
+39.13
+27.21 ± 1.70
+CANDID
+5
+24.91
+38.39
+62.04
+10.67
+53.44
+31.05 ± 0.97 (+3.84)
+OpenCUA-7B
+(s=100)
+Baseline
+5
+23.42
+33.46
+40.82
+11.25
+42.25
+26.06 ± 2.16
+CANDID
+5
+25.36
+40.20
+56.73
+10.93
+47.83
+30.60 ± 2.22 (+4.54)
+Table 3: Main evaluation results on the OSWorld benchmark, averaged over multiple trials (trial counts noted per
+row). Values in parentheses next to domain names indicate the task count. Overall accuracy is reported as mean ±
+standard deviation; values in gray parentheses represent the absolute improvement over each model’s baseline.
+history (h = 4) for the main experiments.
+Models.
+Our evaluation covers three local
+computer-use
+agents:
+Qwen3-VL-30B-A3B-
+Instruct, Qwen3-VL-8B-Instruct, and OpenCUA-
+7B. This model selection encompasses both
+general-purpose vision-language models adapted
+to desktop control and models specialized for
+computer-use behavior, allowing us to test the pro-
+posed control mechanisms across different model
+scales and agent families.
+Candidate sampling configuration.
+For both
+loop recovery and unanimous DONE selection, we
+fix the number of additional sampled candidates to
+four. For Qwen-based agents, we use a temperature
+of 0.7 for default action generation and DONE candi-
+date sampling, and a higher temperature of 1.0 for
+loop-recovery candidate generation to encourage
+greater action diversity under repetitive execution
+patterns. For OpenCUA-7B, the default action gen-
+eration uses greedy decoding (temperature 0.0),
+while candidate generation uses a temperature of
+0.7 for both loop recovery and DONE selection.
+Inference-Time Control Baselines.
+We com-
+pare CANDID against several inference-time con-
+trol baselines. For test-time scaling, we apply GTA-
+1 (Yang et al., 2025), using the local CUAs as
+the planner while retaining the original GTA-1-7B
+grounding model and sampling four plans. We fol-
+low the publicly released GTA-1 implementation,
+including its available prompting and inference
+procedure, without modifying the disclosed com-
+ponents other than replacing the planner with the
+evaluated local CUA. We also implement step-wise
+Self-Guidance, which generates compact progress
+feedback after each step and appends it to the next
+action-generation prompt. Finally, we implement
+VLAA-GUI-style (Han et al., 2026) Loop Breaker
+and Verifier modules by adapting their core inter-
+vention concepts for local CUA evaluation, rather
+than reproducing the full multi-agent architecture.
+Additional details are provided in Appendix C.
+4.2
+Main Result
+Overall performance.
+Table 3 reports the main
+results on OSWorld. We evaluate CANDID under
+different step budgets to examine its effectiveness
+across varying execution lengths. Across all evalu-
+ated local CUAs, CANDID consistently improves
+task success over the corresponding baseline, yield-
+ing gains of 2.01–4.54 percentage points depend-
+ing on the model and step budget. The improve-
+ments are observed under both shorter (s = 50)
+and longer (s = 100) budgets, demonstrating that
+CANDID remains effective across different inter-
+action horizons.
+Comparison with Inference-Time Control Meth-
+ods.
+As shown in Table 4, CANDID outper-
+forms the baseline and all inference-time con-
+trol methods. Among the feedback-based meth-
+ods,
+Self-Guidance decreases accuracy from
+35.31% to 33.30%. The VLAA-GUI-style Loop
+Breaker provides a modest improvement to 36.98%,
+whereas the Verifier and the combined Loop
+Breaker+Verifier variant achieve 34.22% and
+35.84%, respectively. GTA-1 decreases overall
+accuracy to 25.19%, suggesting limitations in the
+local CUA’s high-level planning and structured plan
+6
+
+
+Method
+Domain Accuracy (%)
+Overall (%)
+Office (117)
+Daily (78)
+Professional (49)
+Workflow (93)
+OS (24)
+Baseline
+37.43
+48.15
+41.63
+18.25
+36.67
+35.31
+Test-Time Scaling Method
+GTA-1
+12.74
+38.41
+48.98
+9.77
+54.17
+25.19
+Feedback-Based Methods
+Self-Guidance
+34.96
+36.36
+44.90
+18.26
+50.00
+33.30
+VLAA-Loop Breaker
+37.75
+46.65
+46.94
+21.36
+42.12
+36.98
+VLAA-Verifier
+36.39
+50.22
+40.14
+14.74
+34.72
+34.22
+VLAA-Combined
+34.98
+49.73
+44.22
+20.32
+37.50
+35.84
+CANDID
+39.42
+49.76
+46.94
+22.52
+46.67
+38.80
+Table 4: Comparison with inference-time control baselines using the Qwen3-VL-30B-A3B-Instruct. We compare
+CANDID against a GTA-1 (Yang et al., 2025) test-time scaling method, step-wise Self-Guidance, and VLAA-GUI-
+style (Han et al., 2026) feedback methods, including Loop Breaker, Verifier, and their combined variant. VLAA-GUI
+Loop Breaker is averaged over four runs, Verifier and Combined over three runs, and Baseline and CANDID over
+five runs; GTA-1 and Self-Guidance are based on a single run.
+Figure 5: Failure-mode distribution and accuracy across
+component configurations on Qwen3-VL-30B-A3B
+(s = 50). Loop Recovery primarily reduces repeti-
+tive loops, Unanimous DONE reduces premature false
+success, and their combination achieves the highest av-
+erage score.
+generation. Overall, these results suggest that ver-
+bal feedback or planning-time sampling alone is
+insufficient for local CUAs, whereas CANDID im-
+proves execution stability by introducing alterna-
+tive actions selectively at high-risk states.
+4.3
+Ablation and Design Analysis
+Complementary effects of control modules.
+Fig. 5 shows that the two control modules affect
+distinct failure modes. Loop-only substantially re-
+duces repetitive action loops but shifts some fail-
+ures toward premature false success, while Done-
+only suppresses premature false success at the cost
+of increased execution exhaustion. Combining both
+modules mitigates this trade-off and achieves the
+highest average score of 38.8%, demonstrating that
+loop recovery and conservative termination control
+are most effective when applied jointly.
+Baseline
+Majority
+Unanimous
+Accuracy (%)
+26.06
+27.24
+30.60
+Hit Max
+19.33
+29.33
+64.67
+False Success
+241.33
+232.00
+171.67
+Redirection (%)
+–
+5.53
+49.93
+Table 5: Comparison of majority and unanimous DONE
+selection on OpenCUA-7B with a 100-step budget.
+Majority vs. Unanimous DONE.
+Table 5 com-
+pares majority voting with the proposed unanimous
+termination policy. Majority voting provides only
+a marginal improvement over the baseline, with
+a redirection rate of 5.53%. In contrast, unani-
+mous selection redirects 49.93% of proposed termi-
+nations and reduces false success from 241.33 to
+171.67, improving task accuracy from 26.06% to
+30.60%. Although this increases max-step failures,
+the overall result indicates that majority agreement
+is too weak to counter the model’s termination bias.
+While unanimous gating more effectively sup-
+presses premature termination, it does not consti-
+tute a reliable semantic completion verifier. In the
+task-level proxy analysis, it achieves 56.7% preci-
+sion and 26.3% specificity, compared with 54.3%
+and 15.2% for the VLAA-GUI-style Verifier, re-
+spectively (Appendix B.3.2). Thus, CANDID pri-
+marily acts as a conservative filter against unsup-
+ported termination rather than solving completion
+verification itself.
+Per-Step vs. Triggered Sampling.
+Table 6 com-
+pares CANDID with candidate sampling at every
+step. Per-step sampling lowers false success but
+substantially increases max-step failures and re-
+7
+
+
+Baseline
+Per-Step Sampling
+CANDID
+Accuracy (%)
+35.31
+23.48
+38.80
+Hit Max
+135.0
+239.0
+116.6
+False Success
+97.4
+44.0
+105.2
+Avg. Steps
+25.61
+36.89
+24.40
+Table 6: Comparison of dense per-step sampling and
+sparse intervention with CANDID on Qwen3-VL-30B-
+A3B with a 50-step budget. Hit Max and False Success
+are non-mutually-exclusive trajectory statistics; a task
+may satisfy both conditions.
+Figure 6: Effect of candidate count on task accuracy
+across the two local CUAs. Results with four candidates
+are averaged over five runs, while the remaining settings
+are averaged over three runs. Shaded regions denote ±1
+standard deviation across repeated runs.
+duces accuracy to 23.48%. In contrast, CANDID
+achieves 38.80% accuracy while maintaining a sim-
+ilar trajectory length to the baseline. These results
+show that candidate sampling is effective when ap-
+plied selectively at failure-prone decision points
+rather than throughout execution.
+Sensitivity to Candidate Count.
+Fig. 6 exam-
+ines the effect of the number of sampled candi-
+dates. Increasing the candidate count from one
+to four consistently improves task accuracy for
+both models. Further increasing it to eight pro-
+vides only marginal gains, indicating diminishing
+returns beyond four candidates. We therefore use
+four candidates in the main experiments to balance
+performance and cost.
+4.4
+Efficiency Analysis
+Operational statistics.
+Table 7 shows that CAN-
+DID intervenes selectively rather than modifying
+the entire execution process. Loop recovery is trig-
+gered in 26.6% of steps, with 57.1% resulting in
+trajectory changes, indicating that repetitive behav-
+iors are frequent yet recoverable. DONE selection
+is triggered more sparsely, in only 4.6% of steps,
+but redirects 45.7% of those cases to non-DONE con-
+tinuations. The selector is skipped in most cases,
+58.2% for loop recovery and 77.6% for DONE selec-
+tion, showing that many high-risk decisions can be
+Statistic
+Loop Recovery
+DONE Gating
+Total Steps
+9371
+9371
+Triggered
+2496 (26.6%)
+429 (4.6%)
+Intervention Applied
+1426 (57.1%)
+196 (45.7%)
+Original Action Kept
+1070 (42.9%)
+233 (54.3%)
+Selector Invoked
+1043 (41.8%)
+96 (22.4%)
+Selector Bypassed
+1453 (58.2%)
+333 (77.6%)
+Table 7: Operational statistics of the candidate-based
+control framework on Qwen3-VL-30B-A3B. Percent-
+ages for “Triggered” are computed over all execution
+steps, while the remaining percentages are computed
+over the triggered steps.
+Figure 7: Efficiency comparison of baseline and CAN-
+DID on Qwen3-VL-30B-A3B. Execution time includes
+model inference, action execution, and environment ini-
+tialization, with average steps and token usage.
+resolved through structural filtering alone.
+Runtime and token overhead.
+Fig. 7 compares
+the computational cost of CANDID and the base-
+line using Qwen3-VL-30B-A3B. CANDID in-
+creases prompt-token usage by only 19%, while
+completion tokens, despite a larger relative increase
+from candidate generation and selection, remain
+negligible compared with prompt tokens. CAN-
+DID also shortens the average trajectory from 25.6
+to 24.4 steps per task, partially offsetting the ad-
+ditional inference cost. Consequently, total exe-
+cution time increases by only 10% (359.0→396.1
+s/task), indicating that CANDID improves task per-
+formance with modest additional cost.
+4.5
+Case Study
+Qualitative examples further illustrate how the
+two controls intervene at distinct failure points.
+Loop recovery redirects repeated Enter actions
+on a license screen to an executable alternative,
+typewrite(’n’), while the DONE gating pre-
+vents premature termination before sending a pre-
+pared email by selecting a concrete continuation ac-
+tion. These cases show that CANDID converts de-
+tected risks into constrained executable alternatives.
+Additional details are provided in Appendix D.
+8
+
+
+5
+Related Work
+Models and Frameworks.
+Recent progress in
+multimodal GUI agents has been driven by real-
+istic computer-use benchmarks (Xie et al., 2024;
+Deng et al., 2023; Rawles et al., 2025) and CUA-
+specialized models that improve GUI ground-
+ing, action prediction, and long-horizon interac-
+tion (Wang et al., 2025; Qin et al., 2025; Xue et al.,
+2026; Lin et al., 2024; Xu et al., 2025). Agen-
+tic frameworks further improve reliability through
+multi-agent coordination (Song et al., 2026; Yang
+et al., 2026), hierarchical planning (Agashe et al.,
+2025), and test-time scaling (Yang et al., 2025;
+Gonzalez-Pumariega et al., 2026). However, these
+approaches often rely on proprietary models or sub-
+stantial inference-time computation, leaving effi-
+cient execution control for local CUAs compara-
+tively underexplored.
+Inference-Time
+Exploration
+and
+Selection.
+Reasoning-oriented LLM studies use parallel
+inference-time scaling through candidate sampling
+and branching search (Wang et al., 2023; Yao et al.,
+2023; Zhu et al., 2025; Lee et al., 2026), and re-
+lated CUA frameworks adopt trajectory reranking
+or parallel exploration (Yang et al., 2025; Gonzalez-
+Pumariega et al., 2026). While related in spirit, our
+approach applies candidate diversification only at
+failure-prone points to recover in local CUAs.
+Execution Reliability and Recovery.
+Agent reli-
+ability has been enhanced via feedback, reflection,
+and trajectory refinement (Madaan et al., 2023;
+Shinn et al., 2023; Lin et al., 2026; Han et al., 2026).
+While VLAA-GUI improves automation using ver-
+ifier and loop-breaker (Han et al., 2026), it de-
+pends on proprietary models (Anthropic, 2026a,b;
+Google, 2026; Singh et al., 2026) and multi-agent
+systems. Conversely, CANDID improves reliabil-
+ity using only the local agent’s own action candi-
+dates, without auxiliary agents or verifiers.
+6
+Conclusion
+We
+presented
+CANDID,
+a
+candidate-based
+execution-control framework for local computer-
+use agents that addresses two coupled failure
+modes:
+repetitive action loops and premature
+DONE decisions, both of which persist under naive
+execution scaling and textual feedback. By lever-
+aging alternative actions generated by the local
+agent and intervening only at failure-prone de-
+cision points, CANDID recovers from repetitive
+behavior and challenges unsupported termination.
+Experiments on OSWorld demonstrate consistent
+improvements across multiple local CUAs over
+feedback-based alternatives, with minimal execu-
+tion overhead. These results suggest that selectively
+allocating inference-time computation to high-risk
+execution states can be more effective than uni-
+formly scaling computation throughout the trajec-
+tory.
+Acknowledgments
+This work was supported by the National Research
+Foundation of Korea (NRF) grant funded by the Ko-
+rea government (MSIT) (No. RS-2025-00561961).
+It was also supported by the Institute of Information
+& Communications Technology Planning & Evalu-
+ation (IITP) grant funded by the Korea government
+(MSIT) (No. RS-2025-02214497, Development of
+low-level optimization program API technology for
+AI semiconductors), as well as by the Institute of
+Information & Communications Technology Plan-
+ning & Evaluation (IITP) grant funded by the Korea
+government (MSIT) (No. RS-2026-25507427, De-
+velopment of Efficient Architectures and Training
+Techniques for High-Performance Lightweight AI
+Models).
+Limitations
+Our framework focuses on lightweight execution-
+time control for local computer-use agents and is
+evaluated primarily on OSWorld desktop environ-
+ments. While the proposed mechanisms consis-
+tently improve robustness across multiple local
+CUAs, the current study does not explore broader
+settings such as mobile environments, large-scale
+cloud agents, or long-horizon multi-agent orches-
+tration. CANDID also depends on the base agent
+producing sufficiently diverse and useful candi-
+dates; when sampled candidates collapse to the
+same failed behavior, candidate-based recovery pro-
+vides limited benefit. Moreover, the current loop
+detector targets relatively local repetitive patterns
+and may miss longer-range or irregular failure cy-
+cles. Our candidate selection strategy relies on
+lightweight heuristic filtering and local reranking,
+and we do not yet integrate CANDID with higher-
+level planning or memory modules. Extending the
+framework with adaptive triggering, stronger veri-
+fication, and higher-level agentic signals remains
+an important direction for future work.
+9
+
+
+References
+Saaket Agashe, Jiuzhou Han, Shuyu Gan, Jiachen Yang,
+Ang Li, and Xin Eric Wang. 2024. Agent s: An open
+agentic framework that uses computers like a human.
+Preprint, arXiv:2410.08164.
+Saaket Agashe, Kyle Wong, Vincent Tu, Jiachen Yang,
+Ang Li, and Xin Eric Wang. 2025. Agent s2: A com-
+positional generalist-specialist framework for com-
+puter use agents. Preprint, arXiv:2504.00906.
+Anthropic. 2026a. Introducing claude opus 4.6. https:
+//www.anthropic.com/news/claude-opus-4-6.
+Anthropic.
+2026b.
+Introducing
+claude
+sonnet
+4.6.
+https://www.anthropic.com/news/
+claude-sonnet-4-6.
+Shuai Bai, Yuxuan Cai, Ruizhe Chen, Keqin Chen,
+Xionghui Chen, Zesen Cheng, Lianghao Deng, Wei
+Ding, Chang Gao, Chunjiang Ge, Wenbin Ge, Zhi-
+fang Guo, Qidong Huang, Jie Huang, Fei Huang,
+Binyuan Hui, Shutong Jiang, Zhaohai Li, Mingsheng
+Li, and 45 others. 2025. Qwen3-vl technical report.
+Preprint, arXiv:2511.21631.
+Peter Belcak, Greg Heinrich, Shizhe Diao, Yonggan
+Fu, Xin Dong, Saurav Muralidharan, Yingyan Ce-
+line Lin, and Pavlo Molchanov. 2025. Small lan-
+guage models are the future of agentic ai. Preprint,
+arXiv:2506.02153.
+Rogerio Bonatti, Dan Zhao, Francesco Bonacci, Dillon
+Dupont, Sara Abdali, Yinheng Li, Yadong Lu, Justin
+Wagle, Kazuhito Koishida, Arthur Bucker, Lawrence
+Jang, and Zack Hui. 2024. Windows agent arena:
+Evaluating multi-modal os agents at scale. Preprint,
+arXiv:2409.08264.
+Xiang Deng, Yu Gu, Boyuan Zheng, Shijie Chen,
+Samuel Stevens, Boshi Wang, Huan Sun, and Yu Su.
+2023. Mind2web: Towards a generalist agent for the
+web. Preprint, arXiv:2306.06070.
+Gonzalo Gonzalez-Pumariega, Vincent Tu, Chih-Lun
+Lee, Jiachen Yang, Ang Li, and Xin Eric Wang.
+2026. Scaling agents for computer use. Preprint,
+arXiv:2510.02250.
+Google. 2026. Gemini 3.1 pro model card. https:
+//storage.googleapis.com/deepmind-media/
+Model-Cards/Gemini-3-1-Pro-Model-Card.
+pdf.
+Qijun Han, Haoqin Tu, Zijun Wang, Haoyue Dai,
+Yiyang Zhou, Nancy Lau, Alvaro A. Cardenas, Yuhui
+Xu, Ran Xu, Caiming Xiong, Zeyu Zheng, Huaxiu
+Yao, Yuyin Zhou, and Cihang Xie. 2026.
+Vlaa-
+gui: Knowing when to stop, recover, and search,
+a modular framework for gui automation. Preprint,
+arXiv:2604.21375.
+Yoonsang Lee, Howard Yen, Xi Ye, and Danqi
+Chen. 2026.
+Agentic aggregation for parallel
+scaling of long-horizon agentic tasks.
+Preprint,
+arXiv:2604.11753.
+Kevin Qinghong Lin, Linjie Li, Difei Gao, Zhengyuan
+Yang, Shiwei Wu, Zechen Bai, Weixian Lei, Lijuan
+Wang, and Mike Zheng Shou. 2024. Showui: One
+vision-language-action model for gui visual agent.
+Preprint, arXiv:2411.17465.
+Zichuan Lin, Feiyu Liu, Yijun Yang, Jiafei Lyu, Yiming
+Gao, Yicheng Liu, Zhicong Lu, Yangbin Yu, Mingyu
+Yang, Junyou Li, Deheng Ye, and Jie Jiang. 2026.
+Ui-voyager: A self-evolving gui agent learning via
+failed experience. Preprint, arXiv:2603.24533.
+Zikang Liu, Junyi Li, Wayne Xin Zhao, Dawei Gao,
+Yaliang Li, and Ji rong Wen. 2025. Pal-ui: Planning
+with active look-back for vision-based gui agents.
+Preprint, arXiv:2510.00413.
+Aman Madaan, Niket Tandon, Prakhar Gupta, Skyler
+Hallinan, Luyu Gao, Sarah Wiegreffe, Uri Alon,
+Nouha Dziri, Shrimai Prabhumoye, Yiming Yang,
+Shashank Gupta, Bodhisattwa Prasad Majumder,
+Katherine Hermann, Sean Welleck, Amir Yazdan-
+bakhsh, and Peter Clark. 2023.
+Self-refine: It-
+erative refinement with self-feedback.
+Preprint,
+arXiv:2303.17651.
+Jiayi Pan, Yichi Zhang, Nicholas Tomlin, Yifei Zhou,
+Sergey Levine, and Alane Suhr. 2024. Autonomous
+evaluation and refinement of digital agents. Preprint,
+arXiv:2404.06474.
+Yujia Qin, Yining Ye, Junjie Fang, Haoming Wang,
+Shihao Liang, Shizuo Tian, Junda Zhang, Jiahao Li,
+Yunxin Li, Shijue Huang, Wanjun Zhong, Kuanye
+Li, Jiale Yang, Yu Miao, Woyu Lin, Longxiang Liu,
+Xu Jiang, Qianli Ma, Jingyu Li, and 16 others. 2025.
+Ui-tars: Pioneering automated gui interaction with
+native agents. Preprint, arXiv:2501.12326.
+Christopher Rawles, Sarah Clinckemaillie, Yifan Chang,
+Jonathan Waltz, Gabrielle Lau, Marybeth Fair, Alice
+Li, William Bishop, Wei Li, Folawiyo Campbell-
+Ajala, Daniel Toyama, Robert Berry, Divya Tya-
+magundlu, Timothy Lillicrap, and Oriana Riva.
+2025.
+Androidworld: A dynamic benchmarking
+environment for autonomous agents.
+Preprint,
+arXiv:2405.14573.
+Noah Shinn, Federico Cassano, Edward Berman, Ash-
+win Gopinath, Karthik Narasimhan, and Shunyu Yao.
+2023. Reflexion: Language agents with verbal rein-
+forcement learning. Preprint, arXiv:2303.11366.
+Aaditya Singh, Adam Fry, Adam Perelman, Adam Tart,
+Adi Ganesh, Ahmed El-Kishky, Aidan McLaughlin,
+Aiden Low, AJ Ostrow, Akhila Ananthram, Akshay
+Nathan, Alan Luo, Alec Helyar, Aleksander Madry,
+Aleksandr Efremov, Aleksandra Spyra, Alex Baker-
+Whitcomb, Alex Beutel, Alex Karpenko, and 467
+others. 2026. Openai gpt-5 system card. Preprint,
+arXiv:2601.03267.
+Linxin Song, Yutong Dai, Viraj Prabhu, Jieyu Zhang,
+Taiwei Shi, Li Li, Junnan Li, Silvio Savarese, Zeyuan
+Chen, Jieyu Zhao, Ran Xu, and Caiming Xiong. 2026.
+Coact-1: Computer-using multi-agent system with
+coding actions. Preprint, arXiv:2508.03923.
+10
+
+
+Xinyuan Wang, Bowen Wang, Dunjie Lu, Junlin Yang,
+Tianbao Xie, Junli Wang, Jiaqi Deng, Xiaole Guo,
+Yiheng Xu, Chen Henry Wu, Zhennan Shen, Zhuokai
+Li, Ryan Li, Xiaochuan Li, Junda Chen, Boyuan
+Zheng, Peihang Li, Fangyu Lei, Ruisheng Cao, and
+23 others. 2025. Opencua: Open foundations for
+computer-use agents. Preprint, arXiv:2508.09123.
+Xuezhi Wang, Jason Wei, Dale Schuurmans, Quoc Le,
+Ed Chi, Sharan Narang, Aakanksha Chowdhery, and
+Denny Zhou. 2023. Self-consistency improves chain
+of thought reasoning in language models. Preprint,
+arXiv:2203.11171.
+Tianbao Xie, Danyang Zhang, Jixuan Chen, Xiaochuan
+Li, Siheng Zhao, Ruisheng Cao, Toh Jing Hua, Zhou-
+jun Cheng, Dongchan Shin, Fangyu Lei, Yitao Liu,
+Yiheng Xu, Shuyan Zhou, Silvio Savarese, Caim-
+ing Xiong, Victor Zhong, and Tao Yu. 2024. Os-
+world: Benchmarking multimodal agents for open-
+ended tasks in real computer environments. Preprint,
+arXiv:2404.07972.
+Yiheng Xu, Zekun Wang, Junli Wang, Dunjie Lu, Tian-
+bao Xie, Amrita Saha, Doyen Sahoo, Tao Yu, and
+Caiming Xiong. 2025.
+Aguvis: Unified pure vi-
+sion agents for autonomous gui interaction. Preprint,
+arXiv:2412.04454.
+Taofeng Xue, Chong Peng, Mianqiu Huang, Linsen
+Guo, Tiancheng Han, Haozhe Wang, Jianing Wang,
+Xiaocheng Zhang, Xin Yang, Dengchang Zhao, Jin-
+rui Ding, Xiandi Ma, Yuchen Xie, Peng Pei, Xunliang
+Cai, and Xipeng Qiu. 2026. Evocua: Evolving com-
+puter use agents via learning from scalable synthetic
+experience. Preprint, arXiv:2601.15876.
+Bowen Yang, Kaiming Jin, Zhenyu Wu, Zhaoyang
+Liu, Qiushi Sun, Zehao Li, JingJing Xie, Zhoumi-
+anze Liu, Fangzhi Xu, Kanzhi Cheng, Qingyun Li,
+Yian Wang, Yu Qiao, Zun Wang, and Zichen Ding.
+2026. Os-symphony: A holistic framework for ro-
+bust and generalist computer-using agent. Preprint,
+arXiv:2601.07779.
+Yan Yang, Dongxu Li, Yutong Dai, Yuhao Yang,
+Ziyang Luo, Zirui Zhao, Zhiyuan Hu, Junzhe Huang,
+Amrita Saha, Zeyuan Chen, Ran Xu, Liyuan Pan,
+Silvio Savarese, Caiming Xiong, and Junnan Li.
+2025. Gta1: Gui test-time scaling agent. Preprint,
+arXiv:2507.05791.
+Shunyu Yao, Dian Yu, Jeffrey Zhao, Izhak Shafran,
+Thomas L. Griffiths,
+Yuan Cao,
+and Karthik
+Narasimhan. 2023.
+Tree of thoughts:
+Deliber-
+ate problem solving with large language models.
+Preprint, arXiv:2305.10601.
+Shuyan Zhou, Frank F. Xu, Hao Zhu, Xuhui Zhou,
+Robert Lo, Abishek Sridhar, Xianyi Cheng, Tianyue
+Ou, Yonatan Bisk, Daniel Fried, Uri Alon, and Gra-
+ham Neubig. 2024. Webarena: A realistic web envi-
+ronment for building autonomous agents. Preprint,
+arXiv:2307.13854.
+King Zhu, Hanhao Li, Siwei Wu, Tianshun Xing, De-
+hua Ma, Xiangru Tang, Minghao Liu, Jian Yang, Jia-
+heng Liu, Yuchen Eleanor Jiang, Changwang Zhang,
+Chenghua Lin, Jun Wang, Ge Zhang, and Wangchun-
+shu Zhou. 2025. Scaling test-time compute for llm
+agents. Preprint, arXiv:2506.12928.
+11
+
+
+A
+CANDID Implementation
+A.1
+Loop Detection Details
+This section details the loop detection procedure
+used by the loop-recovery module in Section 3.1.
+The implementation follows a two-stage detection.
+First, a deterministic rule detector checks whether
+the newly proposed action would extend a recent
+repetitive pattern. Second, the local model con-
+firms that the trajectory is stagnant before recovery
+candidates are generated.
+Action signatures.
+For each proposed action, the
+detector constructs a coarse signature consisting
+of an action type, an optional target coordinate,
+and a normalized action string. Action types are
+extracted from parsed PyAutoGUI calls when avail-
+able: click-like calls are mapped to click vari-
+ants, typewrite/write to type, hotkey/press
+to key, scroll/hscroll to scroll, moveTo to
+mouse_move, and dragTo to drag. If the parsed
+code is unavailable, the detector falls back to coarse
+markers in the natural language action string. Tar-
+get coordinates are extracted from the first (x, y)
+pair when present.
+Rule-based trigger.
+Let at be the action pro-
+posed for the current step. If the parsed action
+is empty or is a termination action, loop recov-
+ery is not triggered. Otherwise, the detector com-
+pares at against the last w executed actions, where
+w = loop_recovery_window. The detector re-
+quires at least r −1 historical actions before testing
+repetition, because the current proposal itself sup-
+plies the r-th repeated item. The concrete trigger
+conditions are listed in Table 8.
+For cyclic patterns, the detector uses a slightly
+longer window, max(w, 8), appends the current
+proposal, and converts each action into a compact
+sequence item. Coordinate-based actions are buck-
+eted by the target tolerance τ; type and key actions
+retain their normalized full action string; all other
+actions use only the coarse action type. The detec-
+tor then checks whether the sequence suffix repeats
+with a pattern length from 2 to 4. This catches cases
+such as alternating between two nearby clicks or
+repeatedly cycling through scroll and click opera-
+tions.
+Model confirmation gate.
+The rule detector is
+intentionally high-recall: it identifies points where
+repetition is plausible, but it does not independently
+decide that the trajectory is unproductive. A model
+confirmation call therefore follows a positive rule
+trigger. The confirmation prompt contains the task,
+current screenshot, recent trajectory, and the cur-
+rent proposed action, and asks the same local model
+to return a JSON object with progress_signal,
+loop_detected, loop_evidence, strategy_signal,
+avoid_actions, and escape_direction. Recovery pro-
+ceeds only when either loop_detected=true or
+strategy_signal=SWITCH. Otherwise, the origi-
+nal action is left unchanged and candidate genera-
+tion is skipped.
+Candidate blocking after detection.
+The de-
+tected rule also defines what recovery candidates
+are forbidden to repeat. Malformed candidates are
+removed, and DONE termination is disallowed dur-
+ing loop recovery. If a candidate has a different
+action type from the blocked action type, it re-
+mains eligible. If it has the same action type, it
+is blocked when it lacks a distinguishable target or
+when its target lies within the same tolerance τ of
+the blocked target. This ensures that recovery does
+not simply reselect the same local operation under
+a different surface form.
+A.2
+CANDID Prompts
+Below we provide the prompt skeletons used by
+CANDID. Runtime fields are shown in angle brack-
+ets. The normal action-generation prompt includes
+the computer-use tool schema and requires one
+Action line followed by one <tool_call> block.
+A.2.1
+Loop-Recovery Candidate Selection
+Loop-confirmation prompt.
+After the rule-
+based detector flags a potential repetitive loop,
+CANDID asks the local model to independently
+confirm that the proposed action would continue a
+no-progress loop. Rule-detector evidence is delib-
+erately omitted from this prompt to avoid biasing
+the confirmation.
+12
+
+
+Trigger reason
+Condition
+Intuition
+repeated_action_type_and_target
+The proposed action has a target coordinate,
+and at least r −1 recent actions within the
+window have the same action type and a tar-
+get within tolerance τ of the proposed target.
+The agent is repeatedly
+operating on the same lo-
+cal screen region.
+repeated_targetless_action_type
+The proposed action type is scroll or wait,
+and at least r−1 recent actions in the window
+have the same action type.
+The agent is repeatedly
+scrolling or waiting with-
+out a concrete target.
+repeated_exact_text_or_key_action
+The proposed action type is type or key, and
+the normalized full action string appears at
+least r −1 times in the recent window.
+Text entry and keyboard
+commands require exact
+matching because the pay-
+load matters.
+repeated_response_and_action_type
+The previous two assistant responses are iden-
+tical after normalization, and there is at least
+one recent action with the same action type
+as the proposed action.
+The model is reproduc-
+ing the same reasoning or
+action description while
+continuing the same type
+of operation.
+repeated_cyclic_action_pattern
+The recent action-signature sequence plus the
+proposed action ends with a repeated pattern
+of length 2–4.
+The
+agent
+alternates
+among a small set of
+actions rather than repeat-
+ing one literal action.
+Table
+8:
+Rule-based
+loop
+trigger
+conditions.
+Here
+r
+is
+loop_recovery_min_repeats,
+τ
+is
+loop_recovery_target_tolerance, and the recent action window is loop_recovery_window. In our main
+results, these are r = 3, τ = 80, and a window of 5 actions.
+System Prompt
+You are a loop-confirmation agent for a desktop
+automation task. Analyze the recent trajectory and
+current screenshot for repetitive no-progress behavior.
+Focus only on loop recovery. Do not judge whether the
+whole task is complete. Return only a valid JSON object.
+User Prompt
+Task description: <TASK INSTRUCTION>
+Recent trajectory before the current proposed action:
+<RECENT TRAJECTORY>
+Current proposed action before execution:
+Assistant response: <MODEL RESPONSE>
+Parsed action: <PARSED ACTION>
+PyAutoGUI code: <PYAUTOGUI CODE>
+Assess whether executing the current proposed action
+would continue a repetitive no-progress loop. Focus only
+on loop recovery. Do not judge whether the whole task is
+complete. Return JSON exactly with keys:
+{"progress_signal": "what visibly
+changed, or no visible progress",
+"loop_detected": true/false,
+"loop_evidence": "short evidence",
+"strategy_signal": "KEEP or
+SWITCH",
+"avoid_actions": ["short
+action/target patterns to avoid"],
+"escape_direction": "short
+direction for changing approach"}
+Multimodal input: current screenshot.
+Recovery
+proceeds
+only
+if
+the
+returned
+loop_detected
+value
+is
+true
+or
+the
+strategy_signal is SWITCH.
+Loop-recovery candidate-generation prompt.
+For each recovery sample, CANDID reuses the nor-
+mal action-generation system prompt, tool schema,
+recent multimodal history, and current screenshot.
+It appends the following control block to the cur-
+rent user message:
+Control Block Appended to the User Prompt
+Loop recovery note:
+The recent trajectory status: <PROGRESS SIGNAL>
+Avoid:
+• <AVOID ACTIONS>
+Try instead:
+• choose a different target, menu path, keyboard shortcut,
+or navigation strategy
+• <ESCAPE DIRECTION>
+Evidence:
+<LOOP EVIDENCE>
+Generate the next action using the normal action format.
+Do not terminate or answer DONE during loop recovery.
+Each sampled output retains the base action format:
+Action: <SHORT IMPERATIVE ACTION>
+<tool_call>
+{"name": "computer_use", "arguments":
+{<ACTION ARGUMENTS>}}
+</tool_call>
+Loop-recovery
+candidate-selection
+prompt.
+Malformed, duplicate, and blocked candidates are
+removed before selection. The selector receives
+only the remaining candidates.
+13
+
+
+System Prompt
+You select the best loop-recovery action for a desktop
+automation agent. The normal action model appears
+stuck in a repeated local pattern. Choose exactly one
+provided candidate. Do not invent a new action. Prefer a
+candidate that changes target, action type, menu path, or
+modality while still making task progress. Do not choose
+an action just because it is different; it must be useful for
+the current screen. Return only a valid JSON object.
+User Prompt
+Multimodal input: current screenshot.
+Task instruction: <TASK INSTRUCTION>
+Recent trajectory: <RECENT TRAJECTORY>
+Loop evidence:
+• reason: <TRIGGER REASON>
+• proposed repeated action: <PROPOSED ACTION>
+• blocked action type: <BLOCKED ACTION TYPE>
+• blocked target: <BLOCKED TARGET>
+Candidate recovery actions:
+Candidate <ID>:
+Parsed action: <PARSED ACTION>
+PyAutoGUI code: <PYAUTOGUI CODE>
+Action type: <ACTION TYPE>
+Target: <TARGET>
+Model response: <MODEL RESPONSE>
+<ADDITIONAL CANDIDATES>
+Return JSON exactly with keys:
+{"selected_candidate_id":
+<integer>,
+"selected_action": "candidate
+parsed action",
+"reason": "short reason"}
+A.2.2
+Unanimous DONE Gating
+Candidate-generation prompt.
+When the ini-
+tial action is DONE, additional candidates are sam-
+pled from the base action-generation prompt. Thus,
+there is no separate DONE-specific generation in-
+struction. The prompt contains the computer-use
+system prompt and tool schema, recent screenshot–
+response history, the current screenshot, and the
+following current-step instruction:
+Current-Step User Prompt
+Please generate the next move according to the UI
+screenshot, instruction and previous actions.
+Instruction: <TASK INSTRUCTION>
+Previous actions:
+<PREVIOUS ACTIONS>
+Multimodal input: current screenshot.
+Candidate-selection prompt.
+The original DONE
+proposal and the additional samples are first dedu-
+plicated by executable action. Under the unani-
+mous policy, if any valid non-DONE sample exists,
+all DONE candidates are excluded. The following
+selector prompt is used only when more than one
+candidate remains after this filtering:
+System Prompt
+You select the best next action for a desktop automation
+agent. Compare the candidates against the task
+instruction, current screenshot, and recent trajectory.
+Choose exactly one provided candidate. Do not invent a
+new action. Choose the candidate that is most correct for
+the current state and most likely to complete the task
+successfully. If a candidate claims the task is complete,
+select it only when the visible state and trajectory clearly
+support that claim. Return only a valid JSON object.
+User Prompt
+Multimodal input: current screenshot.
+Task instruction: <TASK INSTRUCTION>
+Recent trajectory: <RECENT TRAJECTORY>
+Candidate actions:
+Candidate <ID>:
+Parsed action: <PARSED ACTION>
+PyAutoGUI code: <PYAUTOGUI CODE>
+Is DONE: <TRUE OR FALSE>
+Model response: <MODEL RESPONSE>
+<ADDITIONAL CANDIDATES>
+Return JSON exactly with keys:
+{"selected_candidate_id":
+<integer>,
+"selected_action": "candidate
+parsed action",
+"reason": "short reason"}
+If filtering leaves a single valid non-DONE candidate,
+it is selected directly without an additional model
+call. If all samples agree on DONE, termination is
+retained.
+A.3
+Computing Infrastructure
+All experiments were conducted on a Linux
+(Ubuntu) server with an NVIDIA A100 80GB
+GPU. Model serving was performed using vLLM
+(v0.12.0) on top of the Transformers library
+(v5.2.0).
+B
+Additional Analysis
+B.1
+Candidate Diversity
+We analyze candidate diversity at triggered control
+points by counting the number of unique exact ac-
+tions and unique action types before filtering. As
+shown in Table 9, Loop Recovery exhibits substan-
+tial diversity at the exact-action level: among 2,496
+triggered events, all four sampled candidates are
+distinct in 1,190 cases (47.7%), while only 209
+cases (8.4%) produce identical actions. In contrast,
+action-type diversity is much lower, with 2,095
+events (83.9%) sharing a single action type across
+all candidates. Similarly, DONE Gating frequently
+generates multiple distinct exact actions, with only
+238 of 429 triggered events (55.5%) producing
+identical candidates. These results suggest that can-
+14
+
+
+Module
+Diversity Metric
+1
+2
+3
+4
+Loop Recovery
+Exact action
+209
+435
+662
+1,190
+Loop Recovery
+Action type
+2,095
+389
+12
+0
+DONE Gating
+Exact action
+238
+96
+73
+22
+Table 9: Candidate diversity at triggered control points.
+w
+τ
+r
+Trials
+Overall (%)
+5
+80
+3
+5
+34.84 ± 1.27
+3
+80
+3
+3
+36.05 ± 0.71
+7
+80
+3
+3
+35.94 ± 0.85
+5
+0
+3
+3
+36.88 ± 0.44
+5
+40
+3
+3
+35.02 ± 1.28
+5
+120
+3
+3
+34.96 ± 0.67
+5
+80
+2
+3
+33.04 ± 1.03
+5
+80
+4
+3
+34.85 ± 0.53
+5
+80
+5
+3
+35.01 ± 1.24
+Table 10: Sensitivity analysis of the loop detector hy-
+perparameters using Qwen3-VL-8B with a step budget
+of s = 50. Results are reported as mean task accuracy
+(%) ± standard deviation over multiple trials.
+didate diversity primarily arises from differences in
+action parameters, such as click locations or typed
+text, rather than coarse GUI action types.
+B.2
+Loop Detector Hyperparameter
+Sensitivity
+Table 10 varies the loop-detection window (w), tar-
+get tolerance (τ), and minimum repeat count (r).
+Although several three-trial settings yield numeri-
+cally higher means than the five-trial main result,
+these gains are not consistent across neighboring
+values and may reflect stochastic variation in agent
+execution. In contrast, setting r = 2 reduces accu-
+racy to 33.04%, nearly eliminating the gain over
+the 32.82% baseline, suggesting that overly sensi-
+tive loop detection can interrupt legitimate repeated
+actions. Overall, performance remains broadly sta-
+ble across moderate changes in the window and
+tolerance.
+B.3
+Task-Level Analysis of Control Decisions
+This section provides a task-level analysis of how
+CANDID’s control modules behave after being trig-
+gered, with particular attention to whether interven-
+tions alter the original decision and how effectively
+the DONE gate distinguishes successful from pre-
+mature termination.
+OSWorld does not provide ground-truth labels
+indicating whether an individual recovery or ter-
+Method
+TP
+FP
+TN
+FN
+Loop Recovery
+26
+148
+8
+10
+Unanimous DONE Gating
+18
+67
+114
+70
+Table 11: Task-level outcomes of triggered control de-
+cisions. Final task success is used as a proxy because
+OSWorld does not provide per-step ground-truth control
+labels.
+mination decision is correct at each execution step.
+We therefore analyze control decisions using final
+task success as a task-level proxy. These results
+should not be interpreted as action-level correct-
+ness; rather, they characterize whether trajectories
+eventually succeed after a control module is trig-
+gered.
+B.3.1
+Intervention Outcomes
+We first examine whether each triggered control
+decision changes the agent’s original action. For
+Loop Recovery, a positive decision indicates that
+the original action is replaced by a recovery action.
+For Unanimous DONE Gating, a positive decision
+indicates that the original DONE proposal is redi-
+rected to a non-DONE continuation. We define TP
+as a changed decision followed by task success,
+FP as a changed decision followed by task failure,
+TN as an unchanged decision followed by task suc-
+cess, and FN as an unchanged decision followed
+by task failure. Table 11 summarizes the resulting
+task-level outcomes for both control modules.
+Among the 34 successful tasks in which Loop
+Recovery was triggered, 26 tasks (76.5%) con-
+tained at least one action-changing intervention.
+This suggests that recovery actions are frequently
+involved in successful triggered trajectories. The
+relatively large FP count should be interpreted cau-
+tiously: Loop Recovery is activated primarily on
+difficult trajectories that already exhibit repetitive
+or stagnant behavior, and such tasks may fail even-
+tually even when the local recovery action is rea-
+sonable.
+For Unanimous DONE Gating, the large TN
+count indicates that the module frequently pre-
+serves the original termination decision in trajec-
+tories that ultimately succeed. This behavior is
+consistent with its role as a conservative policy: it
+redirects termination only when candidate disagree-
+ment provides evidence for continued execution.
+15
+
+
+Method
+Triggered
+TP
+FP
+TN
+FN
+VLAA-GUI Verifier
+229
+113
+95
+17
+4
+Unanimous DONE Gating
+269
+132
+101
+36
+0
+Table 12: Task-level comparison of termination-gate de-
+cisions on Qwen3-VL-30B-A3B with a 50-step budget.
+Method
+Precision
+Recall
+Specificity
+Accuracy
+VLAA-GUI Verifier
+54.3%
+96.6%
+15.2%
+56.8%
+Unanimous DONE Gating
+56.7%
+100.0%
+26.3%
+62.5%
+Table 13: Precision, recall, specificity, and accuracy of
+the termination gates.
+B.3.2
+Termination-Gate Evaluation
+We further compare Unanimous DONE Gating
+with the VLAA-GUI-style Verifier as termination
+gates. In this analysis, TP denotes an accepted
+DONE decision followed by task success, FP denotes
+an accepted DONE decision followed by task failure,
+TN denotes a rejected DONE decision followed by
+task failure, and FN denotes a rejected DONE de-
+cision followed by task success. Table 12 reports
+the corresponding decision counts, and Table 13
+presents the derived precision, recall, specificity,
+and accuracy.
+Both methods achieve high recall, indicating that
+tasks that ultimately succeed are rarely prevented
+from terminating.
+However, precision remains
+modest for both gates, meaning that a substantial
+fraction of accepted DONE decisions still occur in
+trajectories that fail according to the OSWorld eval-
+uator. This limitation reflects the difficulty of in-
+ferring semantic task completion from the local
+model’s own observations and predictions.
+The main difference appears in specificity. Unan-
+imous DONE Gating achieves higher specificity
+than the VLAA-GUI Verifier (26.3% vs. 15.2%),
+indicating that it rejects a larger fraction of pre-
+mature termination proposals. This improvement
+also leads to higher task-level decision accuracy
+(62.5% vs. 56.8%). Overall, these results suggest
+that the unanimous policy provides a more effective
+sampling-based check against unsupported termi-
+nation than textual verification.
+B.4
+Generalization to WindowsAgentArena
+We further evaluate CANDID on 154 Win-
+dowsAgentArena tasks to assess cross-benchmark
+generalization. As shown in Table 14, CANDID
+improves overall task accuracy from 21.47% to
+24.71% for Qwen3-VL-30B-A3B and from 10.39%
+to 11.69% for Qwen3-VL-8B. For Qwen3-VL-30B-
+A3B, the largest gains occur in Windows System
+and Media & Video, although performance varies
+across domains. As the results are based on a sin-
+gle run, they provide preliminary evidence of cross-
+benchmark generalization.
+C
+Baseline Implementations
+This section describes three feedback-style base-
+lines implemented for the comparison.
+Self-
+Guidance is our own lightweight prompt-based
+intervention. The Loop Breaker and Verifier are
+VLAA-GUI-style implementations: they are in-
+spired by the STOP and RECOVER components
+described in VLAA-GUI, but they are adapted to
+our PyAutoGUI action space and local-model set-
+ting rather than reproduced exactly.
+C.1
+Self-Guidance
+Self-Guidance runs a separate diagnostic prompt
+before normal action generation and injects the
+resulting text into the next action prompt as
+Guidance. The guidance model discusses progress,
+local loops, what to avoid, the next direction, and
+whether task completion looks unsafe.
+Prompt skeleton.
+The system prompt asks the
+model to diagnose the desktop trajectory:
+System Prompt
+You are diagnosing progress in a desktop-computer task.
+Analyze the instruction, recent screenshot-action
+trajectory, and current screenshot. Produce short
+free-form guidance for the next action. Be concrete.
+Mention if the agent appears stuck in a local loop.
+Mention what should not be repeated. Mention whether
+task completion looks unsafe and should be avoided. Do
+not output tool calls, XML tags, code, or executable UI
+actions.
+The user message contains the task instruction, re-
+cent screenshots and actions, and the current screen-
+shot. The requested output format is:
+Requested Output Format
+- progress so far
+- suspected issue
+- avoid repeating
+- next direction
+- completion note
+Output use.
+The output is not parsed as a formal
+decision. If non-empty, it is prepended to the next
+normal action-generation prompt as:
+Control Block Appended to the User Prompt
+Guidance:
+<free-form guidance text>
+16
+
+
+Model
+Method
+Domain Accuracy (%)
+Overall (%)
+Office (43)
+Web (30)
+Windows System (24)
+Coding (24)
+Media (21)
+Windows Utilities (12)
+Qwen3-VL-30B-A3B
+Baseline
+2.33
+36.67
+33.33
+33.33
+9.81
+25.00
+21.47
+CANDID
+2.33
+33.33
+50.00
+29.17
+24.09
+25.00
+24.71 (+3.24)
+Qwen3-VL-8B
+Baseline
+0.00
+20.00
+16.67
+12.50
+14.29
+0.00
+10.39
+CANDID
+0.00
+23.33
+20.83
+12.50
+14.29
+0.00
+11.69 (+1.30)
+Table 14: Evaluation results on 154 WindowsAgentArena tasks with a step budget of s = 50 and history length
+h = 4. Values in parentheses next to domain names indicate the task count. Results are based on a single run; values
+in gray parentheses represent the absolute improvement over each model’s baseline.
+The action model may ignore or follow the advice;
+no hard candidate filtering or action constraint is
+applied.
+C.2
+VLAA-GUI-Style Loop Breaker
+The VLAA-GUI-style Loop Breaker is a reflection
+module that runs before action generation when
+previous responses exist. It follows the RECOVER
+idea from VLAA-GUI: inspect recent trajectory
+evidence, decide whether the agent is stuck in
+repetitive no-progress behavior, and emit a strategy-
+change signal. In our implementation, the module
+does not directly choose an action. Instead, when
+it returns a loop signal, it writes a textual loop-
+recovery constraint into the next action prompt.
+Prompt skeleton.
+The system prompt is:
+System Prompt
+You are a reflection agent for a desktop automation task.
+Analyze the recent trajectory and current screenshot for
+repetitive no-progress behavior. Focus only on loop
+recovery. Do not judge whether the whole task is
+complete. Return only a valid JSON object.
+At each step, the user message includes the latest
+assistant response, the parsed action, and optionally
+the current screenshot. The requested schema is:
+Requested Output Schema
+{"progress_signal": "what visibly changed, or
+no visible progress",
+"loop_detected": true/false,
+"loop_evidence": "short evidence",
+"strategy_signal": "KEEP or SWITCH",
+"avoid_actions": ["short action/target
+patterns to avoid"],
+"escape_direction": "short direction for
+changing approach"}
+Output
+use.
+If
+loop_detected=true
+or
+strategy_signal=SWITCH, the module formats
+the result into a constraint block:
+Control Block Appended to the User Prompt
+Loop recovery constraint:
+- strategy_signal: SWITCH
+- loop_evidence: <evidence>
+- avoid_actions: <patterns>
+- escape_direction: <direction>
+The next action must change approach and must
+not match avoid_actions.
+This block is injected into the next action-
+generation prompt.
+The enforcement mode is
+prompt-only: unlike our candidate-based loop re-
+covery, the VLAA-GUI-style Loop Breaker does
+not sample multiple executable candidates or re-
+move repeated actions through a hard filter.
+C.3
+VLAA-GUI-Style Completion Verifier
+The VLAA-GUI-style Verifier is activated only
+when the normal action model proposes DONE. It fol-
+lows the STOP idea from VLAA-GUI: accept task
+termination only when the current screenshot or re-
+cent trajectory provides direct evidence that every
+task requirement is satisfied. Our implementation
+is intentionally conservative and rejects ambiguous
+completion claims.
+Prompt skeleton.
+The system prompt is:
+System Prompt
+You are an extremely strict task completion verifier for
+desktop automation. Decide whether the task is already
+fully completed right now. Mark completion only if
+every requirement has direct, unambiguous evidence in
+the current screenshot or recent trajectory text. Do not
+assume hidden state or intent. For side effects such as
+saving, exporting, sending, creating, deleting, or
+changing settings, require visible or trajectory evidence
+that the side effect was committed. Prefer false negatives
+over false positives. Return only a valid JSON object.
+The user message includes the task instruction, re-
+cent trajectory text, the candidate final response,
+and the parsed termination action. The requested
+schema is:
+Requested Output Schema
+{"complete": true/false,
+"reason": "short evidence-based reason",
+"missing_steps": "what evidence/action is
+still needed, or empty if complete"}
+17
+
+
+Output
+use.
+If
+the
+Verifier
+returns
+complete=false, or if it returns complete=true
+while still mentioning uncertainty or missing steps,
+the agent rejects the termination.
+The current
+action is converted to a wait-style continuation,
+and the next prompt receives feedback of the form:
+Control Block Appended to the User Prompt
+Completion verifier rejected the previous
+terminate action:
+- reason: <reason>
+- missing_steps: <missing evidence or action>
+Continue the task. Do not terminate again
+until the missing evidence is visible.
+Thus, the VLAA-GUI-style Verifier is a feedback
+mechanism rather than a candidate-selection mech-
+anism: it can block a DONE action and provide tex-
+tual correction, but it does not itself select among
+concrete continuation actions.
+D
+Case Study
+D.1
+Loop-Recovery Candidate Selection
+Fig. 8 shows a concrete loop-recovery event from
+a Qwen3-VL 8B trajectory. The agent repeatedly
+pressed Enter while reading the Miniconda license
+text; the loop detector identified this as an exact
+repeated key action, the confirmation gate validated
+the no-progress pattern, and candidate filtering se-
+lected a different continuation action.
+D.2
+Unanimous Done Gating
+Fig. 9 shows a concrete DONE-selection event
+from an OpenCUA-7B trajectory. The initial ac-
+tion proposed successful termination even though
+the email composition window was still open. Ad-
+ditional samples disagreed with termination and
+proposed clicking the visible Send button, so the
+unanimous policy rejected DONE and forced a con-
+crete continuation action.
+18
+
+
+Loop-recovery example from a Qwen3-VL 8B trajectory. The task is a multi-application setup task involving
+Miniconda installation. At step 20, the baseline action proposal would have continued pressing Enter while the terminal
+was displaying the license text.
+Recent executed actions.
+press(’enter’) →press(’enter’) →press(’enter’) →press(’enter’) →
+press(’enter’)
+Raw proposed action. “Press the Enter key to continue reading the Miniconda license agreement.” Parsed code:
+pyautogui.press(’enter’).
+Rule trigger. The detector fires with repeated_exact_text_or_key_action: the proposed action type is key, the
+normalized action is exactly pyautogui.press(’enter’), and the same action appears 5 times in the recent window.
+The cyclic detector also observes a repeated key pattern with repeat count 3.
+Model confirmation. The confirmation gate marks the trajectory as stagnant: “License text scrolling, no installation
+progress”; it sets loop_detected=true and strategy_signal=SWITCH, with the escape direction: “Press ’n’ or ’no’ to
+skip license and proceed to installation.”
+Candidate filtering and selected recovery action. Four recovery candidates are sampled. Three candidates are blocked
+because they are still key actions without a distinguishable target under the blocked action type. The only selectable
+candidate changes the action type to type and executes pyautogui.typewrite(’n’). Since it is the sole valid non-
+blocked candidate, the selector is skipped and this action is executed directly.
+Figure 8: Concrete loop-recovery event of a Qwen3-VL 8B trajectory. The original action would have repeated
+Enter; loop recovery instead executes pyautogui.typewrite(’n’) after rule detection, model confirmation, and
+candidate filtering.
+DONE-selection example from an OpenCUA-7B trajectory. The task is a LibreOffice Writer sharing task. At step 10,
+the document is attached to an email composition window, but the message has not yet been sent.
+Initial termination proposal. The baseline proposal is parsed as DONE: it claims that the document has been shared
+successfully and calls computer.terminate(status=’success’). However, the visible state still contains the email
+composition window and the Send button, indicating that a final send action is still required.
+Candidate disagreement. The DONE gating module samples four additional candidates from the same context. The
+resulting candidate set contains five candidates in total: the original DONE, one additional DONE, and three valid non-DONE
+continuations. Because valid continuation actions exist, the unanimous policy rejects termination and excludes all DONE
+candidates before selection.
+Selector decision. The remaining candidates all attempt the missing final operation: clicking the Send button in the email
+composition toolbar. The selector chooses candidate 1 with the reason that prior Send-click attempts likely missed the
+correct coordinates and that clicking the visible Send button is the final required step. The selected continuation executes
+pyautogui.click(152, 144), redirecting the original DONE decision to a concrete non-DONE action.
+Figure 9: Concrete unanimous DONE-gating event of an OpenCUA-7B trajectory. The initial proposal terminates
+with success, but sampled candidates reveal a valid non-DONE continuation, so DONE candidates are excluded and
+the agent clicks the Send button instead.
+19

@@ -4,6 +4,13 @@
     <a class="dpr-home-notice-tutorial" href="#/tutorial/README">使用教程 <span aria-hidden="true">›</span></a>
   </div>
   <div class="dpr-home-notice-entry">
+    <time class="dpr-home-notice-date" datetime="2026-11-25">11.25</time>
+    <div>
+      <strong class="dpr-home-notice-entry-title">阅读页、侧边栏与后台管理界面视觉升级</strong>
+      <span class="dpr-home-notice-entry-summary">阅读页与侧边栏切换为极简炭黑×浅雾蓝护眼配色，日历升级为圆角卡片并补齐完整暗色模式；后台三页签统一布局、新增全宽「新增研究方向」入口，并优化反馈弹窗交互与次日一次性轻提醒。</span>
+    </div>
+  </div>
+  <div class="dpr-home-notice-entry">
     <time class="dpr-home-notice-date" datetime="2026-10-05">10.05</time>
     <div>
       <strong class="dpr-home-notice-entry-title">medRxiv 自动更新已恢复</strong>
@@ -15,13 +22,6 @@
     <div>
       <strong class="dpr-home-notice-entry-title">日报跨日重复推荐已修复</strong>
       <span class="dpr-home-notice-entry-summary">历史推荐现按原始召回标签与 arXiv 论文标识去重，暂停词条不再参与评分；同一专题次日不会重复推荐相同论文。已有历史页面保留，不自动删除。</span>
-    </div>
-  </div>
-  <div class="dpr-home-notice-entry">
-    <time class="dpr-home-notice-date" datetime="2026-09-09">09.09</time>
-    <div>
-      <strong class="dpr-home-notice-entry-title">90天/365天 arXiv 专题回溯</strong>
-      <span class="dpr-home-notice-entry-summary">支持分片召回、断点评审与分页查看，核心论文与待复核结果分开展示。DeepSeek 费用按实际用量计算，不下载全量 PDF。</span>
     </div>
   </div>
   <div class="dpr-home-site-stats" data-dpr-site-stats hidden aria-live="polite">
@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-11-24</span>
+      <span class="dpr-home-dashboard-kicker">2026-11-25</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 70 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 35 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
-    <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>2 次</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>50</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-11-25 00:35:44 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-11-25 23:35:38 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>11 月 24 日论文日报：今日共筛读 70 篇，精读 50 篇、速读 20 篇。</p>
-<p>两篇满分精读值得优先看：一篇探讨危机咨询中人机协作的收益与障碍，另一篇用多轮对话评估大模型是否会强化用户对 AI 的单向情感依附。</p>
-<p>如果你常和 AI 聊天，不妨先读 CoMPASS，看看研究者如何评估 AI 的回应是在提供支持，还是在加深依附。</p>
+<p>11 月 25 日论文日报：成功筛选 35 篇，15 篇精读、20 篇速读。</p>
+<p>两篇 9.0 分精读值得优先看：一篇关注研究者如何在 AI 辅助社交媒体分析中保有主导权，另一篇关注如何让多模态抑郁分析有证据可依。</p>
+<p>时间有限的话，可以先挑一篇看摘要，留意一个问题：哪些判断由 AI 给出，哪些还需要人来核实？</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -80,12 +80,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">精读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">50 篇</strong>
+    <strong class="dpr-home-dashboard-count">15 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Benefits and Barriers to Human-AI Teaming for Crisis Counseling">Benefits and Barriers to Human-AI Teaming for Crisis Counseling</span></li><li><span class="dpr-home-dashboard-paper-title" title="CoMPASS: A Multi-Turn Benchmark for Measuring LLM Reinforcement of Parasocial Behavior">CoMPASS: A Multi-Turn Benchmark for Measuring LLM Reinforcement of Parasocial Behavior</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Reliance to Overreliance: Taxonomizing and Detecting Relational Risks in AI Companionship">From Reliance to Overreliance: Taxonomizing and Detecting Relational Risks in AI Companionship</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Supporting Researcher Control in AI-Assisted Social Media Analysis: A Mixed-Methods Study of AI4OSN">Supporting Researcher Control in AI-Assisted Social Media Analysis: A Mixed-Methods Study of AI4OSN</span></li><li><span class="dpr-home-dashboard-paper-title" title="EDA: Observe, Verify, and Assess for Evidence-Grounded Multimodal Depression Analysis">EDA: Observe, Verify, and Assess for Evidence-Grounded Multimodal Depression Analysis</span></li><li><span class="dpr-home-dashboard-paper-title" title="Can Your AI Twin Meet People for You? It Can Hold a Conversation. But What Does It Need to Judge Like You?">Can Your AI Twin Meet People for You? It Can Hold a Conversation. But What Does It Need to Judge Like You?</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>15</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>14</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>7</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>5</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>3</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>2</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>4</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>4</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -96,9 +96,9 @@
     <strong class="dpr-home-dashboard-count">20 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="MemEmo: Evaluating Emotion in Memory Systems">MemEmo: Evaluating Emotion in Memory Systems</span></li><li><span class="dpr-home-dashboard-paper-title" title="UIAnchor: Anchoring UI Perception and Action Execution for Reliable Service-Composed Mobile Task Automation with GUI Agents">UIAnchor: Anchoring UI Perception and Action Execution for Reliable Service-Composed Mobile Task Automation with GUI Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="From Vision to Interaction: Evaluating Dynamic Social Intelligence of VLM Agents in ALIVE-World">From Vision to Interaction: Evaluating Dynamic Social Intelligence of VLM Agents in ALIVE-World</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="From Apology to Action: Apologies, Compensation, and Cooperation in LLM Agents">From Apology to Action: Apologies, Compensation, and Cooperation in LLM Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="Can Activation Steering Substitute for Prompt-Based Affective Priming in LLM Digital Twins?">Can Activation Steering Substitute for Prompt-Based Affective Priming in LLM Digital Twins?</span></li><li><span class="dpr-home-dashboard-paper-title" title="Resolution as Attention for Efficient Agent Memory Perception">Resolution as Attention for Efficient Agent Memory Perception</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>7</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>4</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>3</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>6</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>4</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>2</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
 </section>
 </div>
 

@@ -1,0 +1,878 @@
+Emo-H2A: Driving a Facial Robot Directly from LLM Hidden States at
+Token Rate
+Yige Liu1, Jingcheng Huang1, Hao Sun1, Min Li1,∗, and Zhouping Yin1
+Abstract— Diverse,
+semantically
+synchronized,
+and
+low-
+latency facial expressions are essential for human-robot inter-
+action. While large language models (LLMs) have endowed
+anthropomorphic robots with fluent speech, facial expression
+still struggles to follow the conversation. Motivated by this gap,
+we present Emo-H2A (hidden-to-actuation), a paradigm that
+drives a facial robot directly from LLM hidden states during
+autoregressive decoding. Without a separate emotion label,
+expression stays continuous and context-sensitive, and the face
+moves with the unfolding reply. We instantiate this paradigm as
+EmoManifold, a training-free method that extracts a valence–
+arousal–dominance (VAD) coordinate from each hidden state,
+projects it, and drives the face at token granularity. The
+readout is checked on six language models, and the same
+projection drives our 29-degree-of-freedom (DoF) facial robot.
+When driven by this projection, the face shifts its expression
+in the matching direction on 87.5% of within-reply valence
+transitions—whereas holding a single label for the whole reply
+leaves directional tracking near the 50% chance level—and first
+moves in 0.96 s rather than waiting 10–26 s for the reply to
+finish and a turn-level label to return.
+I. INTRODUCTION
+In face-to-face communication, humans perceive spoken
+words and facial expressions as an inseparable composite.
+To reproduce this natural affinity in embodied systems,
+anthropomorphic platforms with high-DoF physical actuation
+are actively being developed [3], [4], while modern LLMs
+provide the linguistic engine for fluent dialogue. Yet, despite
+these advances, modern conversational robots remain funda-
+mentally desynchronized: the facial robot falls out of step
+with the affective nuance of its own speech.
+This desynchronization stems from treating emotion as an
+extrinsic label rather than an endogenous signal. In existing
+pipelines, an utterance opening with sympathy and closing
+with encouragement is assigned a single categorical tag,
+appearing only after the full reply has been generated [1],
+[5]. Recent prompt-engineering and multi-stage scheduling
+approaches attempt to develop intra-utterance trajectories by
+matching generated segments to expression presets [2]. How-
+ever, this strategy introduces complex prompt designs and
+additional parsing passes that substantially increase inference
+latency. As a result, conventional frameworks struggle to
+balance response latency against affective granularity, high-
+lighting the need to move beyond label-mediated emotion
+generation.
+∗Corresponding author: Min Li (min.li@hust.edu.cn).
+1Huazhong
+University
+of
+Science
+and
+Technology,
+Wuhan
+430074,
+China.
+Emails:
+yigeliu@hust.edu.cn,
+D202380251@hust.edu.cn, m202670455@hust.edu.cn,
+yinzhp@mail.hust.edu.cn.
+Affective diversity presents another major hurdle. Tra-
+ditional discrete emotion categories correspond to only a
+handful of static motor templates, which fail to match the
+rich and nuanced expressive capabilities of modern language
+models. Consequently, an urgent need exists for a continu-
+ous affective space capable of modeling fine-grained emo-
+tional transitions. Recent interpretability studies find a low-
+dimensional affective manifold in LLM hidden states, with
+directions resembling valence, dominance, and arousal [6].
+The emergence of this VAD-like geometry suggests that
+LLMs can provide the representational foundation for con-
+tinuous facial affect modeling.
+To address these challenges, we introduce Emo-H2A,
+a paradigm that couples the LLM’s autoregressive hidden
+states at each generated token directly to facial actuator
+commands. We instantiate this paradigm as EmoManifold,
+an online framework that projects token-level hidden repre-
+sentations onto a continuous VAD subspace derived from
+the model’s unembedding vectors and maps the resulting
+affective coordinates to physical motor commands. Physical
+deployment on our 29-DoF facial robot demonstrates that
+EmoManifold follows within-utterance affective shifts with
+low initial response latency, achieving an 83.5% preference
+rate from human observers over both a static expression held
+for the entire utterance and a temporally shuffled control.
+To foster further research, we will open-source our code-
+base and evaluation benchmarks. In summary, our main
+contributions are:
+• Emo-H2A: a paradigm that maps the hidden state at
+each decoding step to facial motor commands, without
+a separate emotion label.
+• EmoManifold: a training-free method that builds a
+VAD subspace, projects each token’s hidden state onto
+it, and drives the face from that coordinate.
+• Physical evaluation: On our 29-DoF facial robot,
+token-level actuation tracks within-reply transitions
+above chance, where turn-level baselines stay near
+chance, and observers prefer the token-level motion over
+a static expression.
+II. RELATED WORK
+A. Facial Robot Platforms and Expression Generation
+The evolution of expressive facial robots has progressed
+from simplified, rule-driven mechanisms to high-DoF plat-
+forms coupled with LLMs. Early facial robots featured
+relatively simple mechanical linkages—such as Kismet [7],
+which actuated eyes, eyebrows, ears, and lips—and synthe-
+sized expressions through hand-crafted rules grounded in
+arXiv:2611.23932v1  [cs.RO]  18 Nov 2026
+
+
+Fig. 1.
+Emo-H2A. (a) Schematic of token-level expression. As each token is generated, continuous valence and arousal coordinates are read out (bottom),
+driving the facial robot to transition smoothly across nuanced expressions (shown at selected tokens). (b) Overview. Existing pipelines (above) pass the
+reply through a category label and an expression generator to play one preset [1], [2]. EmoManifold (below) drives the face directly from the token stream
+as the reply is generated.
+Fig. 2.
+EmoManifold. Online decoding (bottom): user input is tokenized and passed through the LLM decoder; the final-layer, last-position hidden state
+ht is extracted and unembedded to obtain the next token. Online expression driving (top): ht is projected onto VAD; its valence–arousal (VA) components
+are mapped by a Fuzzy Kohonen Clustering Network (FKCN) into seven-dimensional expression weights, fused with presets to drive the facial actuators.
+Offline calibration (right): NRC-VAD pole words and the unembedding matrix Wout construct the affective axes once, offline and training-free.
+the Facial Action Coding System (FACS) [8] or prototype
+interpolation. Subsequent advances in compliant skin mate-
+rials and compact multi-actuator integration enabled high-
+DoF facial robots capable of nuanced surface deformation.
+Within this generation, data-driven visual imitation became
+prominent: Emo [3] trains self-supervised vision-to-motor
+models on a 26-actuator facial robot to anticipate and
+coexpress human facial movements, while X2C [4] maps
+observed human faces onto 30 continuous actuator channels
+on the Ameca anthropomorphic robot. Although these plat-
+forms achieve lifelike mechanical articulation, their control
+signals are driven by external visual mimicry rather than
+conversational semantics. To align nonverbal behavior with
+spoken dialogue on anthropomorphic robots, recent systems
+integrate LLMs into the expression pipeline. FurChat [5],
+SAFE [9], Nadine [10], and Mishra et al. [1] query or prompt
+LLMs to attach discrete emotion tags or nonverbal cue
+bundles to completed replies, whereas Expressive Furhat [11]
+and Xpress [2] generate finer-grained gesture tags, intensity
+levels, or keyframe schedules via structured prompting. How-
+ever, all existing LLM-driven pipelines treat expression as
+an extrinsic symbolic output generated or parsed after text
+decoding, whereas Emo-H2A treats affect as an endogenous
+signal read out at each decoding step.
+B. Affective Representations in Expressive Robotics
+How affective states are represented fundamentally deter-
+mines the granularity and smoothness of robotic facial con-
+trol. Historically, social robotics has relied predominantly on
+discrete categorical models—such as Ekman’s basic emotion
+categories [8]—to index static motor presets or turn-level di-
+alogue classifiers [1], [5], [10]. While straightforward to cali-
+brate on hardware, discrete labels impose coarse quantization
+and abrupt transitions that cannot capture subtle within-
+utterance emotional shifts. To enable continuous modulation,
+expressive robotics turned to dimensional affect models from
+psychology, notably Russell’s two-dimensional circumplex
+model of valence and arousal [12] and Russell and Mehra-
+
+
+bian’s three-factor VAD space [13], later operationalized at
+scale by the NRC-VAD lexicon [14]. Early platforms such as
+Kismet [7] interpolated postures within a designer-specified
+three-dimensional space of arousal, valence, and stance. Yet
+in contemporary LLM-based robots, continuous affective
+coordinates still rely on post-hoc classifiers or explicit scalar
+prompting [2]. Parallel mechanistic interpretability research
+reveals that LLMs inherently encode linear affective geom-
+etry within their latent spaces: Tigges et al. [15] extract a
+linear sentiment direction from residual-stream activations
+using contrastive sentence pairs, and Reichman et al. [6]
+uncover a cross-layer emotional manifold that allows latent
+emotion steering without altering surface semantics. Whereas
+prior interpretability studies recover affective directions by
+running forward passes over labeled or contrastive corpora
+or by training auxiliary modules, EmoManifold reads its
+VAD axes from the unembedding matrix, without training
+an auxiliary module.
+III. METHOD
+The face changes with the tokens of a reply, instead of
+waiting for one label (Fig. 1), and EmoManifold carries
+each decoding step to a facial command before the reply
+is finished (Fig. 2). This section first constructs the affective
+axes (Section III-A); next, it projects each token’s hidden
+state onto those axes (Section III-B); finally, it maps the
+coordinates to actuator commands (Section III-C). The im-
+plementation follows three principles:
+• Expression-Rich: Use a continuous space of expres-
+sions to capture slight affective changes.
+• Token-Level: Update the face at a token rate.
+• Direct-Readout: Derive the facial command from one
+projection, and introduce no reasoning step that would
+add latency.
+A. Training-Free Affective Axes
+This stage builds three affective axes in the LLM’s hidden
+space, aligned with the VAD model [13]. Each axis is a
+difference of unembedding rows, so no emotion classifier
+is trained and the language model is not fine-tuned. Let
+Wout ∈R|V|×d denote the model’s unembedding matrix,
+where |V| is the vocabulary size and d is the hidden
+dimension. For each dimension k ∈{V, A, D}, we form
+positive and negative pole word clusters C+
+k and C−
+k from
+the NRC-VAD lexicon [14]. Words are ranked by extremity
+on that dimension, restricted to those that the target tokenizer
+encodes as a single token, and truncated to the top N words
+per pole. For a polarity cluster C∗
+k (∗∈{+, −}), we average
+the corresponding rows of the unembedding matrix:
+¯eC∗
+k =
+1
+|C∗
+k|
+X
+w∈C∗
+k
+ Wout
+
+id(w),
+(1)
+where id(w) is the unique token index of word w. The
+affective axis for dimension k is the normalized difference
+of the two pole centroids:
+vk =
+¯eC+
+k −¯eC−
+k
+¯eC+
+k −¯eC−
+k
+
+2
+.
+(2)
+The axes {vV , vA, vD} span the VAD affective subspace.
+We use “affective axis” for per-dimension projection and
+construction, and “affective subspace” when discussing tra-
+jectory geometry, orthogonality, and expression mapping.
+The pole-word count N (default 50; sensitivity analysis
+in Section IV-C) is the main hyperparameter of axis con-
+struction. The axes fix the directions, but the scale of a
+projection still depends on the model. A one-time affine map,
+AdaptiveScaler, is therefore fit on a small set of lexicon-
+word sentences, yielding per-dimension parameters (sk, bk)
+that place projections in the lexicon’s [−1, 1] range. Those
+sentences are used once, offline, and the parameters stay
+fixed at inference.
+B. Per-Token VAD Projection
+At inference, the model generates tokens by causal decod-
+ing. At step t, let ht ∈Rd be the final-layer, last-position
+hidden state—the contextual representation of the token just
+emitted. We L2-normalize ht to remove norm drift across
+positions, project onto the three affective axes, and apply
+calibration:
+ˆht =
+ht
+∥ht∥2
+,
+˜zt,k = clip
+ sk v⊤
+k ˆht + bk, −1, 1
+
+,
+k ∈{V, A, D}.
+(3)
+where clip(·, −1, 1) saturates each coordinate to the lexicon
+range [−1, 1], and ˜zt = (˜zt,V , ˜zt,A, ˜zt,D). This produces
+a continuous VAD trajectory {˜zt} at every decoding step,
+including the first token. The projection adds three dot
+products to a hidden state the forward pass has already
+computed. On the deployment PC, the control path from this
+projection through expression blending and smoothing takes
+0.7 ms per token and does not include the language-model
+forward pass.
+C. Continuous Facial Mapping
+This stage converts the VAD coordinates from (3) into
+facial actuator commands in two steps. First, the coordinates
+are mapped through a basic-expression space into blend
+weights (expression mapping). Second, the weights are fused
+into servo commands with hardware-oriented smoothing and
+rate limiting (hardware actuation).
+1) Continuous Mapping from VAD to Basic Expressions:
+Calibrating each servo directly in the VAD subspace is
+costly, and the resulting map is tied to one joint layout. The
+basic-expression space provides a more practical calibration
+basis. We therefore use an FKCN [16] to map the VA
+components into blend weights ωt ∈∆6 ⊂R7 (nonnegative
+and summing to one) over seven basic expressions (neutral,
+happiness, surprise, fear, sadness, disgust, and anger). The
+full VAD coordinate is retained in the readout, and each
+dimension is evaluated in Section IV. For facial actuation, we
+use only valence and arousal: dominance accounts for less
+variance in affective judgments than valence or arousal [17],
+draws the lowest inter-rater agreement among the three when
+observers rate a face [18], and is classically carried by
+
+
+Fig. 3.
+The 29-DoF facial robot platform used for the physical evaluation.
+(a) Unskinned mechanical skeleton: servo groups span the eyelids, brows,
+and mouth. (b) Full appearance with simulated silicone skin—the configu-
+ration driven and recorded in the experiments.
+posture [19]. Because the coordinate already captures dom-
+inance, a downstream mapping can route it to the actuators
+without rebuilding the axes; in this pipeline, it remains in
+the readout rather than the servo command.
+The FKCN has P = 13 fuzzy prototypes {(cj, wj)}P
+j=1,
+where cj ∈R2 is a VA-plane coordinate and wj ∈{0, 1}7
+is the one-hot label of the associated basic expression.
+With 13 prototypes and seven expressions, more than one
+prototype can carry the same label. Prototype coordinates
+follow the circumplex model [12], so each basic emotion
+occupies a characteristic region. Given pt = (˜zt,V , ˜zt,A),
+we compute squared distances dtj = ∥pt −cj∥2 and obtain
+fuzzy memberships by inverse-distance normalization, µtj =
+ dtj
+PP
+l=1 d−1
+tl
+−1 (reducing to a hard assignment when the
+input coincides with a prototype). The output weight vector
+is the membership-weighted sum of prototype labels:
+ωt =
+P
+X
+j=1
+µtj wj.
+(4)
+Unlike nearest-neighbor hard classification, this mapping is
+continuous over the VA plane: a point between prototypes
+yields a soft blend of several expressions rather than a hard
+jump.
+2) Hardware Actuation and Signal Tuning: The actuation
+layer fuses the seven-dimensional weight vector into servo
+commands. Each basic expression has an offline-calibrated
+preset p(m)
+∈[0, 1]29: joints are posed for the target
+expression and normalized by each channel’s travel limits. At
+run time, the 29-dimensional target factor is a linear fusion
+of the presets with the FKCN weights:
+ft =
+7
+X
+m=1
+ωt,m p(m),
+ft ←clip(ft, 0, 1),
+(5)
+The clip is a safeguard: with weights on the simplex and pre-
+sets in [0, 1]29, the fusion already lies in [0, 1]29. The target
+is converted channel-wise into servo angles and sent over
+the serial port. We also apply exponential moving average
+(EMA) smoothing and frame-rate limiting to suppress per-
+token jitter and match servo dynamics; defaults and ablations
+are reported in Section IV-B.
+Because fusion is defined in preset-weight space, the pro-
+jection and the FKCN never address the 29 servo channels.
+Only the seven expression presets are posed on this robot.
+IV. EXPERIMENTS
+We design experiments to address three core questions:
+• Q1. Within-Utterance Tracking: Does the physical
+face reproduce the affective trajectory read token by
+token from the hidden states?
+• Q2. Response Timing: How much earlier does the face
+move when driven during decoding rather than after the
+reply?
+• Q3. Affective Readout: Does the coordinate read the
+situation, or only the words?
+A. Experimental Setup
+Physical evaluation uses the 29-DoF facial robot in Fig. 3,
+controlled by an on-board Intel N100 industrial PC (4-
+core CPU, no discrete GPU) over a serial port. Unless
+noted otherwise, all experiments use Qwen2.5-0.5B with
+offline affective axes and calibration parameters built from
+50 English pole words per pole (Section III-A).
+B. Main Comparison
+1) Actuation Fidelity: This experiment evaluates physical
+tracking of token-rate affective commands. Twenty replies
+are generated once by Qwen2.5-0.5B and recorded in one
+session under a fixed camera pose across five conditions.
+EmoManifold updates valence, arousal, and the facial target
+once per token. The four baselines share the identical reply
+text: Mishra et al. [1] assign one of six categories to the
+finished reply and hold it for the turn using their original
+prompt; Xpress-Turn [2] holds one category and intensity
+for the turn; Xpress-Story [2] synthesizes speech, splits the
+reply at narrative or emotional turns, and plays one mapped
+preset per segment from its word-level timestamp; and the
+shuffled control replays EmoManifold’s per-token commands
+in randomized order, preserving command amplitudes while
+removing temporal order. Category calls use GPT-4o-mini for
+the two turn-level baselines and GPT-4o for Xpress-Story.
+While the robot acts out each reply, a fixed camera records
+the face and Py-Feat [20] estimates frame-by-frame valence
+and arousal independently of our pipeline. Because Py-Feat
+is trained on human faces, we place its readings on the
+commanded scale by fitting one linear map per dimension on
+40 turn-level static segments from Mishra et al. and Xpress-
+Turn, then freezing both maps across all dynamic trials. We
+define the commanded trace as the token-level valence and
+arousal trajectory sent to the actuators by EmoManifold, and
+score the calibrated camera readout of all five conditions
+against this same trace using a fixed 0.5-s actuation lag.
+The primary metric is event-level directional agreement:
+within each 2-s sliding window, an event is flagged when
+commanded valence shifts by more than 0.3 or commanded
+arousal by more than 0.2, and a hit is recorded if the
+calibrated camera readout shifts in the same direction (50%
+chance level). As a secondary metric, we report the R2
+
+
+Fig. 4.
+Token-level affective physical actuation (n=20 replies). Condition definitions are in Section IV-B. (a) Directional agreement between commanded
+affective transitions and the camera readout. (b) R2 gain, in percentage points, beyond a turn-level expression. (c) EmoManifold on the representative
+anger trial: command (blue) and calibrated camera (amber), z-scored valence.
+TABLE I
+ON-DEVICE LATENCY (MEAN ± STD., n=20).
+System
+Per-token
+(ms)
+First update (s)
+GPT-4o-mini
+First update (s)
+Qwen2.5-0.5B
+EmoManifold
+0.7±0.2
+0.96±0.19
+Mishra et al. [1]
+—
+10.2±4.3
+9.9±4.0
+Xpress-Turn [2]
+—
+9.9±3.8
+26.5±5.7
+Xpress-Story [2]
+—
+19.5±6.1
+93.5±39.6
+gain (in percentage points) over a static turn-level expression
+(Fig. 4(b)).
+Fig. 4 shows that EmoManifold tracks commanded transi-
+tions within the utterance. Directional agreement is 87.5%
+for valence (95% CI [76.7, 96.0], p < 10−4) and 69.6%
+for arousal (CI [56.8, 81.7], p=0.001). On valence, none
+of the other four conditions rises above the 50% chance
+level (37.2%–49.4%). On arousal, those conditions span
+34.0%–58.8%, and at least one exceeds chance. Xpress-
+Story is the informative baseline: its face changes at segment
+boundaries within the reply, yet valence agreement stays at
+49.4% (CI [31.3, 66.2]), showing that within-reply changes
+must land where the commanded trajectory shifts. For the
+R2 gain, EmoManifold reaches 21.8 percentage points in
+valence and 18.9 in arousal, against 7.5 and 5.9 for Xpress-
+Story (Fig. 4(b)). A circular-shift surrogate on EmoManifold
+rejects chance alignment (Fisher-combined p < 10−23),
+and the shuffled control—which keeps command amplitudes
+without their order—falls back to chance. Intra-utterance
+tracking therefore depends on the temporal order of the
+commands.
+2) On-Device End-to-End Latency: This experiment mea-
+sures end-to-end response timing and per-token control over-
+head on the industrial PC (Table I). EmoManifold delivers
+its first content-driven facial update in 0.96 s, including
+the language-model forward pass, and the later per-token
+control path takes 0.7 ms excluding that pass. Turn-level
+baselines finish the reply and then query a category label:
+with GPT-4o-mini the first update takes 10.2 s for Mishra
+et al. and 9.9 s for Xpress-Turn; on local Qwen2.5-0.5B,
+with no external call, it takes 9.9 s and 26.5 s. Xpress-
+Story’s first update is that same reply generation plus its
+TABLE II
+COMPARISON OF FACIAL ROBOT INTERACTION SYSTEMS.
+EmoManifold
+Xpress-
+Story
+Xpress-
+Turn
+Mishra
+et al.
+Source
+Hidden
+Script
+Label
+Label
+Expression
+Continuous
+Discrete
+Discrete Discrete
+Update
+Token
+Keyframe
+Turn
+Turn
+Latency
+0.96 s
+93.5 s
+26.5 s
+9.9 s
+TABLE III
+CROSS-MODEL WORD-LEVEL SPEARMAN CORRELATION (N=50).
+Model
+ρV
+ρA
+ρD
+Gemma-2-2B
+0.802
+0.650
+0.598
+Llama-3.2-3B
+0.800
+0.828
+0.708
+Mistral-7B-v0.3
+0.794
+0.788
+0.567
+Qwen2.5-7B
+0.755
+0.792
+0.648
+Llama-3.1-8B
+0.773
+0.788
+0.697
+Qwen2.5-0.5B
+0.837
+0.665
+0.663
+segmentation and emotion calls, 19.5 s with GPT-4o-mini
+and 93.5 s on the local model; speech synthesis is not on
+this clock. By reading affect directly during decoding rather
+than after the reply is finished, EmoManifold removes the
+turn-level latency bottleneck (Table II).
+C. Reliability of the Affective Subspace
+We next examine whether the mined VAD axes recover
+human lexicon ratings and maintain a consistent orthogonal
+geometry across models and languages. We evaluate six lan-
+guage models (Table III) on 300 held-out single-token words
+from the NRC-VAD lexicon (100 per dimension, grouped
+by their most salient dimension), computing the Spearman
+correlation ρ between projected unembedding scores and
+ground-truth lexicon ratings.
+Axis quality depends on the pole-word count N. Fig. 5
+shows ρ across the six models as N varies from 10 to 80:
+all three dimensions are unstable at small N, improve as N
+grows, and saturate beyond N ≈50, which we adopt by
+default.
+Table III reports per-dimension correlations at N=50, with
+cross-dimension means falling between 0.68 and 0.78. The
+deployed Qwen2.5-0.5B model reaches a valence correlation
+
+
+20
+40
+60
+80
+N
+0.65
+0.70
+0.75
+0.80
+0.85
+Spearman ρ
+V
+20
+40
+60
+80
+N
+A
+20
+40
+60
+80
+N
+D
+Fig. 5.
+Word-level Spearman correlation as a function of the number of
+pole words N. Solid lines show the mean across six models; shaded bands
+show the min–max range. All three dimensions saturate beyond N ≈50.
+Fig. 6.
+Cross-lingual affective geometry (| cos |, cohesion, and the random
+baseline are defined in the text). (a) Schematic of cross-lingual emotion word
+clusters (illustrative, not measured): solid lines are the three mined affective
+axes; dashed lines are an idealized orthogonal basis. (b) Measured cohesion
+after each backbone builds its axes from English pole words (N=50).
+Parenthesized numbers are that model’s random baseline.
+of 0.837, matching models up to 8B. Rebuilding the axes
+from Chinese pole words on Qwen2.5-0.5B yields ρV =
+0.823, ρA = 0.803, and ρD = 0.702, confirming a linearly
+readable affective structure in both languages.
+To check axis orthogonality and cross-lingual consistency,
+we build axes from English pole words (N=50) on Qwen2.5-
+0.5B and Llama-3.2-3B, then project five emotion clusters
+(fear, comfort, dominance, strength, calm) containing single-
+token synonyms in five languages per cluster (English, Chi-
+nese, and three additional languages). Cluster cohesion is
+measured as the mean pairwise cosine similarity within each
+cluster and compared against a random three-dimensional
+orthogonal basis (100 trials per cluster).
+Fig. 6(a) illustrates this geometry, and Fig. 6(b) reports the
+metrics for English-built axes: on Qwen2.5-0.5B, | cos | ≤
+0.194 with a cohesion of 0.913 (random: 0.410); on Llama-
+3.2-3B, | cos | ≤0.158 with a cohesion of 0.963 (random:
+0.365). Axes rebuilt from Chinese pole words remain in the
+same range (| cos | ≤0.220 and cohesion 0.898 on Qwen;
+| cos | ≤0.282 and cohesion 0.965 on Llama), showing
+that the subspace geometry holds across both backbones and
+source languages.
+D. Context Sensitivity
+This experiment tests whether the readout reflects situa-
+tional context rather than static word priors, using sarcasm
+where positive wording carries negative intent [21]. We
+S
+P
+N
+−0.2
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+V
+(a) Sentence V
+***
+***
+***
+S
+P
+−1.0
+−0.5
+0.0
+0.5
+1.0
+(b) Token V
+***
+Fig. 7.
+Contextual-triplet sarcasm stress test (n=200, Qwen2.5-0.5B;
+triplet construction in the text). (a) Sentence-level projected valence V
+for S (sarcastic), P (sincere-positive), and N (literal-negative). Raincloud
+plots combine a half-violin (kernel density), a box plot (interquartile range,
+IQR), and per-triplet scatter points; diamonds are bootstrap means ±95% CI,
+gray lines connect matched triplets. (b) Token-level valence at the primary
+anchored positive keyword, S versus P (n=194).
+construct 200 contextual triplets from iSarcasmEval Sub-
+Task C [21], formatting each item as one sentence of ob-
+servable context followed by a quoted utterance: S (sarcastic)
+pairs an adverse context with a positive quotation; P (sincere-
+positive) pairs a favorable context with the word-for-word
+identical positive quotation; and N (literal-negative) pairs
+the adverse context with a literally negative quotation. Each
+triplet is annotated with 1–3 anchored positive keywords
+(e.g., “well”) for token-level evaluation.
+We read out sentence-level valence at the final token and
+token-level valence at each anchored keyword. Across the
+200 triplets (Fig. 7(a)), sentence-level valence for S and N
+closely overlaps (81.5% of pairs differ by less than 0.15),
+whereas S drops significantly below P despite their identical
+quotations (∆V = −0.19; Wilcoxon, n=200, p < 10−11).
+To isolate single-token contextual shifts, Fig. 7(b) com-
+pares the primary anchored keyword appearing in the exact
+same position and surface form in S and P. Under sarcasm,
+keyword valence drops by 0.22 on average (−0.20 across
+all co-occurring keywords), while arousal and dominance
+shift by +0.08 and −0.07, matching the valence-driven
+evaluation shift expected in verbal irony [22]. Repeating
+the test on Llama-3.2-3B yields the same directional shifts
+(∆V (S−P) = −0.20 at the sentence level and −0.16 at
+the primary keyword), confirming that the readout reflects
+situational context rather than static word priors.
+E. Robustness
+This experiment tests whether the display pipeline pre-
+serves within-utterance command order across smoothing
+rates and prototype counts. We replay the pipeline on the 20
+recorded command trajectories, read each frame-rate output
+back onto the VA plane, and score it against the token-level
+command using the same event thresholds and windows.
+At the default setting (α=0.6, P=13), replay gives 84.4%
+valence and 67.7% arousal agreement, closely matching the
+camera measurements (87.5% and 69.6%) and validating
+replay as a proxy for physical execution. Time-shuffled
+
+
+commands passed through the same pipeline fall to 44%–
+48% valence agreement (40%–45% arousal), confirming that
+the metric remains sensitive to command order.
+We then sweep nine settings formed by crossing three
+smoothing rates (α ∈{0.3, 0.6, 0.9}) with three prototype
+sets—the default P=13 and two P=7 constructions that each
+retain a different prototype per emotion class—under the
+same per-frame rate limit. Across all nine settings, valence
+agreement stays within 75%–87% and arousal agreement
+within 68%–74%, well above the shuffled range, showing
+that temporal command order survives the display pipeline
+across parameter choices.
+F. Human Study
+To evaluate human perception, we conduct two silent-
+video questionnaires with 20 participants (10 items each)
+assessing expression recognition and dynamic preference.
+Each item displays the full sentence text before playing the
+unsubtitled video; participants gave informed consent, and
+all responses were anonymous.
+In the recognition task, participants classify each video
+into one of the seven basic expressions, compared against
+hand-tuned static references recorded at the same camera
+pose. EmoManifold achieves 85.5% accuracy versus 90.5%
+for the hand-tuned references (Wilcoxon p=0.013), with both
+showing identical confusion patterns between neighboring
+pairs (fear–surprise and sadness–disgust) inherent to the
+robot’s facial mechanics.
+In the preference task, participants make a three-way
+choice on sentences containing an intra-utterance emotional
+shift, selecting which video best matches the emotional
+progression: EmoManifold’s dynamic expression, a static
+expression held for the whole sentence, or the shuffled-
+order control. EmoManifold is chosen on 83.5% of trials,
+compared with 11.5% for the shuffled control and 5.0%
+for the static expression, with every participant preferring
+EmoManifold over both alternatives (one-sided Wilcoxon
+over participants, p < 10−6). Expression recognition stays
+within five percentage points of the hand-tuned references,
+and observers match the token-level video to emotional shifts
+inside the sentence.
+V. DISCUSSION
+Collectively, our offline readout and physical hardware
+evaluations demonstrate that continuous facial expressions
+can be driven directly from LLM hidden states. The projected
+coordinates correlate consistently with lexicon ratings across
+six language models in both English and Chinese, and
+respond to shifts in situational context even when surface
+wording is held constant. When mapped through the FKCN
+and expression presets onto the physical robot, these tra-
+jectories are reliably recovered by external camera tracking
+and preferred by human observers over both static turn-
+level expressions and time-shuffled controls. Compared with
+discrete emotion labels inferred only after a reply completes,
+the principal advantage is temporal: affective dynamics are
+rendered concurrently with language generation rather than
+deferred until the end of the utterance.
+First,
+coupling
+this
+affective
+channel
+to
+audible
+speech playback remains open. The evaluations establish
+expression–content alignment at token rate. The human
+studies use silent video, and the current system does not
+drive audio-synchronized lip motion. Because mouth degrees
+of freedom must serve both articulation and expression,
+a naive superposition of the two can cause mechanical
+interference. A direct next step is to apply the same
+hidden-state readout to open-source speech-native models
+and project affect along the audio-token stream, so facial
+updates share the playback clock while lip articulation runs
+as a complementary controller on that timeline.
+Second, the face hardware and the interaction policy both
+constrain what can be shown. Discrimination among neigh-
+boring emotions is bounded by the robot’s physical DoFs and
+preset expression basis. More critically, directly externalizing
+an internal affective state can be socially inappropriate: nat-
+ural human interaction often requires suppressing, softening,
+or delaying expression, whereas the current pipeline renders
+the signal immediately upon readout. We therefore plan a
+lightweight, optional regulation stage between projection and
+actuation—gain limiting, temporal hold, and an explicit off
+switch—so deployment can choose when the internal signal
+is shown, softened, or suppressed.
+Third, the physical and human studies remain modest
+in scale across corpus size, participant count, and tested
+backbones. The closed-loop physical actuation (Section IV-
+B) and the human study (Section IV-F) use only Qwen2.5-
+0.5B. Because the subspace and context-sensitivity exper-
+iments already show comparable geometry and sensitivity
+on Llama-3.2-3B, we concentrated hardware and human-
+evaluation resources on the deployment model. Repeating
+the full closed-loop protocol on a second backbone, with a
+larger participant pool, is the direct next measurement step
+along the same evaluation pipeline.
+VI. CONCLUSION
+This paper shows that a facial robot need not rely on a
+discrete emotion label: what a model will express in words
+or audio is already computed in its hidden states before
+the output is rendered. Emo-H2A takes this as its premise,
+locating the relevant hidden states, extracting the affective
+signal—whether by subspace projection, as in EmoManifold,
+or by a learned network—and running actuation in paral-
+lel with generation rather than after it. Continuous VAD
+coordinates are read from an LLM’s hidden states during
+streaming decoding, with the valence–arousal plane driving
+physical expression at token granularity. Across experiments,
+the training-free pipeline yields a context-sensitive readout
+(∆V = −0.19 under sarcasm), tracks commanded intra-
+utterance transitions on a facial robot (87.5% valence and
+69.6% arousal directional agreement, against near-chance
+baselines and with 83.5% human preference), and reduces
+on-board first-update latency to 0.96 s, compared with 9.9–
+93.5 s for local baselines. These results offer a practical
+
+
+route beyond turn-level control toward fast, fine-grained, and
+verifiable embodied affective interaction.
+REFERENCES
+[1] C. Mishra, R. Verdonschot et al., “Real-time emotion generation in
+human–robot dialogue using large language models,” Front. Robot.
+AI, vol. 10, p. 1271610, 2023.
+[2] V. N. Antony, M. Stiber, and C.-M. Huang, “Xpress: A system
+for dynamic, context-aware robot facial expressions using language
+models,” in Proc. 20th ACM/IEEE Int. Conf. Human–Robot Interact.
+(HRI), 2025, pp. 958–967.
+[3] Y. Hu, B. Chen, J. Lin et al., “Human–robot facial coexpression,” Sci.
+Robot., vol. 9, no. 88, p. eadi4724, 2024.
+[4] P. Li, L. Cao, X.-M. Wu, R. Yang, and X. Yu, “X2C: A dataset
+featuring nuanced facial expressions for realistic humanoid imitation,”
+arXiv:2505.11146, 2025.
+[5] N. Cherakara, F. Varghese, S. Shabana et al., “FurChat: An embodied
+conversational agent using LLMs, combining open and closed-domain
+dialogue with facial expressions,” in Proc. 24th Annu. Meeting SIG-
+DIAL, 2023, pp. 588–592.
+[6] B. Reichman, A. Avsian, and L. Heck, “Emotions where art thou:
+Understanding and characterizing the emotional latent space of large
+language models,” in Proc. Int. Conf. Learn. Represent. (ICLR), 2026,
+arXiv:2510.22042.
+[7] C. Breazeal, Designing Sociable Robots. Cambridge, MA, USA: MIT
+Press, 2002.
+[8] P. Ekman and W. V. Friesen, Facial Action Coding System: A Tech-
+nique for the Measurement of Facial Movement. Palo Alto, CA, USA:
+Consulting Psychologists Press, 1978.
+[9] Y. K. Lee, Y. Jung, G. Kang, and S. Hahn, “Developing social
+robots with empathetic non-verbal cues using large language models,”
+arXiv:2308.16529, 2023.
+[10] H. Kang, M. Ben Moussa, and N. Magnenat-Thalmann, “Nadine:
+A large language model-driven intelligent social robot with affective
+capabilities and human-like memory,” Comput. Anim. Virtual Worlds,
+vol. 35, no. 4, p. e2290, 2024.
+[11] G. A. Abbo, R. Janssens et al., “Expressive Furhat: Generating real-
+time facial expressions for human–robot dialogue with LLMs,” in
+Companion Proc. ACM/IEEE Int. Conf. Human–Robot Interact. (HRI),
+2025.
+[12] J. A. Russell, “A circumplex model of affect,” J. Pers. Soc. Psychol.,
+vol. 39, no. 6, pp. 1161–1178, 1980.
+[13] J. A. Russell and A. Mehrabian, “Evidence for a three-factor theory
+of emotions,” J. Res. Pers., vol. 11, no. 3, pp. 273–294, 1977.
+[14] S. Mohammad, “Obtaining reliable human ratings of valence, arousal,
+and dominance for 20,000 English words,” in Proc. 56th Annu.
+Meeting Assoc. Comput. Linguist. (ACL), 2018, pp. 174–184.
+[15] C. Tigges, O. J. Hollinsworth et al., “Language models linearly
+represent sentiment,” in Proc. 7th BlackboxNLP Workshop, 2024, pp.
+58–87.
+[16] M.-J. Han, C.-H. Lin, and K.-T. Song, “A design for smooth transition
+of robotic emotional states,” in Proc. IEEE Workshop Adv. Robot. Soc.
+Impacts (ARSO), 2010, pp. 1–6.
+[17] M. M. Bradley and P. J. Lang, “Measuring emotion: The self-
+assessment manikin and the semantic differential,” J. Behav. Ther. Exp.
+Psychiatry, vol. 25, no. 1, pp. 49–59, 1994.
+[18] T. M. Sutton, A. M. Herbert, and D. Q. Clark, “Valence, arousal, and
+dominance ratings for facial stimuli,” Q. J. Exp. Psychol., vol. 72,
+no. 8, pp. 2046–2055, 2019.
+[19] A. Mehrabian, “Significance of posture and position in the commu-
+nication of attitude and status relationships,” Psychol. Bull., vol. 71,
+no. 5, pp. 359–372, 1969.
+[20] J. H. Cheong, E. Jolly, T. Xie et al., “Py-Feat: Python facial expression
+analysis toolbox,” Affect. Sci., vol. 4, no. 4, pp. 781–796, 2023.
+[21] I. Abu Farha, S. V. Oprea et al., “SemEval-2022 task 6: iSarcasmEval,
+intended sarcasm detection in English and Arabic,” in Proc. 16th Int.
+Workshop Semantic Eval. (SemEval), 2022, pp. 802–814.
+[22] J. S. Leggitt and R. W. Gibbs, “Emotional reactions to verbal irony,”
+Discourse Process., vol. 29, no. 1, pp. 1–24, 2000.

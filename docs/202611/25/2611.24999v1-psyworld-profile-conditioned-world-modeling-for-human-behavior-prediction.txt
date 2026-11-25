@@ -1,0 +1,1154 @@
+PsyWorld: Profile-Conditioned World Modeling for Human
+Behavior Prediction
+Ziyuan Qin
+ziyuan.qin@emory.edu
+Department of Computer Science
+Emory University
+Atlanta, Georgia, USA
+Yang Qiao
+yang.qiao@emory.edu
+Department of Computer Science
+Emory University
+Atlanta, Georgia, USA
+Summer B. Frandsen
+summer.frandsen@emory.edu
+Department of Psychiatry and
+Behavioral Sciences
+Emory University
+Atlanta, Georgia, USA
+Michael T. Treadway
+mtreadway@emory.edu
+Department of Psychiatry and
+Behavioral Sciences
+Emory University
+Atlanta, Georgia, USA
+Liang Zhao
+liang.zhao@emory.edu
+Department of Computer Science
+Emory University
+Atlanta, Georgia, USA
+Abstract
+Understanding how stable psychometric traits and time-varying
+states jointly inform behavior is an important problem in com-
+putational behavioral science. Existing personalized agents com-
+monly condition actions directly on a static profile, leaving realized
+state transitions unused as an explicit source of supervision. We
+introduce a profile-conditioned state world model that uses ob-
+served environment–behavior state transitions to learn transition-
+informed representations for behavioral prediction. During train-
+ing, a posterior encoder quantizes realized transitions, while a prior
+predicts the resulting codes from the psychometric profile and pre-
+transition context. The prior code and predicted next state then
+condition macro-level behavior and simulator-grounded execution.
+Thus, the world model provides structured transition supervision
+instead of treating personality as a direct action descriptor. We eval-
+uate the framework in VEET, a controlled behavioral simulator with
+human trajectories, and in AgentSociety as a structurally different
+synthetic environment. A participant-disjoint split of 240 training,
+25 validation, and 48 test participants evaluates generalization to
+unseen people. On VEET, the model reaches 0.904 Top-1 accuracy
+(95% CI: [0.895, 0.913]) and 0.0033 Macro KL. Ablations associate
+continuous next-state modeling with most of the Top-1 gain, while
+discrete codes and prior alignment mainly improve Top-3 and dis-
+tributional alignment. These results establish transition-informed
+world-model supervision as useful for subject-generalized behavior
+prediction, without implying causal psychological mechanisms or
+calibrated long-horizon state dynamics.
+CCS Concepts
+• Computing methodologies →Modeling and simulation; •
+Applied computing →Psychology.
+Keywords
+human behavior modeling, psychometrics, world models, person-
+alized agents, out-of-distribution generalization, computational
+behavioral science
+ACM Reference Format:
+Ziyuan Qin, Yang Qiao, Summer B. Frandsen, Michael T. Treadway, and Liang
+Zhao. 2027. PsyWorld: Profile-Conditioned World Modeling for Human Be-
+havior Prediction. In Proceedings of KDD 2027 AI for Sciences Track (KDD
+’27). ACM, New York, NY, USA, 11 pages.
+1
+Introduction
+Human behavior reflects both stable individual differences and
+states that vary within a task. Psychometric profiles describe between-
+person variation in stress, motivation, and related traits, whereas
+recorded task, environmental, and behavioral variables describe the
+context in which those tendencies are expressed. Dense longitudi-
+nal evidence shows that trait- and state-level motivation can exert
+distinct and interacting effects on effort-based decisions [7]. For
+computational behavioral simulation, this distinction suggests that
+realized state transitions can provide supervision beyond a static
+profile-to-action mapping.
+Existing personality-conditioned agents only partially use this
+structure. LLM-based social simulators combine persona descrip-
+tions with needs, memory, and planning [10, 13], while consistency-
+oriented training reduces persona drift across interactions [1]. These
+systems can produce locally plausible behavior, but profiles are
+commonly injected as static prompts, policy inputs, or reward de-
+scriptors. A direct profile-to-action model can therefore capture
+participant-level associations without representing within-person
+changes in task, environmental, and behavioral state.
+The central challenge is to exploit realized state changes during
+training without using future information at inference. Realized
+environment–behavior state changes provide transition-level su-
+pervision associated with subsequent behavior, but the future state
+is unavailable before an agent acts. Under participant-disjoint eval-
+uation, the model must also transfer this structure to profiles and
+trajectories never observed during training, rather than memorize
+participant-specific action frequencies. We therefore ask whether
+explicit state-transition supervision can improve behavioral predic-
+tion for previously unseen participants.
+1
+arXiv:2611.24999v1  [cs.LG]  18 Nov 2026
+
+
+KDD ’27, August 2027, San Jose, CA, USA
+Ziyuan Qin, Yang Qiao, Summer B. Frandsen, Michael T. Treadway, and Liang Zhao
+World models provide a natural inductive bias for this question
+because they learn state evolution rather than only action associ-
+ation. Latent world models have enabled agents to learn compact
+transition structure and reason over predicted futures [4–6]. Stan-
+dard world models, however, are designed primarily for task control
+and do not explicitly separate stable psychometric profiles from the
+time-varying environment–behavior state. Our formulation makes
+that distinction explicit and uses next-state prediction as structured
+supervision for downstream behavior.
+We introduce a profile-conditioned state world model. For each
+transition, the model separates the stable psychometric profile from
+the current environment–behavior state and macro behavior. A
+training-time posterior observes the realized state change and as-
+signs it to a vector-quantized transition code. A rollout-time prior
+predicts that code using only the profile and pre-transition context,
+making the transition-informed representation available without
+future leakage. The code and predicted next state condition macro-
+level behavior, which is realized through a simulator-specific micro
+controller. The world model is therefore central to the profile–state–
+behavior factorization, while the evaluated outcome is behavior
+prediction rather than independent calibration of long-horizon state
+dynamics.
+We evaluate the formulation in two complementary environ-
+ments. VEET provides questionnaire profiles and behavioral trajec-
+tories from human participants for the primary unseen-participant
+evaluation. AgentSociety provides a structurally different synthetic
+LLM-based environment for testing whether the same factorization
+can be operationalized across state spaces and action interfaces. We
+use a strictly participant-disjoint split of 240 training, 25 validation,
+and 48 test participants, so every reported VEET test trajectory
+comes from a previously unseen person. Ablations separate the
+effects of continuous next-state prediction, vector quantization,
+and rollout-time prior alignment; a code–trait analysis bounds the
+interpretation of the learned representation.
+Our contributions are:
+• We formulate subject-generalized human behavior predic-
+tion by separating stable psychometric profiles from time-
+varying environment–behavior states and using realized
+transitions as structured supervision.
+• We develop a profile-conditioned state world model whose
+posterior extracts vector-quantized transition codes from
+observed state changes and whose prior predicts them from
+pre-transition context for leakage-free rollout.
+• On a participant-disjoint VEET split, we show the predictive
+utility of transition supervision and characterize the distinct
+roles of continuous state prediction, discrete codes, and prior
+alignment; AgentSociety supplies a synthetic operationaliza-
+tion rather than independent psychological validation.
+2
+Related Work
+Trait–state modeling and behavioral simulation. Psychological
+theories distinguish relatively stable between-person traits from
+within-person states that fluctuate across time and context. Lon-
+gitudinal evidence further shows that trait and state motivation
+can contribute independently and interactively to effort-based deci-
+sions [7]. Simulation platforms provide a controlled setting in which
+such dynamics can be observed and modeled: Unity-based experi-
+mental frameworks reproduce established behavioral effects [2, 8],
+while interview-conditioned generative agents can reproduce sev-
+eral empirical patterns in human responses [9]. Our focus is not
+to assign a fixed psychological type to an agent, but to use ob-
+served environmental and behavioral state changes as structured
+supervision for profile-conditioned behavior prediction.
+Personality-conditioned agents. Personality-aware agents com-
+monly inject profile information through prompts, memory, needs,
+value systems, or policy conditioning. AgentSociety combines needs,
+affect, cognition, and memory in large-scale social simulation [10],
+whereas D2A maps personality profiles to desire-driven values for
+daily activity generation [13]. Other work has measured how Big
+Five traits alter LLM-agent decisions and performance [3, 12], or
+used consistency-based optimization to reduce persona drift across
+interactions [1]. These methods establish the value of explicit pro-
+files, but primarily use them as static conditions on behavior. We
+instead separate the profile from the time-varying environment–
+behavior state and model how their interaction informs subsequent
+behavior.
+World models and latent transition learning. Latent world models
+learn compact predictive representations of sequential environment
+dynamics and use them for imagination or control. Dreamer intro-
+duced policy learning in a recurrent latent state space [4], while
+discrete and more general successors improved representation learn-
+ing and cross-domain robustness [5, 6]. We adopt the predictive
+principle of world modeling for a different scientific target: learning
+how questionnaire-derived traits condition environment–behavior
+state changes. Our transition-informed posterior uses realized fu-
+ture changes to discover discrete modes, and a prior predicts those
+modes from pre-transition context for rollout. The codes therefore
+represent transition-level predictive structure rather than static
+personality categories.
+3
+Method
+3.1
+Problem Formulation: Transition-Informed
+Behavioral Prediction
+For participant𝑖, the stable questionnaire-derived profile is q𝑖∈R𝑑𝑞.
+Each behavioral trajectory is represented by transitions
+(s𝑡, q𝑖,𝑎𝑡, s𝑡+1,𝑎𝑡+1),
+where s𝑡∈R49 is the recorded environment–behavior state and 𝑎𝑡
+is the current macro behavior. Our primary empirical objective is
+𝑝(𝑎𝑡+1 | q𝑖, s𝑡,𝑎𝑡)
+for participants whose profiles and trajectories are absent from
+training.
+Rather than predict the next macro behavior only from current
+context, we jointly model
+𝑝(s𝑡+1,𝑎𝑡+1 | q𝑖, s𝑡,𝑎𝑡).
+2
+
+
+PsyWorld: Profile-Conditioned World Modeling for Human Behavior Prediction
+KDD ’27, August 2027, San Jose, CA, USA
+The realized next state supplies structured transition supervision
+during training. At inference, a predicted state and prior transi-
+tion code condition behavior without access to s𝑡+1. This factor-
+ization treats the latent codes as predictive summaries of profile-
+conditioned state transitions, not as causal psychological or clinical
+constructs.
+3.2
+Overview
+The profile-conditioned state world model first encodes the stable
+profile, current environment–behavior state, and macro behavior.
+A training-time posterior uses the realized future state change to
+identify a discrete transition code, while a prior predicts that code
+from information available before the transition. Conditioned on
+the code, the world model predicts the next state. The transition
+code and predicted next state feed a macro behavior decoder, and a
+simulator-specific execution policy realizes the macro behavior as
+primitive actions. The code is therefore a transition-level predictive
+variable rather than a participant identity or personality label.
+3.3
+Profile-Conditioned State World Model
+We represent stable and time-varying information separately. The
+psychometric profile q𝑖is fixed for participant 𝑖, whereas s𝑡records
+the time-varying task, environmental, and behavioral state. The
+current macro behavior 𝑎𝑡specifies the behavioral context under
+which the transition occurs. For AgentSociety,
+AAS = {work, consume, rest, leisure, move}.
+The context encoder fuses these variables:
+h𝑡= 𝑓ctx
+𝜃
+(q𝑖, s𝑡,𝑎𝑡).
+Given a latent transition code z𝑡, the world-model decoder predicts
+the next environment–behavior state:
+ˆs𝑡+1 = 𝑓wm
+𝜃
+(h𝑡, z𝑡).
+This decoder supplies structured transition supervision and makes
+the profile–state–behavior factorization explicit instead of using
+the profile only as a direct action descriptor.
+3.4
+Transition-Informed Latent Representation
+The latent code must be informative about a realized transition yet
+available before that transition occurs. A code learned only from
+current context can collapse into a static subject embedding or a
+shortcut for the current state. A code inferred from the realized
+future is more transition-specific, but cannot be used directly at
+inference.
+We address this tension with a prior–posterior scheme. The
+rollout prior predicts
+𝑝𝜃(𝑘𝑡| h𝑡) = Cat(softmax(𝑊𝑧h𝑡)) .
+During training and rollout, we use the hard assignment 𝑘prior
+𝑡
+=
+arg max𝑘𝑝𝜃(𝑘| h𝑡) and zprior
+𝑡
+= c𝑘prior
+𝑡
+. During training, the realized
+state change
+Δs𝑡= s𝑡+1 −s𝑡
+provides privileged transition supervision. The posterior encoder
+maps the pre-transition context and realized change into a continu-
+ous latent vector:
+˜z𝑡= 𝑔𝜙(h𝑡, Δs𝑡).
+The posterior code is available only during training. The hard prior
+code is also evaluated during training through prior alignment and
+next-state reconstruction, and it is the only code used at rollout.
+We quantize the posterior vector with the learned codebook
+C = {c𝑗}𝐾
+𝑗=1, where 𝐾= 128 and c𝑗∈R64:
+𝑘post
+𝑡
+= arg
+min
+𝑗∈{1,...,𝐾} ∥˜z𝑡−c𝑗∥2
+2,
+zpost
+𝑡
+= c𝑘post
+𝑡
+.
+The VQ objective is
+LVQ = ∥sg[˜z𝑡] −zpost
+𝑡
+∥2
+2 + 𝛽∥˜z𝑡−sg[zpost
+𝑡
+]∥2
+2,
+where sg[·] is the stop-gradient operator.
+The assignment induces the one-hot posterior 𝑞𝜙(𝑘𝑡| ·) =
+1{𝑘𝑡= 𝑘post
+𝑡
+}. The prior predicts this assignment from h𝑡alone:
+Lprior = 𝐷KL
+ 𝑞𝜙(𝑘𝑡| ·) ∥𝑝𝜃(𝑘𝑡| h𝑡) = −log𝑝𝜃(𝑘post
+𝑡
+| h𝑡).
+The prior-alignment arrow in Fig. 1 denotes this cross-entropy.
+The posterior discovers transition-informed codes from observed
+futures, while the prior predicts them using only pre-transition
+information.
+3.5
+Transition-Conditioned Macro Behavior
+Prediction
+The world model predicts both the next state and the next macro
+behavior. The latent code summarizes how the current profile,
+environment–behavior state, and macro behavior are associated
+with the next transition. We compute the transition-conditioned
+logits as
+ℓtrans
+𝑡+1
+= 𝑓trans
+𝜃
+(h𝑡, z𝑡, ˆs𝑡+1).
+A context branch provides a complementary direct prediction:
+ℓctx
+𝑡+1 = 𝑓ctx-macro
+𝜃
+(h𝑡, s𝑡).
+We combine the branches with a learned gate:
+𝛾𝑡= 𝜎
+
+𝑓gate
+𝜃
+(h𝑡, z𝑡, ˆs𝑡+1)
+
+,
+ℓ𝑡+1 = 𝛾𝑡ℓtrans
+𝑡+1 + (1 −𝛾𝑡)ℓctx
+𝑡+1.
+This design makes macro prediction transition-aware without re-
+quiring the latent branch when the current context is already suffi-
+cient.
+3.6
+Joint Training Objective
+We jointly train state prediction, vector quantization, prior align-
+ment, and macro behavior prediction:
+L = 𝜆𝑠Lstate + 𝜆VQLVQ + 𝜆𝑧Lprior + 𝜆𝑎Lmacro.
+During training, the shared decoder forms ˆs𝑟
+𝑡+1 = 𝑓wm
+𝜃
+(h𝑡, z𝑟
+𝑡) for
+𝑟∈{post, prior}. The equally weighted objective is
+Lstate =
+∑︁
+𝑟∈{post,prior}
+∥ˆs𝑟
+𝑡+1 −s𝑡+1∥2
+2.
+The alignment loss trains the prior distribution despite hard selec-
+tion, while prior reconstruction exposes the decoder to the rollout
+code. At rollout, only the prior-code prediction is used. For the
+observed next macro behavior 𝑎★
+𝑡+1,
+Lmacro = −log𝑝𝜃(𝑎★
+𝑡+1 | q𝑖, s𝑡,𝑎𝑡).
+The gated decoder is trained through Lmacro applied to the com-
+bined logits. All variants use the same class-balanced macro loss.
+3
+
+
+KDD ’27, August 2027, San Jose, CA, USA
+Ziyuan Qin, Yang Qiao, Summer B. Frandsen, Michael T. Treadway, and Liang Zhao
+Figure 1: A stable psychometric profile conditions latent transition codes together with the current environmental and
+behavioral state and macro action. The predicted next-state representation then informs subsequent behavior prediction.
+Dashed components use the realized future only during training; solid paths are available at rollout.
+The VQ-based variants additionally use a lightweight code-usage
+regularizer to mitigate codebook collapse.
+3.7
+Simulation-Grounded Execution
+After a macro behavior is predicted, the execution policy realizes it
+as a short-horizon trajectory segment. The macro behavior spec-
+ifies the high-level intent, while the micro controller instantiates
+that intent under the current simulator state. Let 𝜉𝑡:𝑡+𝐻denote the
+executable segment over horizon 𝐻. The execution policy is
+𝜋exec
+𝜔
+(𝜉𝑡:𝑡+𝐻| q𝑖, s𝑡,𝑎𝑡).
+Here, q𝑖preserves participant-level conditioning, s𝑡grounds execu-
+tion in the simulator, and 𝑎𝑡specifies the macro intent.
+We train the execution policy with DPO [11]. Under the same
+context, pairs are ranked by deviation from the corresponding
+human trajectory: 𝜉+ is the closer match and 𝜉−has substantially
+larger deviation. The objective is
+LDPO = −log𝜎
+ 
+𝛽
+"
+log 𝜋exec
+𝜔
+(𝜉+ | q𝑖, s𝑡,𝑎𝑡)
+𝜋ref (𝜉+ | q𝑖, s𝑡,𝑎𝑡)
+−log 𝜋exec
+𝜔
+(𝜉−| q𝑖, s𝑡,𝑎𝑡)
+𝜋ref (𝜉−| q𝑖, s𝑡,𝑎𝑡)
+#!
+,
+(1)
+where 𝜋ref is the reference execution policy and 𝛽controls prefer-
+ence strength.
+4
+Experiments
+Experiments examine whether transition-informed supervision im-
+proves behavior prediction for unseen participants, how continuous
+next-state modeling, discretization, and prior alignment contribute,
+and whether the same profile–state–behavior factorization can be
+operationalized in a structurally different simulator. VEET provides
+the primary human-participant evaluation; AgentSociety provides
+a synthetic cross-simulator test.
+4.1
+Experimental Setup
+Simulation Environment. We evaluate our framework on two
+complementary simulation platforms: AgentSociety [10] and VEET,
+a self-built Unity-based behavioral simulator. AgentSociety is a syn-
+thetic, LLM-driven city-scale multi-agent simulation platform in
+which agents maintain internal memory, update needs and internal
+simulator states, generate daily activity plans, and execute behav-
+iors through modular action blocks. It provides a synthetic testbed
+for operationalizing profile-conditioned behavior under a differ-
+ent state and action interface. VEET is a Unity-based simulator
+designed to study behavioral trade-offs between reward acquisition
+and anxiety- or effort-related pressure. Further environment details
+appear in Section B. Participants make sequential navigation and
+task decisions in a controlled interactive environment.
+AgentSociety Simulation. We use AgentSociety as a synthetic
+testbed and adapt it to our hierarchical formulation by injecting
+questionnaire-derived psychological profiles into each LLM-controlled
+agent and constraining its behavior to five macro actions: work,
+consume, rest, leisure, and move. Each agent is simulated over a
+full daily schedule rather than through isolated one-step queries.
+At each decision point, the LLM observes the agent’s current needs,
+profile-derived traits, location, and recent context, and selects a
+macro action that is executed over the corresponding simulation
+interval. This yields temporally grounded macro-action traces that
+4
+
+
+PsyWorld: Profile-Conditioned World Modeling for Human Behavior Prediction
+KDD ’27, August 2027, San Jose, CA, USA
+can be directly compared with our hierarchical policy models. Im-
+plementation details of this adaptation appear in Section A.
+Dataset and Subjects. We use questionnaire profiles from 313
+VEET participants as the common subject representation across
+both environments. In VEET, these participants provide question-
+naire profiles and behavioral trajectories for training the state-
+transition world model and macro-behavior predictor. Post-level
+subjective ratings are used only as auxiliary targets in the Di-
+rect SFT/BC baseline and are not modeled as dynamic affective
+states by the proposed world model. For AgentSociety, the same
+profile vectors initialize synthetic LLM-controlled agents in the
+modified simulator. Agents are rolled out over a one-day sched-
+ule starting at 08:00 with a 5-minute base simulation resolution,
+and trajectories are logged event-wise when actions are commit-
+ted. Each LLM decision is constrained to the structured macro
+vocabulary {work, consume, rest, leisure, move}, yielding profile-
+conditioned daily behavior traces.
+Subject-Level OOD Evaluation. We treat the human participant
+as the domain factor and use a strictly subject-disjoint split of 240
+training, 25 validation, and 48 test participants. Each partic-
+ipant, questionnaire profile, and associated trajectory belongs to
+exactly one split; there is no participant overlap across training,
+validation, and test. This protocol therefore tests whether the behav-
+ioral predictor generalizes to unseen people, rather than measuring
+performance on new trajectories from previously observed people.
+Table 1 reports this subject-level OOD evaluation.
+Implementation Details. The trajectory encoder 𝐸𝜙is a two-layer
+transformer with hidden dimension 128 and four attention heads.
+The VQ codebook contains 𝐾= 128 entries of dimension 64, up-
+dated via exponential moving average with decay 0.99. The profile
+encoder 𝐸𝑞
+𝜓is a two-layer MLP with hidden dimension 64 and ReLU
+activations. The macro decoder uses a gated two-branch architec-
+ture: one branch conditions on the transition code and predicted
+next state, and the other on current context; the logits from the
+two branches are combined with a learned scalar gate. All models
+are trained with Adam (lr = 3 × 10−4, 𝛽1 = 0.9, 𝛽2 = 0.999) for 100
+epochs with batch size 256. The objective weights are set to 𝜆𝑠= 1.0,
+𝜆VQ = 0.25, 𝜆𝑧= 0.1, and 𝜆𝑎= 1.0. All variants use the same class-
+balanced macro loss. The VQ-based variants additionally use the
+code-usage regularizer described in Section 3; the gated branches
+are optimized through the combined macro loss. All experiments
+are run on a single NVIDIA A100 GPU.
+Evaluation Metrics. We report Top-1 and Top-3 accuracy for next-
+macro-behavior prediction. Let 𝑃𝑑and 𝑃𝑝denote the empirical
+and predicted macro-action distributions. Macro KL is 𝐷KL(𝑃𝑑∥𝑃𝑝),
+and macro-distribution similarity is 1 −JSD(𝑃𝑑, 𝑃𝑝)/log 2. These
+metrics evaluate distributional alignment beyond the dominant
+class; the JSD-based measure does not by itself establish long-range
+temporal dependence. We also report the number of unique VQ
+codes activated by the prior as a diagnostic of codebook collapse.
+4.2
+Unseen-Participant Behavioral Prediction
+Table 1 evaluates the complete 48-participant test set, with no par-
+ticipant, profile, or trajectory shared with training. On VEET, the
+profile-conditioned world model reaches 0.904 Top-1 and 0.989 Top-
+3 accuracy, compared with 0.754 and 0.890 for direct SFT/BC. It also
+reduces Macro KL to 0.0033 and reaches 0.999 macro-distribution
+similarity. The participant-level 95% bootstrap interval for Top-1
+is [0.895, 0.913], with the remaining intervals reported directly in
+the table. Together, these results show that the learned transition
+representation supports macro-behavior prediction for previously
+unseen participants; they do not establish causal psychological
+dynamics.
+4.3
+Contribution of Transition Supervision
+Table 2 separates continuous next-state prediction, discrete transi-
+tion modeling, and rollout-time prior alignment. The largest point-
+wise difference is between direct SFT/BC in Table 1 (0.754 Top-1) and
+the continuous world model (0.901), associating explicit next-state
+supervision with most of the Top-1 gain. Because these variants also
+differ architecturally, this comparison is evidence of predictive util-
+ity rather than a controlled causal attribution. Vector quantization
+changes Top-1 only slightly (0.905) but improves Top-3 from 0.952
+to 0.981 and reduces Macro KL from 0.012 to 0.0078. Prior alignment
+further lowers Macro KL to 0.0033 and raises Top-3 to 0.989 while
+preserving Top-1. Thus, continuous transition supervision supplies
+the principal pointwise gain, whereas the discrete prior–posterior
+design mainly improves behavioral coverage and distributional
+alignment while making the transition-informed representation
+available before the future is observed.
+A profile-cluster diagnostic tests whether this aggregate result
+is concentrated in a small questionnaire subgroup. VEET Top-1 re-
+mains between 0.891 and 0.913 across the reported groups, although
+teleport recall is lower and more variable (0.13–0.26). Because clus-
+ter sizes are limited, we treat these differences as descriptive bound-
+aries rather than subgroup or causal effects (Table 3).
+4.4
+What the Latent Modes Represent
+The latent variable is intended to summarize transition-level pre-
+dictive structure, not to encode a static personality category. We
+therefore examine 19 analyzed prior codes against seven psychome-
+tric scales (133 tests). No code–scale association survives BH–FDR
+correction, and nominal effects are small (|𝜌| ≈0.11–0.19). This
+result does not prove disentanglement, but it is consistent with the
+transition modes not being reducible to individual questionnaire
+dimensions (Figure 3).
+At the uncorrected level, several small associations provide ex-
+ploratory structure without supporting psychometric labels. C90 is
+positively associated with PSS, STAI-T, BDI, and STAI-S; C23 and
+C91 show related stress–anxiety patterns; C73 is positively associ-
+ated with AMI; and C88, C74, and C48 are negatively associated with
+STAI-S. Code-use entropy and the number of unique codes likewise
+yield no FDR-significant scale association. We therefore treat these
+patterns as hypothesis-generating diagnostics of transition-mode
+usage, not as evidence that individual codes correspond to traits,
+symptoms, or clinical categories.
+5
+
+
+KDD ’27, August 2027, San Jose, CA, USA
+Ziyuan Qin, Yang Qiao, Summer B. Frandsen, Michael T. Treadway, and Liang Zhao
+(a) VEET human–agent trajectory comparison
+work
+consume
+rest
+leisure
+move
+0.0
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+Held-out macro frequency
+C0: n=104, acc=0.56
+Observed
+Predicted
+work
+consume
+rest
+leisure
+move
+C1: n=142, acc=0.61
+work
+consume
+rest
+leisure
+move
+C2: n=230, acc=0.60
+work
+consume
+rest
+leisure
+move
+C3: n=75, acc=0.61
+Held-out macro-action distributions: observed vs. gated VQ-WM prediction
+(b) AgentSociety observed vs. predicted macro distributions
+Figure 2: Cross-environment qualitative diagnostics. Panel (a) compares human and agent trajectories for two held-out
+VEET participants. Panel (b) compares observed and gated VQ-WM macro-action distributions within AgentSociety-specific
+questionnaire-profile clusters; its compact labels C0–C3 correspond to A-C0–A-C3 in Table 4. Here, 𝑛denotes the number of
+held-out macro-action events rather than unique participants. The panels visualize environment-specific outcomes and are not
+pooled.
+4.5
+Synthetic Cross-Simulator
+Operationalization
+AgentSociety tests whether the same profile–state–behavior fac-
+torization can be operationalized in a synthetic LLM-based simula-
+tor with a different state space and action interface. Ours obtains
+the highest reported Top-1 accuracy (0.595) and maintains strong
+macro-distribution alignment in Table 1. Figure 2b further compares
+observed and predicted cluster-level action mixtures. The rollouts
+preserve differences among work, consumption, leisure, rest, and
+movement across profile groups, while the prediction tracks the
+dominant cluster-level patterns. We interpret this as a synthetic
+cross-simulator operationalization, not as a second independent
+validation of human psychological mechanisms; the AgentSoci-
+ety agents are initialized from questionnaire-derived profiles. For
+descriptive diagnostics, we fit and label the questionnaire-profile
+clusters separately within each environment; their identifiers are
+therefore environment-specific and are not comparable across Ta-
+bles 3 and 4. AgentSociety implementation details appear in Ap-
+pendix A.
+Table 4 further tests whether cross-simulator performance is
+concentrated in one questionnaire-defined subgroup. Top-1 varies
+from 0.558 to 0.613 across the four clusters, while leisure recall
+ranges from 0.16 to 0.27. The mid-profile cluster is comparatively
+harder, whereas the remaining clusters have similar aggregate ac-
+curacy despite different stress, BDI, and hedonic profiles. Because
+these groups contain 10–14 held-out participants, we interpret the
+differences as descriptive diagnostics rather than causal subgroup
+effects. The narrow performance range indicates that the aggregate
+AgentSociety result is not driven by a single profile cluster.
+Table 5 defines Completion as the fraction of rollouts completing
+the requested macro action, Coin gain as the mean number of
+VEET coin rewards per rollout, First-act. KL as the divergence
+between model and human first-action distributions, and Move. gap
+as the absolute difference in overall move frequency. DPO improves
+6
+
+
+PsyWorld: Profile-Conditioned World Modeling for Human Behavior Prediction
+KDD ’27, August 2027, San Jose, CA, USA
+Figure 3: Exploratory associations between participant-level prior-code usage frequencies and seven psychometric scales. Cells
+report Spearman 𝜌; ∗denotes BH–FDR 𝑞< 0.05 across 133 tests and † denotes uncorrected 𝑝< 0.05. No association survives FDR
+correction. The median pairwise sample size is 297, and codes are ordered by maximum absolute correlation.
+completion and reduces both gaps; on VEET, it also increases coin
+gain.
+7
+
+
+KDD ’27, August 2027, San Jose, CA, USA
+Ziyuan Qin, Yang Qiao, Summer B. Frandsen, Michael T. Treadway, and Liang Zhao
+Table 1: Main results under subject-level OOD evaluation on VEET and AgentSociety. The 240/25/48 train/validation/test
+participants are mutually exclusive, so the test set evaluates generalization to unseen people rather than new trajectories from
+people observed during training. Macro Top-1/Top-3 evaluate next macro-action prediction; Macro KL is 𝐷KL(𝑃data(𝑎)∥𝑃pred(𝑎)),
+and Dist. Sim. is the macro-action distribution similarity 1 −JSD(𝑃data, 𝑃pred)/log 2. For Ours on VEET, the second line reports
+95% participant-level bootstrap confidence intervals over all 48 test participants (1,000 resamples; seed 2026).
+Model
+Top-1 ↑
+Top-3 ↑
+Macro KL ↓
+Dist. Sim. ↑
+VQ Codes ↑
+VEET
+Random
+0.167
+0.500
+0.937
+0.666
+–
+Majority
+0.739
+–
+6.888
+0.855
+–
+Direct SFT / BC
+0.754
+0.890
+0.361
+0.846
+–
+IRL policy
+0.650
+0.845
+0.431
+0.758
+–
+Ours
+0.904
+[0.895, 0.913]
+0.989
+[0.987, 0.990]
+0.0033
+[0.0023, 0.0046]
+0.999
+[0.998, 0.999]
+19
+AgentSociety
+Random
+0.200
+0.600
+0.081
+0.869
+–
+Majority
+0.298
+–
+0.843
+0.504
+–
+Direct SFT
+0.525
+0.826
+0.158
+0.681
+–
+Ours
+0.595
+0.933
+0.078
+0.974
+5
+Table 2: VEET latent representation ablation.
+Variant
+Top-1 ↑
+Top-3 ↑
+Macro KL ↓
+Simple WM + decoder
+0.901
+0.952
+0.012
+VQ-WM
+0.905
+0.981
+0.0078
+VQ-WM + prior align.
+0.904
+0.989
+0.0033
+Table 3: Descriptive held-out VEET performance by
+environment-specific questionnaire-profile cluster.
+Cluster
+Profile tag
+𝑁
+Top-1
+Teleport R.
+V-C0
+Mid profile
+7
+0.910
+0.18
+V-C1
+Elevated stress
+18
+0.913
+0.13
+V-C2
+Higher stress / BDI
+8
+0.905
+0.26
+V-C3
+High hedonic / low BDI
+15
+0.891
+0.26
+Table 4: Descriptive held-out AgentSociety performance by
+environment-specific questionnaire-profile cluster.
+Cluster
+Profile tag
+𝑁
+Top-1
+Leisure R.
+A-C0
+Mid profile
+13
+0.558
+0.16
+A-C1
+High hedonic / low BDI
+14
+0.606
+0.27
+A-C2
+Elevated stress
+10
+0.600
+0.25
+A-C3
+Higher stress / BDI
+11
+0.613
+0.24
+Table 5: Micro-control results for SFT/BC and macro-
+conditioned DPO.
+VEET
+AgentSoc.
+Metric
+SFT/BC
+DPO
+SFT/BC
+DPO
+Completion ↑
+0.168
+0.332
+0.664
+0.990
+Coin gain ↑
+0.120
+2.516
+–
+–
+First-act. KL ↓
+2.556
+1.382
+1.468
+0.712
+Move. gap ↓
+0.873
+0.520
+0.453
+0.267
+5
+Limitations and Ethical Considerations
+The VEET data were collected by the original study team under
+institutional human-subjects oversight at Emory University, with
+informed consent from all participants. This work uses only de-
+identified data and involved no new participant recruitment or
+contact; access was restricted to authorized researchers.
+Our evaluation establishes the downstream predictive utility of
+transition supervision; it does not independently assess calibrated
+multi-step state-transition fidelity. The model does not contain a
+separately observed dynamic affect channel; its transition repre-
+sentation is learned from environmental and behavioral variables
+recorded by VEET. The learned codes are behavior-predictive sum-
+maries rather than causal, clinical, or diagnostic states, and the
+model is not intended for consequential decisions about individuals.
+Participant-disjoint evaluation addresses transfer to unseen people
+within this study design; validation across additional populations
+and instruments remains future work. Responsible use requires
+de-identification, restricted access, and human oversight.
+6
+Conclusion
+We study transition-informed supervision for behavior prediction
+in unseen participants. The world model separates stable profiles,
+current states, and behavior: a posterior extracts codes from ob-
+served changes, while a prior predicts them before the future is
+available. VEET results associate next-state modeling with point-
+wise accuracy and discretization and prior alignment with behav-
+ioral coverage and distributional alignment. AgentSociety provides
+a synthetic cross-simulator operationalization. These results sup-
+port the world model as a predictive inductive bias rather than a
+validated psychological mechanism.
+7
+Generative AI Usage
+Generative AI tools assisted manuscript organization and language
+editing, LaTeX and figure preparation, and development and debug-
+ging of analysis code.
+8
+
+
+PsyWorld: Profile-Conditioned World Modeling for Human Behavior Prediction
+KDD ’27, August 2027, San Jose, CA, USA
+References
+[1] Marwa Abdulhai, Ryan Cheng, Donovan Clay, Tim Althoff, Sergey Levine, and
+Natasha Jaques. 2025. Consistently Simulating Human Personas with Multi-Turn
+Reinforcement Learning. arXiv:2511.00222 [cs.CL] https://arxiv.org/abs/2511.
+00222
+[2] Jack Brookes, Matthew Warburton, Mshari Alghadier, Mark Mon-Williams, and
+Faisal Mushtaq. 2019. Studying human behavior with virtual reality: The Unity
+Experiment Framework. Behavior Research Methods 52, 2 (April 2019), 455–463.
+doi:10.3758/s13428-019-01242-0
+[3] Yifan Duan, Yihong Tang, Xuefeng Bai, Kehai Chen, Juntao Li, and Min Zhang.
+2025. The Power of Personality: A Human Simulation Perspective to Investigate
+Large Language Model Agents. arXiv:2502.20859 [cs.CL] https://arxiv.org/abs/
+2502.20859
+[4] Danijar Hafner, Timothy Lillicrap, Jimmy Ba, and Mohammad Norouzi.
+2020.
+Dream to Control: Learning Behaviors by Latent Imagination.
+arXiv:1912.01603 [cs.LG] https://arxiv.org/abs/1912.01603
+[5] Danijar Hafner, Timothy Lillicrap, Mohammad Norouzi, and Jimmy Ba. 2022.
+Mastering Atari with Discrete World Models. arXiv:2010.02193 [cs.LG] https:
+//arxiv.org/abs/2010.02193
+[6] Danijar Hafner, Jurgis Pasukonis, Jimmy Ba, and Timothy Lillicrap. 2023. Mas-
+tering diverse domains through world models. arXiv preprint arXiv:2301.04104
+(2023).
+[7] Samuel R. C. Hewitt, Agnes Norbury, Quentin J. M. Huys, and Tobias U. Hauser.
+2025. Day-to-day fluctuations in motivation drive effort-based decision-making.
+Proceedings of the National Academy of Sciences 122, 12 (2025), e2417964122.
+arXiv:https://www.pnas.org/doi/pdf/10.1073/pnas.2417964122 doi:10.1073/pnas.
+2417964122
+[8] Michail D. Kozlov and Mark K. Johansen. 2010. Real Behavior in Virtual Envi-
+ronments: Psychology Experiments in a Simple Virtual-Reality Paradigm Using
+Video Games. Cyberpsychology, Behavior, and Social Networking 13 (2010), 711 –
+714. https://api.semanticscholar.org/CorpusID:9400778
+[9] Joon Sung Park, Carolyn Q. Zou, Jonne Kamphorst, Niles Egan, Aaron Shaw,
+Benjamin Mako Hill, Carrie Cai, Meredith Ringel Morris, Percy Liang, Robb
+Willer, and Michael S. Bernstein. 2026. LLM Agents Grounded in Self-Reports
+Enable General-Purpose Simulation of Individuals. arXiv:2411.10109 [cs.AI]
+https://arxiv.org/abs/2411.10109
+[10] Jinghua Piao, Yuwei Yan, Jun Zhang, Nian Li, Junbo Yan, Xiaochong Lan, Zhihong
+Lu, Zhiheng Zheng, Jing Yi Wang, Di Zhou, et al. 2025. Agentsociety: Large-scale
+simulation of llm-driven generative agents advances understanding of human
+behaviors and society. (2025).
+[11] Rafael Rafailov, Archit Sharma, Eric Mitchell, Christopher D Manning, Stefano
+Ermon, and Chelsea Finn. 2023. Direct preference optimization: Your language
+model is secretly a reward model. Advances in neural information processing
+systems 36 (2023), 53728–53741.
+[12] Mingjun Ren and Wentao Xu. 2025. The Impact of Big Five Personality Traits
+on AI Agent Decision-Making in Public Spaces: A Social Simulation Study.
+arXiv:2503.15497 [cs.HC] https://arxiv.org/abs/2503.15497
+[13] Yiding Wang, Yuxuan Chen, Fangwei Zhong, Long Ma, and Yizhou Wang.
+2025. Simulating Human-like Daily Activities with Desire-driven Autonomy.
+arXiv:2412.06435 [cs.AI] https://arxiv.org/abs/2412.06435
+A
+AgentSociety
+A.1
+Modifications
+We use AgentSociety as a synthetic testbed and modify it to expose
+a profile-conditioned hierarchical action interface. The modifica-
+tion consists of four components: profile injection, need-dynamics
+modification, block-level action restriction, and trajectory logging.
+Profile injection. For each subject, we first convert the ques-
+tionnaire vector into an AgentPsychProfile. The profile contains
+initial need satisfactions, emotion values, personality text, and
+three composite behavioral dimensions: hedonic capacity, effort
+capacity, and stress level. After the simulator creates the native
+SocietyAgent instances, we patch each live agent by writing these
+values into its memory state. Specifically, we initialize hunger_satisfaction,
+energy_satisfaction, safety_satisfaction, social_satisfaction,
+and the added pleasure_satisfaction field, together with the
+agent’s emotion state, emotion types, background text, and initial
+thought.
+Need-dynamics modification. We extend the original need
+state with a pleasure-related dimension. This dimension is initial-
+ized from questionnaire-derived hedonic traits, especially measures
+related to anhedonia and momentary pleasure. We also patch the
+NeedsBlock parameters after agent construction. Questionnaire
+traits scale the decay rates of hunger, energy, safety, social, and
+pleasure needs through multiplicative factors 𝛼𝐻, 𝛼𝐷, 𝛼𝑃, 𝛼𝐶, 𝛼𝐿.
+Anxiety- and hedonic-related traits further shift the safety and
+pleasure thresholds. This makes the same environment state induce
+different dominant needs for different profile types. For example,
+high stress can make safety needs trigger earlier, while low hedonic
+capacity can make pleasure satisfaction decay faster and trigger
+leisure-seeking behavior sooner.
+Social-behavior suppression. Because our experiments focus
+on individual profile-conditioned behavior rather than interper-
+sonal dynamics, we suppress the original social pathway. We re-
+move social behavior from the plan guidance options, replace the
+detailed planning prompt with a no-social version, and set the so-
+cial satisfaction state to a high value while making its decay nearly
+zero. We also remove any registered SocialBlock from the agent
+dispatcher when present. This prevents the agent from spending
+trajectory steps on messaging, calling, or meeting other agents,
+and ensures that logged behaviors correspond to individual daily
+activities.
+Structured macro-action interface. The original AgentSo-
+ciety planner can generate free-form natural-language actions.
+We replace this with a five-category macro-action vocabulary:
+A = {work, consume, rest, leisure, move}. Internally, these cor-
+respond to coarse plan types work, consume, sleep, leisure, and
+mobility. The detailed plan prompt is constrained so that each plan
+step must use exactly one of these coarse types and must avoid fine-
+grained sub-actions. We additionally introduce or expose dedicated
+rest and leisure execution paths so that rest and leisure corre-
+spond to executed behavior modules rather than merely textual
+descriptions.
+The macro-action prior is profile-conditioned. The current dom-
+inant need provides a base preference over macro actions: hunger
+favors consumption, tiredness favors rest, safety favors work, and
+pleasure favors leisure. The composite profile dimensions then shift
+these logits: hedonic capacity increases the tendency toward con-
+sumption and leisure, effort capacity increases work and mobility,
+and stress increases rest while suppressing consumption, leisure,
+and movement. The resulting logits define a profile-conditioned
+macro distribution used both for simulation analysis and as the
+behavioral abstraction aligned with our hierarchical policy models.
+Execution and logging. Each LLM-controlled agent is simu-
+lated over a daily schedule. At each discrete simulation time point,
+the agent observes its current need state, emotion, thought, profile
+text, location, and recent memory context. The LLM selects a guid-
+ance option and expands it into a short structured plan whose steps
+belong to the allowed macro categories. During post-processing,
+each executed memory stream event is mapped back to one of
+the five macro actions. We log the simulation tick, current need
+state, satisfaction values, questionnaire profile, macro action, macro-
+action logits and probabilities, and the corresponding micro-action
+9
+
+
+KDD ’27, August 2027, San Jose, CA, USA
+Ziyuan Qin, Yang Qiao, Summer B. Frandsen, Michael T. Treadway, and Liang Zhao
+Algorithm 1 AgentSociety profile-conditioned simulation
+Require: Questionnaire profiles {𝑞𝑖}, selected subjects S
+1: for 𝑖∈S do
+2:
+𝑝𝑖←QuestionnaireToProfile(𝑞𝑖)
+3:
+Create AgentSociety agent 𝑎𝑖
+4:
+Inject 𝑝𝑖into memory needs, emotions, personality, and
+thought
+5:
+Patch NeedsBlock decay rates and thresholds
+6:
+Remove social guidance and disable SocialBlock
+7:
+Restrict plan steps to {work, consume, rest, leisure, move}
+8: end for
+9: for each simulation time step 𝑡do
+10:
+for each agent 𝑎𝑖do
+11:
+Observe current simulator state, location, memory, and
+profile
+12:
+Compute profile-conditioned macro prior
+13:
+LLM selects a structured macro action and generates a
+plan
+14:
+Execute the corresponding AgentSociety behavior block
+15:
+Log state, profile, macro action, probabilities, and de-
+scription
+16:
+end for
+17: end for
+description. This produces event-level trajectories that are tempo-
+rally grounded in the AgentSociety simulator and directly com-
+parable to the macro-action sequences used by our hierarchical
+world-model and policy components.
+AgentSociety trajectory generation details. For AgentSociety, each
+rollout uses the VEET questionnaire-derived profile vector q𝑖to
+initialize the agent’s native need and emotion fields. The profile
+determines hedonic capacity, effort capacity, perceived stress, and
+need-specific decay or threshold parameters. Simulations begin at
+08:00 and run over a one-day schedule. AgentSociety advances with
+ticks_per_step=300, corresponding to a 5-minute simulation res-
+olution. However, logged trajectories are event-based rather than
+uniformly sampled: a record is written when the agent commits an
+action in its memory stream. As a result, logged behavioral intervals
+are variable, typically ranging from 5 to 30 simulated minutes.
+At each decision point, the LLM observes the agent’s current
+native simulator state, location, profile-derived traits, and recent
+memory context. It first selects a profile-conditioned guidance op-
+tion and then expands it into a structured plan of up to six coarse
+steps. Each step is constrained to one of five macro-action cat-
+egories: {work, consume, rest, leisure, move}. These event-level
+macro-action traces form the AgentSociety dataset used for profile-
+conditioned behavior modeling.
+B
+VEET Explanation
+B.1
+VEET Environment and Training State
+Details
+VEET environment. VEET is an embodied Unity-based behavioral
+task in which participants navigate through a multi-room virtual
+environment, collect coins, move between rooms through doors,
+and occasionally use teleportation. The environment records both
+low-level motor behavior and task-level progress variables. Each
+participant also provides questionnaire responses measuring affec-
+tive and motivational traits. These questionnaire responses define a
+subject profile vector q𝑖, which conditions our models throughout
+training.
+Observation state. At each time step, we convert the raw Unity
+observation into a flat numerical state vector s𝑡. The state contains
+four groups of information: (1) self-motion and position, including
+player position, rotation, movement distance, and wall distances;
+(2) room context, including current room, room effort, room reward,
+door positions, and distances to front and back doors; (3) object
+layout, including remaining coin counts and nearest-coin relative
+positions/distances; and (4) task progress, including collected coins,
+points, button presses, teleport counts, elapsed time, room time,
+round time, and timing flags for post-level subjective queries, but
+not the subjective rating values. The raw state vector is normalized
+with the same feature scaler used by the behavioral cloning and
+reward-model baselines. When clean-feature checkpoints are used,
+we apply the corresponding feature mask before normalization so
+that all models use an identical state interface.
+Questionnaire conditioning. Each subject 𝑖is associated with a
+questionnaire-derived vector q𝑖. Depending on the experiment, q𝑖is
+represented either as item-level responses, compressed scale-level
+features, or eight scale scores corresponding to PSS, SHAPS, BDI,
+AES, AMI, MAPSR, STAI-S, and STAI-T. The same q𝑖is concate-
+nated with the environment state or encoded as profile context in
+the policy and world-model networks. Thus, the model predicts
+behavior not only from the current physical state, but also from
+stable subject-level psychometric traits.
+Macro-action labels. We derive a six-way macro-action label from
+human replay trajectories.
+These labels are inferred from geometric progress, movement
+speed, button presses, room effort, and short-horizon events. For
+example, go_to_coin corresponds to movement that reduces dis-
+tance to nearby coins, go_to_next_door and go_to_prev_door
+correspond to room-transition-directed behavior, and teleport
+corresponds to explicit teleport usage. This macro abstraction pro-
+vides the high-level action space for our hierarchical policy and
+world model.
+Micro-action space. The lower-level VEET controller uses the
+native discrete Unity action space. Each action is represented as a
+triplet (𝑚𝑡,𝑟𝑡,𝑧𝑡), where 𝑚𝑡is movement intensity, 𝑟𝑡is turn direc-
+tion, and 𝑧𝑡indicates teleportation. Non-teleport actions enumerate
+movement and turn combinations, while a separate discrete action
+is reserved for teleport. This gives a 13-way micro-action space.
+The macro-conditioned micro policy receives the normalized state
+s𝑡, the subject profile q𝑖, and an embedding of the current macro
+action, then outputs a distribution over these 13 low-level actions.
+Training transitions. We distinguish the state-world-model and
+micro-control interfaces. The former uses
+DWM = {(s𝑡, q𝑖,𝑎macro
+𝑡
+, s𝑡+1,𝑎macro
+𝑡+1
+)},
+10
+
+
+PsyWorld: Profile-Conditioned World Modeling for Human Behavior Prediction
+KDD ’27, August 2027, San Jose, CA, USA
+whereas the micro controller uses
+Dmicro = {(s𝑡, q𝑖,𝑎macro
+𝑡
+,𝑎micro
+𝑡
+, s𝑡+1)}.
+This separation prevents the observed micro action from entering
+the world-model transition tuple. For macro-conditioned DPO, can-
+didate trajectory segments are initialized from the same replay con-
+text and conditioned on the macro label. We form preference pairs
+by comparing candidates with the corresponding human replay
+trajectory using progress signals such as coin gain, door progress,
+movement distance, room change, and teleport events. The closer
+candidate is preferred, whereas a segment with substantially larger
+behavioral deviation is rejected.
+Role in our framework. VEET therefore provides both human
+demonstration trajectories and questionnaire-conditioned subject
+profiles. The trajectories supervise macro-action prediction, micro-
+action execution, and latent transition modeling, while the profiles
+allow the model to capture individual differences in strategy selec-
+tion. This makes VEET a controlled testbed for evaluating whether
+transition-informed supervision supports profile-conditioned be-
+havior prediction beyond a majority-action shortcut.
+11
