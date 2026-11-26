@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-11-25</span>
+      <span class="dpr-home-dashboard-kicker">2026-11-26</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 35 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 34 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>19</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-11-25 23:35:38 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-11-26 23:50:17 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>11 月 25 日论文日报：成功筛选 35 篇，15 篇精读、20 篇速读。</p>
-<p>两篇 9.0 分精读值得优先看：一篇关注研究者如何在 AI 辅助社交媒体分析中保有主导权，另一篇关注如何让多模态抑郁分析有证据可依。</p>
-<p>时间有限的话，可以先挑一篇看摘要，留意一个问题：哪些判断由 AI 给出，哪些还需要人来核实？</p>
+<p>11 月 26 日论文日报：共筛选 34 篇，精读 15 篇、速读 19 篇，焦点是 AI 如何应对没说清的需求。</p>
+<p>两篇 9.0 分精读最值得看：EA-Bench 衡量指令不完善时的信息与行动效率，另一篇聚焦如何让大模型识别用户没明说的意图。</p>
+<p>如果只读一篇，先看隐藏意图研究，再拿一条自己常用的模糊指令试试：AI 会先追问，还是直接猜？</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -83,9 +83,9 @@
     <strong class="dpr-home-dashboard-count">15 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Supporting Researcher Control in AI-Assisted Social Media Analysis: A Mixed-Methods Study of AI4OSN">Supporting Researcher Control in AI-Assisted Social Media Analysis: A Mixed-Methods Study of AI4OSN</span></li><li><span class="dpr-home-dashboard-paper-title" title="EDA: Observe, Verify, and Assess for Evidence-Grounded Multimodal Depression Analysis">EDA: Observe, Verify, and Assess for Evidence-Grounded Multimodal Depression Analysis</span></li><li><span class="dpr-home-dashboard-paper-title" title="Can Your AI Twin Meet People for You? It Can Hold a Conversation. But What Does It Need to Judge Like You?">Can Your AI Twin Meet People for You? It Can Hold a Conversation. But What Does It Need to Judge Like You?</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="EA-Bench: Measuring information and action efficiency under imperfect instructions">EA-Bench: Measuring information and action efficiency under imperfect instructions</span></li><li><span class="dpr-home-dashboard-paper-title" title="Do You Even Know What I Want? Improving LLMs Ability to Detect Hidden User Intent">Do You Even Know What I Want? Improving LLMs Ability to Detect Hidden User Intent</span></li><li><span class="dpr-home-dashboard-paper-title" title="Do LLM Agents Compromise Like Humans? Risk and Responsibility in Dyadic Decision-Making">Do LLM Agents Compromise Like Humans? Risk and Responsibility in Dyadic Decision-Making</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>4</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>4</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">ai-social-psych <strong>4</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>3</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -93,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">20 篇</strong>
+    <strong class="dpr-home-dashboard-count">19 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="From Apology to Action: Apologies, Compensation, and Cooperation in LLM Agents">From Apology to Action: Apologies, Compensation, and Cooperation in LLM Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="Can Activation Steering Substitute for Prompt-Based Affective Priming in LLM Digital Twins?">Can Activation Steering Substitute for Prompt-Based Affective Priming in LLM Digital Twins?</span></li><li><span class="dpr-home-dashboard-paper-title" title="Resolution as Attention for Efficient Agent Memory Perception">Resolution as Attention for Efficient Agent Memory Perception</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Tether: Verified Stateful Policy Engine for System-Level Monitoring of Agents">Tether: Verified Stateful Policy Engine for System-Level Monitoring of Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="Embodied Human-Data Interaction">Embodied Human-Data Interaction</span></li><li><span class="dpr-home-dashboard-paper-title" title="When Agents Play Differently: Localizing Human--Agent Behavioral Divergence with Conditional Distributional Testing">When Agents Play Differently: Localizing Human--Agent Behavioral Divergence with Conditional Distributional Testing</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">personal-agent <strong>6</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>4</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>3</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>2</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>2</strong></span><span class="dpr-home-dashboard-tag">llm-econ <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>4</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>4</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">ba <strong>1</strong></span></div>
 </section>
 </div>
 

@@ -1,0 +1,2581 @@
+2026-11-22
+Tacinf: A Unified Tactile Infrastructure for Robot
+Manipulation
+Qiwei Wu12*‡
+Xiangyu Chen2*
+Xin Xiang2*
+Rui Zhang1*
+Yihang Kang2
+Weiran Chen2
+Zikang Xie2
+Yangfan Li2
+Tao Wang2
+Xiangzheng Wang2
+Tianyi Bi2
+Zhiyan Zhang2
+Xianpeng Wang2
+Mingqian Zhou3
+Yan Yu2
+Chuanyu Li2
+Wenjie Zhang2
+Tao Li1
+Weihua Zhang1†
+Renjing Xu2†
+Junjie Lai1
+1Nvidia
+2HKUST(GZ)
+3University of Cambridge
+*Equal Contribution
+‡ Project Leader
+† Corresponding Authors
+tacinf.github.io
+Abstract
+Force-aware manipulation requires robots to infer appropriate interaction forces from task context
+and tactile feedback. We present Tacinf, a low-cost, modular infrastructure that enables policies to
+predict robot actions and fingertip forces from task language, vision, and touch. Task instructions
+can optionally specify the desired force level. Tacinf integrates simulation data synthesis and tactile
+benchmarking (Tabero), vision-tactile-language-action (VTLA) policy learning, handheld data collection
+using the same gripper as robot deployment (Tacumi), and task-aligned sim-to-real evaluation (Taco).
+Together, these components form an integrated workflow connecting data collection from multiple
+sources, foundation-model training, and hardware deployment. We validate each component, including
+the simulation data, benchmark, controller, and Tacumi, and are releasing the full stack as open source.
+A foundation model fine-tuned solely on tactile simulation data transfers zero-shot to different real-robot
+tasks. Across eight policy variants, mean task success rates are strongly correlated between simulation
+and the real robot (Pearson r=0.998, mean maximum rank violation MMRV=0.010). For the four
+policies with reported force measurements, mean grip force is higher under firm instructions than under
+gentle instructions on all three tasks in both domains. When both object positions and instances are
+randomized, a mixture of teleoperation, simulation, and Tacumi data raises mean real-robot task success
+from 20% with teleoperation alone to 60%.
+Keywords: Tactile Sensing, Vision-Language-Action Models, Language-Conditioned Force Control, Zero-
+Shot Sim-to-Real Evaluation
+1. Introduction
+Foundation models for robot manipulation have advanced rapidly. Force-aware tasks require these models
+to infer and regulate physical interaction as well as select motions from images and task language. Force
+requirements may be explicit, as in instructions to act “gently” or “firmly”, or implicit in tasks such as opening
+a container or wiping a surface. In both cases, the policy must infer appropriate contact behavior from the
+instruction, scene, and tactile feedback. Tactile data are essential for training such policies, but differences in
+hardware and sensor design make effective datasets costly to collect. During execution, the system must use
+real-time feedback to adjust its behavior and apply appropriate forces. Poorly performing policies can damage
+objects or the robot itself, creating a need for low-cost evaluation platforms that support policy testing and
+refinement.
+We introduce Tacinf (Fig. 1), a full-stack open-source infrastructure for tactile and force-aware manipulation.
+Tacinf-Tabero generates simulated data with tactile observations and force supervision and provides a benchmark
+© 2026 NVIDIA. All rights reserved.
+arXiv:2611.29240v1  [cs.RO]  22 Nov 2026
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Fig. 1. Tacinf’s tactile data collection, force-aware evaluation, and Sim2Real deployment. Left: Quest 3
+teleoperation, Universal Manipulation Interface (UMI), and the force-controlled gripper; middle: LEGO-like
+VTLA, scalable tactile tasks, and the force-aware evaluation protocol; right: zero-shot Sim2Real evaluation and
+joint training on UMI and simulation-augmented data.
+for evaluating vision-tactile-language-action (VTLA) policies. Tacinf-VTLA offers modular tactile interfaces for
+implementing different policies. Tacinf-Tacumi provides hardware for robot deployment and for collecting tactile
+observations and force targets through teleoperation and handheld demonstrations. Tacinf-Taco supports task-
+aligned sim-to-real evaluation and training on data from multiple sources. Together, these components support
+data collection, simulation-based evaluation, sim-to-real transfer, and policy deployment at low hardware,
+compute, and data costs. The Tacumi kit costs under $2,500, and the minimum compute requirement is a
+single RTX 4090.
+Our experiments validate the system components and yield three main findings. First, a tactile foundation model
+fine-tuned solely on simulation data can be deployed zero-shot on the real robot, achieving success rates of at
+least 98% on LIBERO-like tasks, with predicted forces close to the teleoperation references under our evaluation
+metrics. Second, across eight Tacinf-VTLA policy variants, simulation closely preserves the real-robot ranking
+by success rate, Pearson 𝑟= 0.998, mean maximum rank violation (MMRV)= 0.010. Measured grip force
+distinguishes firm from gentle instructions for the four policies reported, with absolute forces varying across
+objects and domains. Third, teleoperation, Tacumi, and simulation data make complementary contributions.
+We demonstrate the utility of each source, including demonstrations collected without a robot, and increase
+success from 20% to 60% on out-of-distribution objects at randomized positions with a low data-collection cost.
+Our contributions are:
+• Multi-source tactile data collection and synergy: we develop a low-cost, open-source system for
+collecting multimodal tactile data through complementary methods. These sources form a data pyramid
+whose combined benefits are evaluated through ablation studies.
+• Force control and execution: we use data from multiple sources to build a complete system connecting
+policy prediction to actuation, enabling scalable force control for contact-rich tasks.
+• Sim-to-real consistency: we align the simulation and physical systems used by tactile manipulation
+foundation models, achieving closely matched behavior and reducing evaluation costs.
+2
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+2. Related Work
+2.1. Simulation Platforms and Synthetic Data
+Robot simulation provides reproducible environments for policy learning and evaluation. Early infrastructures
+such as robosuite, LIBERO, and CALVIN established reusable manipulation tasks and language-conditioned
+evaluation protocols Liu et al. (2023); Mees et al. (2022); Zhu et al. (2020). Recent platforms extend these
+capabilities through household scene diversity in RoboCasa, GPU-parallel simulation in ManiSkill3 and Isaac
+Lab, and unified assets and interfaces in RoboVerse Geng et al. (2025); Nasiriany et al. (2024); NVIDIA et al.
+(2025b); Tao et al. (2025). MuBlE couples MuJoCo dynamics with Blender rendering for tasks requiring both
+visual and physical reasoning Nazarczuk et al. (2025). At the data-generation level, RoboTwin and RoboTwin
+2.0 combine task construction and demonstration generation for bimanual manipulation, while SkillMimicGen
+reuses demonstrations through skill-level generation Chen et al. (2025); Garrett et al. (2025); Mu et al. (2025).
+GraspVLA further demonstrates the use of large-scale synthetic action data for policy pretraining Deng et al.
+(2025). These approaches motivate our reuse of existing trajectories, but trajectory replay alone does not
+establish that contact forces or tactile observations transfer across simulators.
+A complementary direction reconstructs real environments for simulation-based policy evaluation. SIMPLER
+studies visual and control gaps and evaluates whether simulated performance predicts real-robot behavior;
+PolaRiS combines neural scene reconstruction with simulation-data co-training Jain et al. (2026); Li et al.
+(2025b). SimFoundry automates scene reconstruction and generates task-relevant scene variations, while
+SceneRig reconstructs simulation-ready 3D scenes from single images Luo et al. (2026); Ranawaka et al. (2026).
+Seed3D 2.0 generates 3D assets for simulation Gu et al. (2026). Ctrl-World instead uses an action-conditioned
+generative world model for policy evaluation and improvement Guo et al. (2026). These works establish
+precedents for real-to-sim reconstruction, data mixing, and cross-domain policy ranking. Tacinf-Taco adapts
+this direction to tactile observations and force-conditioned evaluation.
+Tactile simulation datasets and benchmarks are also emerging. VTDexManip supports visuotactile pretraining
+and dexterous manipulation, SafeDiff evaluates force-aware interaction using SafeDoorManip50k, and UniVTAC
+unifies multi-sensor tactile synthesis, representation learning, and manipulation benchmarking Chen et al.
+(2026); Liu et al. (2025b); Wei et al. (2025). SoftVTBench pairs visuotactile observations with independent
+deformation ground truth for evaluating deformable-object interaction quality Jing et al. (2026). OpenViTac
+benchmarks visuo-tactile policies in paired simulation and real-world settings and reports sim-to-real agreement
+across policy families Wu et al. (2026). Tacinf-Tabero focuses on converting existing manipulation trajectories
+into synchronized vision-tactile-language supervision and on evaluating instruction-dependent interaction
+forces alongside task completion.
+2.2. Tactile Simulation Methods
+Vision-based tactile simulation must account for contact geometry, sensor deformation, and image formation.
+TACTO couples physics-engine contact information with efficient optical rendering Wang et al. (2022). Taxim
+calibrates an example-based optical mapping and models marker motion using elastic deformation and super-
+position; FOTS provides fast optical and marker-motion approximations for tactile-motor learning Si and Yuan
+(2022); Zhao et al. (2024). These methods offer efficient sensor-observation models, although their calibration
+assumptions and approximations must be distinguished from a complete elastomer dynamics model. TacEx
+integrates soft-body contact simulation with Taxim and FOTS in Isaac Sim. TacSL provides a GPU-parallel
+visuotactile library with support for policy learning. Its optical rendering and marker-field extraction use the
+same simulated deformation, keeping the two observation streams consistent Akinola et al. (2025); Nguyen
+et al. (2024).
+Physics-based approaches pursue more explicit contact mechanics. DiffTactile combines differentiable sensor
+3
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+and object simulation for system identification and trajectory optimization, while Taccel integrates contact
+and rigid-body dynamics in a GPU-parallel tactile simulation platform Li et al. (2025c); Si et al. (2024).
+HydroShear additionally models path-dependent shear accumulation and stick-slip transitions Dang et al.
+(2026). Learned observation transfer offers a complementary route: SimShear generates shear-aware tactile
+images from simulated observations and shear conditioning, and Cross-Sensor Touch Generation translates
+tactile observations between sensor designs Freud et al. (2025); Rodriguez et al. (2025). Applications such as
+AnyRotate, UniTac2Pose, and VT-Refine demonstrate how simulated touch can support in-hand manipulation,
+pose estimation, and policy refinement Huang et al. (2025b); Wu et al. (2025b); Yang et al. (2025). Together,
+these studies illustrate a trade-off between contact fidelity, calibration effort, and simulation throughput, and
+they establish tactile sim-to-real transfer as an important evaluation target Freud et al. (2025); Yang et al.
+(2025). Following the modular integration exemplified by TacEx, Tacinf uses Taxim for optical observations
+and FOTS for marker motion. Our contribution is the calibrated integration of Taxim and FOTS into a scalable
+data and evaluation pipeline. We evaluate the sim-to-real transfer of language-conditioned force levels across
+policy variants. Compared with a simulator that generates both streams from one simulated deformation, such
+as TacSL, this modular approach trades per-sample consistency in deformation for the throughput needed to
+replay open-source trajectories at scale. We therefore use marker displacement as a cue for relative shear and
+direction, and derive the wrench for supervision and control directly from physics-engine contact reactions.
+2.3. Tactile Data Collection
+Learning generalizable robot manipulation policies requires diverse, high-quality demonstrations, yet collecting
+real-world robot interaction data remains costly and difficult to scale. Teleoperation is a widely used approach in
+which human operators guide physical robots to perform tasks, providing demonstrations that directly reflect the
+robot’s observations and actions. Large-scale efforts such as DROID demonstrate the value of diverse teleoperated
+data Khazatsky et al. (2024). However, each collection setup requires access to a robot, and scaling collection
+entails additional hardware, operator time, and deployment effort. Universal Manipulation Interface (UMI)
+addresses these constraints by collecting demonstrations with handheld grippers and transferring the resulting
+skills to robots, decoupling demonstration collection from physical robot access Chi et al. (2024). FastUMI
+further develops this direction through a scalable, hardware-independent collection interface Zhaxizhuoma
+et al. (2025). For tactile learning, sensor hardware and observation alignment are equally important: GelSight
+provides high-resolution contact geometry and deformation measurements, PolyTouch combines complementary
+sensing modalities, and 3D-ViTac fuses distributed tactile measurements with visual geometry Huang et al.
+(2025a); Yuan et al. (2017); Zhao et al. (2025a). These approaches provide a practical foundation for expanding
+manipulation datasets beyond dedicated robot workstations.
+Demonstrations of contact-rich manipulation must record motion, visual observations, and the contact infor-
+mation needed to regulate physical interaction. In teleoperation systems without real-time force feedback,
+operators rely primarily on visual observations to infer contact states, making it difficult to perceive and
+regulate interaction forces accurately. Insufficient or excessive force may result in unstable grasps, excessive
+object loading, or task failures. These issues can compromise demonstration quality and increase repeated
+attempts and unusable demonstrations, reducing collection efficiency. Moreover, collecting tactile demonstra-
+tions through teleoperation still requires sensor-equipped robots, limiting scalability. Integrating tactile sensors
+directly into handheld manipulation interfaces such as UMI allows operators to manipulate objects directly
+while synchronously recording motion, vision, and touch. Combined with direct mechanical feedback or active
+motor feedback, these interfaces allow operators to perceive contact states and adjust interaction forces more
+intuitively. ViTaMIn combines a compliant handheld gripper with visuotactile sensing and operator-perceptible
+force feedback, while ViTaMIn-B extends this approach to bimanual collection with tracked controllers Li et al.
+(2025a); Liu et al. (2025a). FreeTacMan uses a wearable gripper for synchronized visuotactile demonstrations,
+exUMI integrates modular tactile sensing with calibrated state acquisition, and TacUMI combines tactile
+4
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+observations, force-torque measurements, and pose tracking Cheng et al. (2026a); Wu et al. (2025a); Xu et al.
+(2025b). UMI-FT further demonstrates the use of finger-level wrench measurements for learning compliant
+manipulation Choi et al. (2026). Building on this direction, Tacinf-Tacumi combines tactile sensing with
+real-time active force feedback, enabling operators to perceive and regulate grasp effort during demonstration
+collection. The handheld interface and robot execution system use the same low-cost gripper motor, eliminating
+the need to select a separate, dedicated gripper motor for deployment. This reduces additional hardware
+procurement and adaptation effort, lowering deployment costs and integration complexity.
+2.4. Tactile Foundation Models
+Tactile foundation models encompass transferable perception backbones as well as policies conditioned on
+touch. Learning to Jointly Understand Visual and Tactile Signals and UniTouch align tactile observations
+with visual or multimodal representations Li et al. (2024); Yang et al. (2024). Sparsh studies self-supervised
+tactile pretraining and introduces TacBench; Transferable Tactile Transformers uses a shared backbone with
+sensor-specific and task-specific modules Higuera et al. (2025a); Zhao et al. (2025b). Sensor-Invariant Tactile
+Representation and AnyTouch address cross-sensor transfer, with AnyTouch explicitly combining static and
+dynamic tactile information Feng et al. (2025); Gupta et al. (2025). TacX extends pretraining beyond tactile
+images to multiple sensing modalities, while AnyTouch 2 emphasizes temporal deformation and force-aware
+dynamics Feng et al. (2026); Higuera et al. (2025b). These advances establish that scalable touch learning
+depends on sensor diversity, temporal information, and appropriate transfer evaluations, not simply on treating
+a tactile image as another camera view.
+Tactile–language models connect contact observations to semantic reasoning. Octopi and Octopi-1.5 use tactile
+inputs for object-property inference and language-grounded reasoning Yu et al. (2024, 2025b). On the action
+side, OpenVLA, OpenVLA-OFT, 𝜋0, 𝜋0.5, RDT-1B, and GR00T N1 provide generalist vision-language-action
+(VLA) policy architectures and training recipes that motivate tactile extensions Black et al. (2025a,b); Kim et al.
+(2025a,b); Liu et al. (2025c); NVIDIA et al. (2025a). TLA and VTLA study language-conditioned contact-rich
+manipulation, including insertion and preference-based learning Hao et al. (2026); Zhang et al. (2026).
+TA-VLA examines torque-aware policy design; OmniVTLA aligns heterogeneous tactile signals with semantic
+representations; VLA-Touch introduces tactile feedback at planning and execution levels Bi et al. (2026);
+Cheng et al. (2026b); Zhang et al. (2025b). Tactile-VLA already combines tactile-conditioned prediction with
+hybrid position-force control Huang et al. (2025c). Related visuotactile policies such as RoboPack and Reactive
+Diffusion Policy use touch for dynamics inference or fast reactive control Ai et al. (2024); Xue et al. (2025).
+Tacinf-VTLA builds on these approaches to representation learning and control. It provides a simple, modular
+interface for incorporating tactile observations and force supervision into foundation-model post-training. The
+framework supports different tactile inputs, predicts fingertip-force targets, and couples a pretrained policy to
+separate feedback loops for grip force and applied wrench.
+3. Tacinf
+3.1. Tacinf-Tabero
+Tacinf-Tabero is the simulation benchmark component of Tacinf. It offers reproducible language-conditioned
+tactile manipulation tasks, scalable multimodal data generation, and process-aware metrics for evaluating
+physical interaction quality.
+5
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+3.1.1. Data Reuse
+Open-source manipulation datasets are valuable community resources. We develop a reusable workflow for
+transferring datasets from MuJoCo and other platforms to the Isaac Sim-based Tacinf-Tabero benchmark. This
+workflow improves visual fidelity through high-quality rendering and augments existing demonstrations with
+tactile observations, reducing the need to reconstruct each dataset from scratch.
+We first reconstruct task environments in Isaac Lab NVIDIA et al. (2025b) to match the source domains, including
+assets, initial object and robot poses, and success logic. This workflow can currently be partially automated with
+SimFoundry Ranawaka et al. (2026) or large language models. We then replay the source trajectories in the
+reconstructed scenes to obtain multimodal data that follow the demonstrated human trajectories. Transferring
+these trajectories to tactile manipulation settings presents two challenges. First, the end-effector differs: our
+robot uses a gripper integrated with visuo-tactile sensors whose geometry differs from the original. Second,
+the underlying physical behavior differs: some source datasets rely on Operational Space Control (OSC) Khatib
+(1987), which is highly sensitive to physical parameters. Datasets collected by real-robot teleoperation or UMI
+devices also introduce simulation-to-real gaps. We therefore make two adjustments: (1) align the end-effector
+tool center point (TCP) by adjusting the robot-arm base pose; and (2) use a high-gain proportional-derivative
+(PD) joint controller during trajectory replay to minimize cumulative tracking error.
+We evaluate the success rate of trajectory replay with the tactile gripper and obtain an acceptable proportion of
+successful episodes. We refer to this proportion as the data retention rate.
+3.1.2. Cross-Modal Data Acquisition
+We use GPU-accelerated parallel rendering in Isaac Lab to build a scalable multimodal acquisition system with
+synchronized sensory streams. Visual information is obtained from two camera configurations: a wrist-mounted
+camera and a third-person view camera, both providing synchronized RGB-D data. Tactile observations are
+produced by a simulated GelSight Yuan et al. (2017) sensor with a resolution of 320 × 240, providing both
+RGB tactile images and an 11 × 9 marker grid. We also support Xense sensors with a marker grid of 20 rows
+and 11 columns; image resolution is specified by the sensor configuration. For efficient tactile simulation, we
+use the computationally lightweight methods of Taxim and FOTS Si and Yuan (2022); Zhao et al. (2024).
+Tactile Image. Tactile images are generated using the Taxim framework Si and Yuan (2022). GelSight builds
+on retrographic sensing Johnson and Adelson (2009) and reconstructs contact geometry from calibrated
+illumination-dependent images Yuan et al. (2017); simulation evaluates the forward mapping from geometry
+to image. Taxim shifts the depth map according to the indentation depth, approximates static gel deformation
+using multiple layers of Gaussian filtering, and computes surface normals for optical rendering. Marker
+Displacement Field. Following the FOTS approach Zhao et al. (2024), we model the displacement field of
+surface markers on an elastic tactile sensor. Given simulated contact deformation and relative-motion cues,
+Gaussian spatial decay functions approximate marker displacement caused by normal expansion, shear, and
+planar torsion. The resulting field is expressed in sensor image coordinates and provides a raw signal that
+contains information about shear forces and torques. This marker-field interface can be extended from optical
+tactile sensors to capacitive, piezoelectric, or magnetic sensors.
+Contact Force. The physics engine provides the left and right sensor reactions, f 𝑆𝐿
+𝐿
+and f 𝑆𝑅
+𝑅, in their local
+frames. After rotation into the TCP frame, the negative sum gives the force exerted on the object. The two
+contact forces and their moment arms provide a point-force approximation of the TCP wrench (Section 3.2);
+the scalar grip proxy is computed separately from the contact force magnitudes.
+All cameras are rendered in parallel using tiled rendering, and all modalities, including visual, tactile, force,
+language instructions, and executed actions, are sampled synchronously at 20 Hz to produce temporally aligned
+multimodal observations at each time step.
+6
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Fig. 2. Tacinf-Tabero simulation benchmark. Tacinf-Tabero replicates the LIBERO task environments, enables
+data reuse, enhances the visual fidelity of simulated data, and provides high-quality tactile observations.
+3.1.3. Language-Conditioned Force-Level Data Generation
+We focus on tasks in which the desired interaction cannot be specified adequately by task completion alone,
+including explicit force instructions and contact-sensitive object handling. We distinguish two categories: (1)
+language-conditioned force-level tasks; and (2) manipulation of deformable objects or objects with articulated
+parts. Tabero is primarily used to validate the first category, while we validate the corresponding behavior for
+the second category directly in real-world scenarios.
+For the first category of tasks, most open-source datasets use continuous actions for arm control but binary
+or discrete gripper commands, limiting fine-grained force regulation and producing narrow within-task force
+distributions. We vary the low-level gripper controller parameters to execute the same task at different force
+magnitudes.
+In our simulation, the gripper uses a spring-damper position servo, consistent with the impedance-control
+formulation Hogan (1985). For a single-DOF gripper with width 𝑝, the commanded force is:
+𝐹cmd = 𝐾𝑝(𝑝target −𝑝) + 𝐾𝑑( ˙𝑝target −˙𝑝).
+(1)
+At steady state after contact, velocities vanish and the static grip force approximates 𝐹static ≈𝐾𝑝· 𝛿, where
+𝛿= 𝑝−𝑝target > 0 is the penetration depth. Thus, varying 𝐾𝑝scales the steady-state force under identical high-
+level commands. During initial contact, however, the impact force is dominated by damping: 𝐹impact ∝𝐾𝑑· | ˙𝑝|,
+so adjusting 𝐾𝑑diversifies transient forces. This variation is difficult to realize directly with many real robot
+grippers, motivating the tactile UMI device described below for data collection.
+We replay trajectories under different (𝐾𝑝, 𝐾𝑑) settings to instantiate an ordered force-level condition ℓ. In the
+reported benchmark, ℓ∈{10%, 25%, 100%}, with the same task and trajectory semantics retained across levels.
+These interactions produce distinct sensor-side force patterns f 𝑆𝐿
+𝐿
+and f 𝑆𝑅
+𝑅; their TCP-frame transforms and
+object-side signs follow Eq. (4). Following Tactile-VLA Huang et al. (2025c), we attach language such as “gently”
+or “softly” to low-force conditions and “firmly” or “tightly” to high-force conditions, aligning the language
+condition with the measured force distribution. The objective is to preserve the ordering and separation of
+force levels induced by ℓ, with “gentle” corresponding to one end of this range. For special tasks whose nature
+already demands substantial force, such as wiping a blackboard, we do not add an adverb. We record gripper
+aperture 𝑝as a continuous variable, keeping the action space compatible with the force dynamics. This pipeline
+provides a reusable way to generate language-conditioned force profiles for arbitrary tasks.
+7
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+3.1.4. Metrics Beyond Success Rate
+Task success alone overlooks critical aspects of physical interaction; force-aware and deformation-aware
+benchmarks address complementary aspects of this issue Jing et al. (2026); Wei et al. (2025). To reduce
+computational cost, we approximate contact using rigid-body simulation with force sensing. We evaluate the
+resulting fingertip forces to quantify physical interaction quality during task execution. The two grip-force
+metrics use 𝐹grip, derived from the squeeze proxy in Eq. (2) using the relation in Eq. (3): Maximum Transient
+Grip Force (MG). The average of the top 5% values of 𝐹grip over an episode, capturing peak grasping effort
+and transient spikes that may indicate aggressive or damaging behavior. Average Grip Force (AG). The
+mean stable grip force 𝐹grip across both fingers during intervals without relative slip between the object and
+fingertips. It provides a reference estimate of tangential squeezing force; it does not represent absolute ground
+truth. Maximum Transient Applied Force (MA). The average of the top 5% magnitudes of the applied force,
+characterizing extreme interaction events such as impacts. Average Applied Force (AA). The mean applied
+force magnitude during contact, measuring overall interaction intensity.
+With wrench-aware control, the three translational forces and the two modeled torque components about TCP
+𝑥and 𝑧are additionally tracked in terms of their means, peaks, and tracking errors. Under the sufficient-grip,
+no-slip assumption below, object-dependent torque about the grasp axis is excluded from this sensor-centered
+evaluation. Together, these metrics enable a more nuanced and physically grounded evaluation of robot policies,
+moving beyond binary success to assess safety and interaction quality.
+3.2. Tacinf-VTLA
+Tacinf-VTLA provides shared interfaces for adapting tactile observations, supervising fingertip-force targets,
+and executing policies with feedback. These interfaces allow different tactile policies to be trained, compared,
+and deployed under common data and task protocols. We instantiate the framework using the OpenPi
+infrastructure for 𝜋0 and 𝜋0.5 Black et al. (2025a,b), focusing on system reuse and the empirical contribution of
+each component. In this implementation, the policy predicts fingertip-force targets from vision, language, and
+touch, and a closed-loop force-position controller converts its outputs into compliant robot motion.
+3.2.1. Fingertip Force Decomposition and Two-Contact Wrench Mapping
+The separation of internal grasp forces from the resultant object wrench is standard in grasp mechanics; recent
+compliant imitation-learning systems also distinguish grasp and external interaction forces Choi et al. (2026).
+Our force decomposition also draws on the force-constrained formulation used in gentle-manipulation policy
+learning Zhou et al. (2026). In our implementation, a two-finger parallel gripper has a single opening and
+closing degree of freedom, so the planar contact at its fingertips decomposes naturally into two parts: the
+components squeezing each other along the closing axis form the grip force, while the remaining components
+constitute the applied interaction on the object, represented as an estimated six-dimensional wrench at the
+TCP under a two-contact approximation (3D force plus a 3D moment vector whose grasp-axis component
+is neglected). During grasping, the normal force that compresses the sensor pads against the object surface
+dominates; when the gripper transports, wipes, or twists the object, shear forces and moments also influence
+the object motion.
+3.2.2. Hybrid Controller
+Building on hybrid position-force control and impedance-based interaction control, as well as their use in tactile-
+conditioned policies, we implement force-error-driven pose and gripper-width corrections. We distinguish a
+scalar squeeze channel from the applied wrench, which comprises a 3D force and a 3D torque. Let 𝑖∈{𝐿, 𝑅}
+index the left and right fingertips, 𝑆𝑖denote each sensor frame, and 𝑇denote the TCP frame. A superscript 𝑆𝑖
+or 𝑇specifies the coordinate frame, whereas ⊤denotes transpose. Lowercase f 𝑆𝑖
+𝑖
+∈R3 is the contact reaction
+8
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+(a) Gentle grasp
+Fgrip
+p (gripper aperture)
+Normal load
+(b) Blackboard wiping
+Fy
+T
+Fz
+T
+Normal load + Lateral force
++ Vertical force
+(c) Card swiping
+±Fx
+T
+Fz
+T
+Normal load + Tangential force
++ Vertical force
+(d) Knob turning
+τz
+T
+−fL,x
+T
+−fR,x
+T
+Normal load + Torque
+Tactile pad
+Grip
+Torque
+x
+y
+z
+TCP frame
+Fig. 3. Fingertip-force decomposition across tactile skills. Purple arrows denote internal grip forces, and
+colored arrows denote TCP forces and torques. Arrows indicate loads acting on the object; dashed segments
+mark portions occluded by a tactile pad. (a) Gentle grasping, (b) blackboard wiping, (c) card swiping, and (d)
+knob turning.
+acting on sensor 𝑖; its local 𝑧-axis is normal to the pad. The squeeze force is a one-dimensional scalar computed
+from the full contact reactions:
+𝐹squeeze = min
+(︀
+‖f 𝑆𝐿
+𝐿‖, ‖f 𝑆𝑅
+𝑅‖
+)︀
+∈R≥0.
+(2)
+We assume the object is at the threshold of relative sliding while remaining stationary. Because the pressure
+directions at the two fingertips are not necessarily collinear, we define the force required to keep the object
+stationary, 𝐹static, in terms of the grip force 𝐹grip, the friction coefficient 𝜇, and the squeeze proxy as
+𝐹static = 𝐹grip𝜇= 2𝐹squeeze𝜇≈
+(︀
+‖f 𝑆𝐿
+𝐿‖ + ‖f 𝑆𝑅
+𝑅‖
+)︀
+𝜇.
+(3)
+The TCP frame is denoted by 𝑇. Lowercase f 𝑇
+𝐿, f 𝑇
+𝑅are the left and right sensor reactions expressed in this
+common frame, and capital F𝑇denotes the single resultant force exerted on the object:
+F𝑇= −(f 𝑇
+𝐿+ f 𝑇
+𝑅).
+(4)
+The sensor-local normal axes map to opposite directions along TCP 𝑦. The scalar aperture 𝑝is the distance
+between the two tactile contact planes along 𝑦. Approximating the contacts by the pad centers, at (0, −𝑝/2, 0)⊤
+and (0, 𝑝/2, 0)⊤relative to the TCP, gives the moment directly from the two forces:
+𝜏𝑇≈𝑝
+2
+(︀
+𝑓𝑇
+𝐿,𝑧−𝑓𝑇
+𝑅,𝑧, 0, 𝑓𝑇
+𝑅,𝑥−𝑓𝑇
+𝐿,𝑥
+)︀⊤.
+(5)
+We assume the grip force is sufficient to maintain stable contact without relative slip between the object
+and tactile pads. Under this assumption, torque about the grasp axis 𝑦still depends on the object and its
+contact conditions. To keep the calculation centered on the sensors and known gripper geometry, we leave
+this object-dependent component outside the modeled wrench and its feedback correction. The zero entry for
+the 𝑦-moment in Eq. (5) indicates that this component is omitted from the model; the physical torque may be
+nonzero. Fig. 3 illustrates the decomposition across gentle grasping, blackboard wiping, card swiping, and
+knob turning.
+Wrench-Aware Control The policy predicts an end-effector pose Ppred ∈𝑆𝐸(3) and target sensor reactions in
+the two local frames. The controller rotates each target and measurement into the TCP frame using rotation
+matrices before subtraction:
+e𝑇
+𝐿= R𝑇
+𝑆𝐿(f 𝑆𝐿,target
+𝐿
+−f 𝑆𝐿
+𝐿),
+e𝑇
+𝑅= R𝑇
+𝑆𝑅(f 𝑆𝑅,target
+𝑅
+−f 𝑆𝑅
+𝑅).
+(6)
+9
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+The sum and difference of the two fingertip errors give the force-driven pose corrections directly:
+∆p = −K𝑝R𝐵
+𝑇(e𝑇
+𝐿+ e𝑇
+𝑅),
+∆𝜑= K𝜑R𝐵
+𝑇
+⎡
+⎢⎣
+𝑝
+2(𝑒𝑇
+𝐿,𝑧−𝑒𝑇
+𝑅,𝑧)
+0
+−𝑝
+2(𝑒𝑇
+𝐿,𝑥−𝑒𝑇
+𝑅,𝑥)
+⎤
+⎥⎦,
+pcmd = ppred + ∆p,
+Rcmd = exp
+(︀
+[∆𝜑]×
+)︀
+Rpred.
+(7)
+Here R𝐵
+𝑇rotates from TCP to base coordinates while moments remain referenced to the TCP. The gains K𝑝and
+K𝜑have units m/N and rad/(N·m), respectively, and [ · ]× denotes the cross-product matrix. The controller
+corrects the pose predicted by the policy using the force-feedback corrections in Eq. (7). The rotation vector
+∆𝜑updates orientation through the exponential map. Differential inverse kinematics converts the corrected
+pose into joint velocity commands, while the independent grip loop adjusts aperture.
+Grip Force Control To overcome the limitation of position control in precise force regulation, we implement
+a grip force feedback loop. The predicted sensor-frame reactions f 𝑆𝑖,target
+𝑖
+give the contact force magnitudes,
+yielding the squeeze proxy and then 𝐹pred
+grip through Eqs. (2) and (3); the grip-loop target is
+𝐹target
+grip
+= (1 + 𝑘ff) 𝐹pred
+grip ,
+𝑘ff > 0,
+(8)
+where 𝑘ff is a feedforward gain. The measured grip force ˜𝐹grip is exponentially smoothed. Let 𝑝denote the
+gripper width. We apply a correction ∆𝑝only when |∆𝑝| ≥dz, where dz > 0 is a deadzone threshold accounting
+for gripper imprecision:
+∆𝑝= 𝑘adm
+𝑝
+· (𝐹target
+grip
+−˜𝐹grip),
+(9)
+with 𝑘adm
+𝑝
+an admittance gain. The final gripper command is
+𝑝cmd = clip
+(︀
+𝑝pred + ∆𝑝, 0, 𝑝max
+)︀
+,
+(10)
+where 𝑝pred is the policy-predicted gripper width. This allows the policy to specify a desired grip force while the
+controller achieves accurate tracking via feedforward and force feedback. The low-level controller thus uses the
+two fingertip force vectors and the gripper aperture. Contact-force magnitudes determine the grip-force proxy,
+while the sum and the difference scaled by half the aperture determine the wrench-based pose corrections. The
+policy coordinates these commands at the task level.
+3.2.3. Tactile Policy
+Tacinf-VTLA is trained on the tactile representations and force-aware instructions generated by Tacinf-Tabero.
+To integrate tactile signals into the VLA foundation model, we evaluate three tactile input adapters that
+map different tactile modalities into conditional tokens. The high-level policy then jointly predicts future
+gripper poses and six-dimensional fingertip-force setpoints based on vision, language, and touch. The fixed
+admittance-based low-level controller described above tracks these commands and provides physical compliance
+(Fig. 4). The high-level policy learns to infer appropriate interaction forces from the task context. Using flow
+matching within OpenPi, the policy predicts continuous pose commands and six fingertip-force components.
+The three adapters share the same temporal window, preprocessing, backbone, and training protocol; only the
+tactile input interface is varied in the ablation. Below, we detail the adapters and loss function, and compare
+alternative tactile injection strategies inspired by prior work.
+Marker-Field Adapter. The marker-field adapter processes marker displacement relative to the sensor’s
+initial rest state. The input consists of 𝐻+ 1 frames: the first frame captures the undeformed marker layout,
+and the subsequent 𝐻frames record 2D marker positions in the sensor’s local plane, resulting in an array
+𝑀∈R(𝐻+1)×𝑁×2. Here, 𝑁is the number of markers, and each 2D entry contains a marker’s planar coordinates.
+10
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+A lightweight temporal convolutional network (TCN) encodes this spatiotemporal sequence into tokens for
+integration into the transformer backbone. Appendix A summarizes the evaluated variants.
+Tactile-Image Adapter. Inspired by visuotactile policy conditioning Xue et al. (2025); Zhang et al. (2026), we
+implement an image adapter for our backbone. Specifically, we construct a single composite tactile image by
+arranging the 𝐻historical frames from the left finger and the 𝐻frames from the right finger into a unified
+spatial layout. The value of 𝐻is determined by the shared multi-view image resolution and the prescribed
+tactile-image resolution; when 𝐻= 1, the composite contains only the current contact state. This image,
+encoding the full tactile history of both fingertips, is processed by the same visual encoder used for RGB-D
+observations. Its features then interact with visual features via cross-attention in the transformer, so the model
+can reason jointly about contact and scene geometry. Appendix A summarizes the evaluated variants.
+Force Adapter. We use the 3D sensor-frame reaction vectors f 𝑆𝐿
+𝐿
+and f 𝑆𝑅
+𝑅
+as raw inputs, resulting in a 6-
+dimensional force signal. Although these reactions can be transformed and combined with the known fingertip
+geometry to compose the applied wrench at the TCP, we find it more effective to feed their concatenation into a
+multilayer perceptron (MLP) to obtain a compact latent representation of contact dynamics. This representation
+is injected into the model alongside other modalities to enhance physical awareness. Appendix A summarizes
+the evaluated variants.
+Force Supervision. Flow matching Black et al. (2025b) supports continuous commands, including gripper
+position and fingertip forces. Each normalized target contains 13 effective components: seven motion and
+gripper-control components and six sensor-frame fingertip-force components, zero-padded to the output width
+𝐷= 32. Let 𝐵be the batch size, 𝐾the future prediction horizon, and 𝑒𝑏,𝑘,𝑑= 𝑣𝑏,𝑘,𝑑−𝑢𝑏,𝑘,𝑑the difference
+between predicted and target flow velocities for sample 𝑏, prediction step 𝑘, and output dimension 𝑑. The
+weighted loss is
+ℒ=
+1
+𝐵𝐾𝐷
+𝐵
+∑︁
+𝑏=1
+𝐾
+∑︁
+𝑘=1
+𝐷
+∑︁
+𝑑=1
+𝑤𝑑𝑒2
+𝑏,𝑘,𝑑,
+(11)
+where 𝑤𝑑= 1 for 1 ≤𝑑≤7, 𝑤𝑑= 𝜆force for 8 ≤𝑑≤13, and 𝑤𝑑= 𝜆pad for the remaining padding
+dimensions, with nonnegative weights. The loss averages over batch samples, prediction steps, and the full
+output width, retaining 𝐷in the denominator even when padding has zero weight. The batch average estimates
+the expectation over sampled flow times and Gaussian noise.
+VTLA System
+VIT
+Paligemma
+Action Expert 
+Robot 
+States
+Force-aware
+Instruction
+TCN
+Tokenizer
+MLP
+Tokenizer
+MLP
+Tokenizer
+Force & Position Chunk
+Tactile image
+Marker
+motion field
+6D force
+(encoder)
+6D force
+(decoder)
+Grip Force & Position
+Applied Force & Position
+Admittance
+Control
+Feedforward
+Gain
+Finger Coord. to
+Base Coord.
+Admittance
+Control
+Gripper 
+States
+Gripper
+Actuator
+Arm Joint
+Actuator
+Arm
+States
+Diff IK
+F & P Chunk
+Decouple
+Real-Time Force Feedback System
+Fig. 4. Tacinf-VTLA system overview. Tactile inputs are encoded by input adapters and fused with vision and
+language. The policy predicts force-position commands, which are tracked by separate grip-force and wrench
+feedback loops to achieve compliant interaction. IK = inverse kinematics.
+3.3. Tacinf-Tacumi
+We develop Tacinf-Tacumi, a handheld multimodal interface for collecting demonstrations of contact-rich
+manipulation. Following the robot-free teaching paradigm of UMI Chi et al. (2024), the system combines
+tactile sensing with real-time active force feedback, so operators can perceive and regulate grasping load while
+11
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Fig. 5. Tacinf-Tacumi hardware. Left: the real handheld collection device, with its quasi-direct-drive (QDD)
+actuator, wrist RGB camera, and tactile fingertips. Right: structural renderings of the arm-mounted gripper,
+the handheld device, and an exploded view of the handheld device, shown at the same scale. Labels identify
+the shared camera, tactile sensors, and motor, as well as the virtual reality (VR) controller used only on the
+handheld device for UMI pose tracking.
+directly manipulating objects. It synchronously captures end-effector motion, gripper aperture, and contact
+observations to provide multimodal demonstrations for tasks requiring fine force regulation.
+As shown in Fig. 5, Tacinf-Tacumi comprises a motorized trigger, a parallel gripper, and multimodal sensing
+components. The trigger operates under field-oriented control (FOC) and serves as both the opening and
+closing command interface and the active feedback actuator. The parallel gripper is driven by a DAMIAO motor
+that provides position and load feedback, while fingertip-mounted Xense vision-based tactile sensors provide
+tactile images and contact-force estimates. A VR controller supplies six-degree-of-freedom pose tracking, and a
+camera records visual observations. The acquired signals and task instructions are organized under a common
+data schema, allowing handheld demonstrations to be combined with robot teleoperation and simulation
+trajectories for the mixed-data training evaluated in Section 4.8.
+3.3.1. Fine Force Regulation
+The handheld interface uses position commands and torque feedback to establish a bidirectional interaction
+loop, following the position-force architecture of bilateral interfaces Lawrence (1993). In the command channel,
+trigger rotation is mapped to a target gripper aperture and converted into a motion command for the DAMIAO
+motor. The actual aperture is obtained from motor position feedback through the transmission relationship.
+The target and actual apertures represent operator intent and gripper execution state, respectively.
+In the feedback channel, the torque estimate reported by the gripper motor is mapped to a feedback command
+for the trigger:
+𝜏cmd
+trigger = 𝑘fbˆ𝜏gripper,
+(12)
+where ˆ𝜏gripper denotes the estimated gripper motor torque and 𝑘fb is a signed feedback gain. Its direction
+follows the coordinate conventions of the two motors so that the grasping load produces a reaction torque
+opposing further trigger closure. The trigger motor executes the command in Eq. (12) through FOC Bhardwaj
+(2013), rendering changes in gripper load as resistance perceptible to the operator and supporting continuous
+force regulation through real-time interaction feedback.
+Motor torque feedback and tactile force estimation serve complementary roles. Motor torque includes con-
+tributions from transmission friction and actuator dynamics Le Tien et al. (2008); it conveys load variations
+12
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+but cannot directly measure fingertip contact force. The Xense sensors provide contact-force estimates using
+the manufacturer’s calibration, supporting contact observations, real-robot force statistics, and the grip-force
+feedback controller in Section 3.2. This design combines active feedback for the operator with contact sensing
+for policy learning and robot control while preserving the distinct physical meanings of the two signals.
+3.3.2. Data Collection
+The system separately acquires the gripper’s six-degree-of-freedom rigid-body pose and single-degree-of-
+freedom aperture to represent end-effector motion and grasp state. The tracking design considers trajectory
+reliability, system integration complexity, and deployment overhead across collection environments.
+Existing handheld collection systems employ different pose-acquisition strategies. UMI estimates trajectories
+from wrist-camera observations and inertial measurements, but its original paper acknowledges a dependence
+on sufficient environmental texture, with limitations in texture-deficient settings such as rooms with plain white
+walls Chi et al. (2024). TacUMI integrates a VIVE Tracker into the handheld device, providing an example of
+acquiring manipulation trajectories with a dedicated tracking device Cheng et al. (2026a). For Lighthouse-based
+implementations such as VIVE Tracker 3.0, external base-station installation and spatial configuration introduce
+additional preparation when moving between collection sites HTC VIVE (n.d.). ViTaMIn-B instead adopts Meta
+Quest controllers and reports a higher proportion of valid demonstrations than the simultaneous localization
+and mapping (SLAM) approach used in UMI on its Weight Placement task, providing empirical support for
+consumer VR tracking in handheld collection Li et al. (2025a).
+Building on these precedents, we adopt the commercial headset-and-controller tracking system of Meta Quest 3,
+separating end-effector pose acquisition from wrist-camera trajectory reconstruction. This solution provides
+real-time poses without external tracking base stations, reducing site configuration requirements and facilitating
+portable demonstration collection across everyday environments. The controller is rigidly attached to the
+handheld device, and its tracked pose is transformed into the gripper tool center point (TCP) pose through a
+fixed extrinsic transformation, consistent with the controller-to-end-effector mapping used in prior handheld
+interfaces Li et al. (2025a):
+T𝑊
+𝑇(𝑡) = T𝑊
+𝐶(𝑡) T𝐶
+𝑇,
+where 𝑊, 𝐶, and 𝑇denote the tracking reference frame, Quest controller frame, and TCP frame defined in
+Section 3.2, respectively. The fixed extrinsic T𝐶
+𝑇maps coordinates from 𝑇to 𝐶and is estimated from 20 paired
+robot and controller poses using hand-eye calibration, as detailed in Appendix E.1.
+Gripper aperture is computed from motor position feedback through the transmission relationship, allowing
+actuation and state acquisition to share the same hardware. End-effector pose, gripper aperture, control
+commands, load feedback, and visual and tactile observations are aligned on a common timeline to form
+multimodal trajectories that preserve the correspondence between actions and contact information. The native
+acquisition rates and common host timestamp convention are described in Appendix E.2.
+3.3.3. Low Cost and Actuator Consistency
+Prior interfaces address collection-to-deployment differences through hardware design, calibration, or adapta-
+tion Wi et al. (2026); Xu et al. (2025a); Yu et al. (2025a); Zhang et al. (2025a). Tacinf-Tacumi uses the same
+low-cost gripper motor for handheld collection and robot execution, reusing the gripper actuation design and
+its command and state interfaces. During deployment, the robot operates the corresponding motorized gripper,
+while the trigger serves only as the human interface during demonstration collection. This design avoids
+selecting a different, dedicated gripper motor for deployment, reducing hardware selection, control-interface
+adaptation, and system integration effort.
+Reusing the actuation design helps reduce control and calibration differences introduced by actuator replace-
+13
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+(a) Teleoperation
+(b) Simulation replay
+(c) Tacumi demonstrations
+Teleoperation
+Simulation Replay
+Tacumi
+Joint policy training 
+Mixed data 
+from all sources
+Fig. 6. Tacinf-Taco data sources and co-training. (a) Third-person camera view of real-robot teleoperation.
+(b) Simulation replay of the same trajectory in the configured Tacinf-Taco scene, with Vitasoy, Coca-Cola,
+cookie, and basket. (c) Tacumi demonstration: the UMI camera view at the moment of grasping the Vitasoy box.
+Simulation replays teleoperation trajectories; Tacumi demonstrations are collected independently in parallel.
+Training uses all three sources.
+ment. Its cost advantage derives from the low-cost motor selection and design reuse across collection and
+execution. With a shared actuation design, contact responses can still differ between collection and deployment.
+Transmission geometry, fingertip geometry, sensor mounting, and control parameters require matching or
+calibration. Within this scope, the design reduces additional hardware and engineering requirements for
+deployment while providing a basis for consistency between the demonstration data and the robot execution
+interface.
+3.4. Tacinf-Taco
+Tacinf-Taco (Tactile policy Co-training) combines teleoperation, simulation, and Tacumi (UMI) demonstrations
+for VTLA post-training. Simulation data are generated by replaying teleoperation trajectories in task-aligned
+Tacinf-Tabero scenes. Tacumi demonstrations provide a parallel real-data source with varied object positions,
+orientations, and approach motions. All three sources are mixed to train one policy. Collection effort decreases
+from teleoperation to Tacumi to simulation. Fig. 6 summarizes these sources and their relation.
+The framework consists of three dependent parts:
+1. Task-aligned scene reconstruction: transfer workspace appearance and interactive-object geometry
+into a common task frame, providing the assets for controlled visual variation.
+2. Manipulator-system Real2Sim: align the robot, cameras, tactile sensing, and action interfaces so that
+replay produces synchronized observations and force targets compatible with real data.
+3. Augmentation and post-training: combine simulation-based visual and force-level variation with UMI-
+based spatial variation, then return the resulting VTLA policy to the shared physical interface.
+The aligned simulator also supports policy evaluation. The simulation-only adaptation protocol and paired
+Sim/Sim2Real evaluation are specified in Sections 4.5 and 4.6; they are separate from the mixed-data post-
+training design described here.
+The shared interface specification allows the framework to accommodate new assets and backbones. New
+datasets are mapped to a common schema for tasks, states, and success criteria; new tactile sensors supply
+14
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+calibrated observation models; and new pretrained VLAs provide input adapters and action heads. Each
+extension retains the common time step, normalization, force supervision, and evaluation interfaces.
+Following real-to-sim evaluation approaches that align policy-relevant observations and control Jain et al.
+(2026); Li et al. (2025b), and tactile sim-to-real studies such as AnyRotate and SimShear Freud et al. (2025);
+Yang et al. (2025), Taco uses two practical criteria. First, visual-physical separation: Gaussian or neural
+appearance models are used only for rendering and never for contact; explicit collision geometry handles
+contact, support, and shadow reception. Second, policy-relevant consistency: parameters are adjusted
+to match the data structures, distributions, and visual observations used by the policy. Exact matching of
+physical parameters is often impractical because it requires extensive measurement and calibration, and some
+parameters are commercially restricted. We assess policy-relevant consistency through checks of contact onset,
+contact-patch persistence, force scale, marker response, and action replay.
+3.4.1. Task-Relevant Scene Reconstruction
+This module transfers the real workspace and interactive objects into Isaac Sim, so that rendering and interaction
+use the same camera extrinsics and operation region. The workspace is represented visually by 3D Gaussians,
+while objects enter the physical layer as independent textured meshes. Both are aligned to the task coordinate
+system and obey the visual-physical separation principle.
+Task-Aligned Workspace Reconstruction. We represent workspace appearance with 3D Gaussian Splatting
+(3DGS) Kerbl et al. (2023) and convert it into an Isaac Sim-loadable NuRec Volume. The task-side robot, white
+collision table, cameras, and operation region remain unchanged; the Gaussian asset is aligned to the task
+frame using a single registration matrix Treg. We use the Odin1 spatial camera from Liuxing Technology for
+reconstruction data capture, because in addition to a directly usable video stream, its built-in LiDAR odometry
+provides a more accurate reference for camera extrinsics. A spatial camera continuously records trajectories
+around the operation region that cover the reachable space and fields of view of the third-person and wrist
+cameras, while logging calibrated images, poses, and COLMAP intrinsics/extrinsics Schonberger and Frahm
+(2016). The reconstruction is exported as a standard 3DGS point set in a Z-up, meter-based convention. Capture
+is concentrated in the views used by the policy: the third-person camera frustum and the frusta swept by the
+wrist camera throughout the arm workspace. Uniform coverage of the room is unnecessary.
+3DGS Post-Processing. During scanning, the robot arm is present in the scene, so retaining its Gaussians would
+create double geometry with the simulated robot defined in the Unified Robot Description Format (URDF).
+Under a tabletop-plane constraint, we perform random sample consensus (RANSAC) plane estimation Fischler
+and Bolles (1981), candidate-point selection with tabletop protection, connected-component clustering and
+morphological filtering, and multiple cleanup passes based on bounding-box neighborhoods, nearest-neighbor
+growth, and base-column constraints, while protecting fine structures such as cables wrapped around the
+arm. For rendering compatibility, we remove far-field outliers, contract higher-order spherical harmonics to
+DC-only, and ensure that the declared SH order matches the specular tensor dimensions, zero-padding missing
+dimensions when necessary. Finally, the scene in Universal Scene Description (USD) format uses an outer
+transform to cancel the task’s fixed external frame and retains only Treg in the inner transform relative to the
+robot base.
+Object Reconstruction. Interactive objects are reconstructed separately and imported as independent USD
+assets; they are not extracted from the workspace Gaussians. For each real object, we capture one image and
+use Seed3D 2.0 Gu et al. (2026) to generate a textured 3D model exported as USD. The explicit mesh follows
+Isaac’s rasterization path; when Gaussian appearance and an object mesh overlap, the object asset handles
+physical interaction while the Gaussian layer supplies only unmodeled background. The exported USD has
+no collision geometry. We therefore add rigid-body properties through a USD overlay and generate collision
+meshes with convex decomposition without modifying the generated asset itself. The visual mesh is used only
+15
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+for rendering and the collision mesh only for contact; object physics is supplied by the overlay. Because Seed3D
+scale and initial pose can differ from the real object, we import the asset into Isaac Sim, replay the recorded
+real demonstrations, and iteratively adjust object scale and initial position along each axis until grasp and
+placement trajectories align. Calibration aims to improve agreement in trajectories and success rates between
+simulated replay and the real robot, beyond visual similarity alone. Task demonstrations and robot trajectories
+remain fixed during calibration. Before evaluation, we check the reconstructed scene with task initialization
+and camera observations.
+3.4.2. Embodiment Real2Sim
+Scene alignment alone is insufficient for policy transfer: the simulated embodiment must expose the same
+action and observation semantics as the real system. To ensure the generality of our framework, we do not
+reconstruct the robot arm’s complete Gaussian appearance; instead, we reproduce only its dynamics and
+kinematics system. In addition, we explicitly simulate the shared Tacumi gripper, including its gripper control
+and tactile sensing.
+Manipulator System. We build the XArm dynamics in Isaac Lab and tune its PD parameters to match the
+real robot’s control behavior. Hand-eye calibration provides the third-person camera pose relative to the robot
+base. The shared Tacumi gripper and sensor assembly determines the wrist camera’s relative pose through its
+mechanical design, so this pose does not require estimation from an external sensor model. Finally, we tune the
+shared tactile gripper’s passive-joint mode, PD parameters, and the force-position hybrid controller introduced
+above.
+Tactile Observation Modeling. Our tactile Real2Sim path combines the Taxim optical model Si and Yuan
+(2022) and the FOTS marker-motion model Zhao et al. (2024) in a shared Isaac Lab sensor interface. The
+simulator first derives a contact representation from the depth image beneath the pad. Taxim maps local surface
+geometry to a tactile RGB observation, while FOTS combines contact deformation with contact-centroid changes
+and relative sensor-object yaw to produce a marker displacement field in sensor image coordinates. The two
+models are complementary forward models: they reproduce the signals exposed to the policy without requiring
+an exact replica of the commercial sensor’s internal optics or elastomer mechanics. Following the calibration
+methods of Taxim and FOTS, we calibrate the above models using a small set of real tactile observations and,
+through parameter settings in Isaac Sim, align the simulated and real data streams in resolution, channel
+semantics, preprocessing, and temporal-update conventions. We jointly adjust the observation mapping and
+the contact geometry. In particular, the normal thickness of the tactile-pad collision volume is treated as an
+asset-level variable and tuned to reduce discrete-time interpenetration while preserving a stable contact patch
+and consistent activation of both tactile models. This calibration targets contact responses relevant to the policy,
+extending beyond visual mesh alignment. Appendix D details the depth-to-indentation mapping, optical and
+marker interfaces, and calibration scope; the complete simulator configuration is released with the calibrated
+asset and pinned by the run manifest. Due to commercial restrictions, we cannot obtain the complete optical
+and mechanical specifications of Xense. We therefore only tune the cameras’ rendered view and operating
+depth range at the observation level, and do not claim strict structural extrinsic registration.
+3.4.3. Data Augmentation and Joint Post-Training
+Taco combines three data sources for co-training: teleoperation data, Tacumi data, and simulation data. The
+goal is to improve the policy’s generalization on real-robot tasks while preserving consistent language, contact,
+and action semantics across sources.
+Real seeds and simulated visual augmentation. Real-robot trajectories supply the original task instructions,
+motions, and available observations, and anchor the scene and sensor calibration. Relatively fixed object
+positions facilitate simulation alignment, while UMI data supply complementary spatial variation. Starting from
+16
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+the aligned assets, the simulation branch varies object appearance or instances and background visual elements.
+Building on Tacinf-Tabero, we replay the task under these variations and controlled force regimes, producing
+synchronized visual observations, tactile images, marker fields, contact forces, and action targets. Background
+appearance changes leave the collision model unchanged; replacing an interactive object’s geometry requires
+a corresponding collision asset and a new contact rollout. Replaying the varied scene generates new tactile
+signals and force labels that reflect the updated physical interactions. After replay, a contact-signal check and a
+task-completion check filter out data that produced no contact or failed the task.
+Spatial augmentation with UMI. Tacumi extends spatial coverage with human demonstrations. Objects are
+placed at different positions and orientations and approached along different paths. The shared gripper records
+the resulting changes in contact and motion together, adding physical spatial variation to the simulated visual
+and force-level variations. Each variation in object pose is recorded as a new demonstration with corresponding
+actions and contact observations. Tracked UMI poses and sensor observations are expressed through the
+common task and observation-action interfaces before mixing.
+Joint VTLA post-training. The real, simulated, and UMI trajectories are synchronized, normalized, and
+sampled into mixed batches to jointly post-train a single pretrained Tacinf-VTLA policy with the action and
+fingertip-force supervision in Section 3.2. The source sampling ratio and task/force-level coverage are explicit
+training settings. The post-trained policy is deployed with the same tactile gripper and hybrid controller.
+Data synergy. Among the three data sources, simulation data are the cheapest, UMI data come next, and
+teleoperation data are the most expensive. Simulation data provide visual-element and object generalization,
+UMI data provide grasp-approach and object-pose variation, and teleoperation data provide precise examples.
+The co-training study in Section 4.8 evaluates these complementary contributions. The three-source mixture
+substantially outperforms teleoperation-only training on out-of-distribution (OOD) tasks. Position generalization
+is limited without UMI data, and object generalization is limited without simulation data. Teleoperation provides
+precise reference demonstrations for the other sources, while UMI-only training performs poorly in the evaluated
+setting. Together, these results illustrate the benefits of combining the three sources.
+4. Evaluation
+Sections 4.1–4.3 evaluate nine tactile-input variants of the foundation model on Tabero; Sections 4.4–4.6
+evaluate eight models retrained with Taco data; Section 4.7 evaluates one model on separate controller data;
+and Section 4.8 evaluates six models retrained with different data mixtures. The hardware consists of one
+XArm7 arm equipped with an Xense-based tactile gripper and its UMI counterpart for data collection, together
+with a Meta Quest 3 for UMI pose tracking. Compute devices include four H20 and two A6000 GPUs; a single
+RTX 4090 workstation is the minimum compute requirement for reproducing the complete system.
+Evaluation protocol. Counting the two force levels as distinct task requirements, Tabero contains 18 base tasks
+and Taco contains six base tasks, six position-randomized tasks, and six tasks with both position and object
+randomization; three additional manipulation tasks are used to validate the controller. The task categories are
+language-conditioned force following and special-object manipulation. Each base Tabero and Taco task has 30
+demonstrations; data quantities for mixed-data and standalone task experiments are specified separately. In
+simulation, each model is evaluated for 50 trials per task. On the real robot, each model is evaluated for 20
+trials on force-following tasks and 10 trials on special tasks, using the criteria in Appendix B.2. Sections 4.1–4.3
+use the per-finger minimum in Eq. (2) as grip force. Sections 4.4–4.8 use the sum of left and right fingertip
+force magnitudes as an approximation because individual fingertip readings are inaccurate during contact; see
+Appendix C.4. A trial is terminated when it exceeds the maximum episode length. Firm and gentle conditions
+of the same task share identical initial object and robot states. The real-robot policy runs at 20 Hz and executes
+actions asynchronously through temporal ensembling, with an inference latency of roughly 150–200 ms; the
+tactile closed-loop controller runs at the same 20 Hz rate.
+17
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+4.1. Data Reuse and Annotation
+We evaluate the Tacinf-Tabero data transfer and reuse workflow using LIBERO, a representative open-source
+dataset built on MuJoCo. We assess task success and distributional consistency after transfer to Isaac Lab.
+Specifically, we compare success rates for four LIBERO task subsets between the original MuJoCo dataset and
+our replayed trajectories in Isaac Lab. Fig. 2 illustrates the range of task scenarios our simulation platform can
+provide. Subsequent experiments use a subset of these configurations without visual randomization.
+When using the same robot kinematics and control policy as in the original dataset, our baseline configuration
+yields a success rate distribution that closely matches that reported in OpenVLA Kim et al. (2025b). However,
+replacing the standard parallel-jaw end effector with a tactile-sensor-integrated gripper on the same Franka
+arm introduces mechanical differences that lead to a measurable drop in success rates. This degradation is
+especially pronounced in tasks requiring delicate manipulation, where lower grip forces strongly correlate with
+reduced success. The results shown in Table 1 highlight the sensitivity of force-aware tasks to end-effector
+design and force regulation.
+Table 1: Cross-platform data validation: task success rates across four LIBERO subtasks. We compare the
+original MuJoCo dataset, our replay in Isaac Lab with identical robot configuration (denoted Isaac), and our
+modified setup with a tactile-equipped Franka gripper at 100%, 25%, and 10% force scaling (denoted T-100,
+T-25, and T-10).
+Task
+MuJoCo
+Isaac
+T-100
+T-25
+T-10
+Spatial
+0.86
+0.83
+0.42
+0.24
+0.07
+Object
+0.91
+0.77
+0.84
+0.87
+0.73
+Goal
+0.76
+0.78
+0.55
+0.44
+0.30
+LIBERO-10
+0.86
+0.66
+0.60
+0.47
+0.32
+Average
+0.85
+0.76
+0.60
+0.50
+0.36
+4.2. From Discrete to Continuous Force-Position Control
+We verify whether our data collection framework effectively expands the distribution of interaction forces. We
+compare a baseline using binary gripper control, which logs only discrete open/close commands and regulates
+no force, against our approach, which explicitly sets different force parameters during execution; results
+are shown in Fig. 7. Specifically, we define 100% grip force as the “firm” condition, modifying the original
+instruction with the adverbs “firmly” and “tightly”, and 25% and 10% as the “gentle” conditions, annotated with
+“gently” and “softly”. These conditions define an ordered force scale. The adverb set corresponds to increasing
+grip force as the commanded level increases, and unseen adverbs reserved for testing (Appendix C.2) produce
+intermediate values between the two endpoints. Language thus specifies a position along a continuous force
+scale. Here, “Binary” refers specifically to the baseline gripper’s discrete open/close command interface. In our
+experiments, we set 𝐾𝑝∈{2000, 500, 200} N/m and 𝐾𝑑∈{100, 25, 10} N·s/m to correspond to 100%, 25%,
+and 10% force levels, respectively, where the 100% setting follows the default parameters for the Franka robot
+in Isaac Sim. For the same task, we present tactile images, marker fields, and contact force measurements
+at comparable contact stages under these distinct force settings in Fig. 7, demonstrating clear multimodal
+variations aligned with the intended interaction intensity.
+We also observe that under the extreme 10% force setting, the retention rate of most tasks is relatively low.
+Appendix C gives the formal definition of the retention rate. We therefore construct a Tabero subset to
+evaluate policy performance under these extreme conditions in the subsequent ablations. This subset includes
+9 tasks from the Object dataset, each executed under two force conditions specified by linguistic adverbs. The
+composition of the dataset is presented in Appendix B.1. We collect three datasets over the task group, differing
+18
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+(a) LIBERO Spatial
+(b) LIBERO Object
+(c) LIBERO Goal
+(d) LIBERO-10
+Fig. 7. Force distribution and tactile observations at different force magnitudes. Left: force distributions
+under various control modes across different task suites. “Binary” represents the binarized control commands
+applied by a non-tactile gripper; “100%”, “25%”, and “10%” indicate the force distributions of a tactile gripper
+under different force settings, where “100%” retains the default gripper PD gains of the original continuous-
+control setup. The “Binary” setting records discrete open/close commands without regulating a force target,
+resulting in a higher peak applied force than the 100% setting. Right: tactile images and corresponding camera
+images at different force magnitudes. The left two columns represent the first category of objects and the
+right two columns the second; RGB denotes the simulated tactile RGB image, and RGB+Marker overlays the
+simulated marker motion field on the RGB image. In the camera views, the left view is from the third-person
+camera and the right view is from the wrist-mounted camera.
+only in force magnitude and gripper actuation strategy. Dataset A uses continuous control with “gentle” forces
+at 25% of the corresponding “firm” level. Dataset B also employs continuous control but reduces the force to
+10%, representing an extreme low-force regime where slippage is likely. Dataset C uses the same 10% force
+level but switches to binary open/close commands, with only discrete gripper states logged.
+During evaluation, the arm and gripper operate with impedance parameters corresponding to 100% force
+scaling. The Tacinf-VTLA policy predicts target contact forces conditioned on language and visual inputs; these
+targets are tracked by a closed-loop admittance controller that modulates impedance during execution. We
+adapt a base VLA model using low-rank adaptation (LoRA) to incorporate tactile marker fields (Dataset A
+and B), while a vision-language-only variant is trained on Dataset C for ablation, where the binary gripper
+commands carry no continuous force target to predict. As shown in Table 2, that variant does not modulate
+force at all (AG 35.8 N under firm against 34.6 N under gentle), consistent with the ablation below: force
+modulation appears only when the policy is given a continuous force target to predict. The sharp drop in
+success rate from 25% to 10% force scaling reflects the increased difficulty of maintaining stable contact
+under ultra-gentle constraints, showing that Dataset B represents a substantially more challenging regime for
+gentleness-aware policies. Appendix C.2 reports the corresponding language-to-force trend on this dataset,
+including the out-of-domain adverbs.
+4.3. Ablation and Comparison of VTLA
+We use Dataset B to compare tactile input methods and ablate force-control components. FS denotes force
+supervision. Force E+FS, Img, and Force D+FS adapt the design principles of Huang et al. (2025c), Zhang
+19
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Table 2: Training results on the three datasets. SR = success rate. Each cell gives the firm / gentle value, where
+the gentle condition is 25% for Dataset A, 10% for Dataset B, and 10% with binary gripper commands for
+Dataset C.
+Metric
+A 100% / 25%
+B 100% / 10%
+C 100% / 10%
+SR
+0.87 / 0.79
+0.86 / 0.52
+0.86 / 0.87
+AG
+31.3 / 8.5
+32.4 / 3.7
+35.8 / 34.6
+MG
+61.3 / 19.9
+62.7 / 11.4
+65.7 / 65.0
+Fig. 8. Ablation study on tactile modalities. (a) Task success rates under firm (F) and gentle (G) conditions;
+line length indicates the difference in success rate between conditions. (b) Average grip force (N) under the two
+conditions; line length indicates the difference in mean force. Filled and open circles denote firm and gentle
+conditions, respectively. None = no tactile input; Img = tactile image input; Field = marker displacement
+field input, i.e. the spatial marker field; Force E = six-dimensional force input via MLP encoder; Force D =
+six-dimensional force input via decoder; FS = force supervision loss enabled.
+et al. (2026), and Zhang et al. (2025b), respectively, within our shared backbone and training protocol.
+These experiments assess the design choices under a common backbone, dataset, and protocol. Because the
+implementations differ from the original systems in these respects, the results are not directly comparable with
+those reported in the source papers. Except where the ablation architecture requires a different tactile interface,
+all models were fine-tuned via LoRA Hu et al. (2022) with an identical set of hyperparameters; Appendix A
+summarizes the evaluated variants.
+Fig. 8 shows that the baseline without tactile input and without force supervision fails completely. The following
+ablations distinguish the contributions of these two factors.
+Role of force supervision. Under the training and execution framework used for Dataset B, explicit supervision
+of fingertip-force targets and an interface for executing those targets account for the main performance gains.
+Without force supervision, Img, Field, and Force E each achieve a success rate of 0.01 under the gentle
+condition. FS, which receives no tactile observations at the high-level policy, achieves 0.45 under gentle and
+0.82 under firm conditions. These results identify force-target learning and execution as important components
+of force-level following in this setting.
+Impact of tactile input. The FS high-level policy receives no tactile images, marker fields, or fingertip-force
+observations. It nevertheless receives fingertip-force supervision and executes actions through a low-level
+controller that uses measured fingertip forces for feedback. Comparing FS with variants such as Field+FS
+20
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+therefore measures the additional value of high-level tactile observations under the same force supervision and
+feedback control. With force supervision enabled, the marker field provides the best balance of performance
+across firm and gentle conditions, and most other variants outperform FS under both conditions. The benefit
+varies across representations: Force D+FS performs worse than FS under the gentle condition, and the variation
+across models exceeds the average gain over FS. Tactile observations thus provide contact information that
+helps the policy infer the supervised force targets and use them to determine force and action outputs.
+4.4. From Single-Source to Multi-Source Data
+We use the data-replay pipeline introduced by Tabero to obtain, from single-distribution real-robot data,
+simulated Taco data with “firm” and “gentle” force distributions, and evaluate the consistency between the two
+domains. To complement task-level validation, we measure the consistency along three channels: visual images,
+tactile images, and action labels. Visual consistency is quantified by the Contrastive Language-Image Pre-training
+(CLIP) similarity Radford et al. (2021) of the third-person and wrist camera views; tactile consistency by the
+structural similarity (SSIM) and the mean absolute error (MAE) between simulated and real tactile images; and
+action consistency by the MAE of the action labels. Table 3 reports these metrics for three firm-force tasks. The
+results show that the wrist and third-person camera views are well aligned (both CLIP similarities above 0.75);
+the tactile signals further agree in SSIM and MAE, and the actions are also well aligned, demonstrating the data
+reliability of the Taco replay pipeline. Fig. 9 shows this alignment qualitatively for one task, pairing the real run
+with the simulated replay across the third-person, wrist, and tactile views. UMI data further extend the data
+sources: because UMI data cost less than teleoperation, we can collect data over a larger spatial randomization
+range. Appendix C.5 shows how the expanded spatial range differs from the original teleoperated data in
+trajectories and distributions, and Section 4.8 further evaluates the synergy of multi-source data.
+Table 3: Sim-to-real data consistency across visual, tactile, and action channels. All three channels show
+agreement on every task: CLIP similarity exceeds 0.75, tactile SSIM exceeds 0.93, and action MAE is below
+0.074. These results indicate that the replay pipeline closely reproduces the real data distributions on these
+tasks.
+Third-person CLIP
+Wrist CLIP
+Tactile SSIM
+Tactile MAE
+Action MAE
+Firm Task 1
+0.781
+0.770
+0.941
+0.0160
+0.0708
+Firm Task 2
+0.785
+0.754
+0.931
+0.0182
+0.0685
+Firm Task 3
+0.794
+0.766
+0.932
+0.0196
+0.0733
+4.5. Policy-Level Zero-Shot Sim2Real Transfer
+We test whether Taco supports transfer of language-conditioned force levels to the physical robot when task-
+specific policy training uses no real-robot samples. Each policy is initialized from a pretrained VLA and adapted
+using simulation data only. After Real2Sim calibration, the same adapted policy, language conditions, and
+controller are used in the aligned simulation (Sim) and on the physical robot (Sim2Real). The force regimes are
+changed during simulation data generation, while the robot evaluation measures whether the corresponding
+force level is reproduced. Real tactile observations used for simulator and observation-mapping calibration
+are separate from policy optimization. Simulation evaluation uses random seeds different from those used
+for training; objects are placed manually for real-robot evaluation. Following the paired evaluation protocol
+of PolaRiS Jain et al. (2026), the two evaluations share the same task set, language instructions, controller
+settings, and termination criteria. For every policy we report the mean success rate (Mean SR), averaged
+over the firm (F) and gentle (G) conditions and over the three tasks, and the average grip force the policy
+predicts. The reference is the human teleoperation label: for task 𝑡and force level 𝑥∈{F, G}, the teleoperation
+21
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Fig. 9. Milk-carton grasping and placement in reality and simulation. Eight time-aligned observations show
+the real and simulated third-person views, wrist-camera views, and left/right tactile pads as the robot grasps
+and places a milk carton.
+demonstrations define AGteleop
+𝑥,𝑡
+, the average grip force the operator applies under the same instruction. We
+define the signed prediction deviation
+∆𝑥,𝑡= AGpre
+𝑥,𝑡−AGteleop
+𝑥,𝑡
+,
+(13)
+so that ∆> 0 means the policy predicts a firmer grasp than the human label and ∆< 0 a gentler one. All
+deviations in this section use the predicted force pre to assess agreement with the teleoperation reference.
+Measured forces (meas) and controller tracking are evaluated separately in Section 4.6. Each model contributes
+six deviations defined by Eq. (13) per domain, covering three tasks and two force levels. Table 4 reports their
+mean absolute deviation:
+¯∆= 1
+6
+∑︁
+𝑥∈{F,G}
+∑︁
+𝑡
+|∆𝑥,𝑡|.
+The two variants without force supervision, None and Img (Img uses a tactile image but has no force supervision),
+did not solve the evaluated tasks in either domain (Mean SR 0), and neither provided a force reading. Among
+the tactile policies with force supervision, Force D+FS attains the highest Mean SR, followed by Field+FS (𝜋0.5,
+no state input, NS) and Force E+FS; Field+FS (𝜋0) is lowest because it fails almost all Vitasoy episodes.
+In simulation, every tactile model has a mean absolute deviation within 1.4 N, indicating predictions close to
+the teleoperation labels.
+4.6. Crossing the Sim2Real Gap
+Following SIMPLER and PolaRiS Jain et al. (2026); Li et al. (2025b), we quantify the faithfulness of the
+simulated evaluation with the Pearson correlation and the Mean Maximum Rank Violation (MMRV) between
+the Sim2Real and Sim scores, computed across the eight policy variants evaluated in both domains: the
+22
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Table 4: Predicted grip force against the human teleoperation label. Mean SR (%) averages the firm (F) and
+gentle (G) success rates over the three tasks. ¯∆is the mean absolute deviation |AGpre −AGteleop| over the
+three tasks and both force levels, in N; larger ¯∆means the predicted force departs further from the human
+label. Sim evaluates the adapted policy in the aligned simulation; Sim2Real evaluates it on the physical robot.
+A dash marks a policy with no force reading; None and Img fail both conditions in both domains. For Field+FS
+(𝜋0) on the robot, the Vitasoy gentle condition has no completed episode, so its ¯∆averages the five remaining
+cells. The table uses AG as its force metric and omits MG.
+Sim2Real
+Sim
+Model
+Mean SR (%) ↑
+¯Δ (N) ↓
+Mean SR (%) ↑
+¯Δ (N) ↓
+None (𝜋0.5)
+0
+–
+0
+–
+Img (𝜋0, 𝑤=0)
+0
+–
+0
+–
+Force D+FS (𝜋0)
+98.3
+3.63
+99.0
+0.62
+Force E+FS (𝜋0)
+92.5
+1.35
+98.0
+0.94
+Field+FS (𝜋0)
+67.5
+0.90
+69.3
+0.47
+Field+FS (𝜋0.5, state)
+82.5
+4.12
+89.0
+0.78
+Field+FS (𝜋0.5, no state)
+96.7
+1.14
+96.7
+1.38
+Img+FS (𝜋0.5, no state)
+88.3
+1.12
+95.7
+1.11
+Table Notes: ¯Δ is computed from predicted forces (pre). Averaging absolute deviations prevents positive and negative errors from
+canceling across force conditions. Both simulation and real-robot AG use the sum of the left and right fingertip-force magnitudes described
+in Section 4. The remaining Img+FS (𝜋0.5) variants are evaluated in simulation only and reported under the force-separation metric in
+Appendix C.3.
+seven tactile variants with paired Sim and Sim2Real scores, together with the 𝜋0.5 baseline under the position-
+controlled gripper system. We use the success-only score, Mean SR. Fig. 10 reports 𝑟= 0.998 and MMRV= 0.010:
+the success ordering transfers almost perfectly. Excluding the two baselines with zero success yields 𝑟= 0.961,
+which still indicates a strong correlation.
+Fig. 10 also places this agreement alongside recent sim-to-real evaluations. PolaRiS (Jain et al., 2026)
+reports 𝑟= 0.83, and its published comparison reports an MMRV of 0.23 for Ctrl-World (Jain et al., 2026).
+OpenViTac (Wu et al., 2026) reports 𝑟= 0.967 and MMRV= 0.006 across seven methods and eight shared
+tasks; SimFoundry (Ranawaka et al., 2026) reports 𝑟= 0.911 and MMRV= 0.018 across seven tasks and five
+policy families; SceneRig (Luo et al., 2026) reports 𝑟= 0.92 and MMRV= 0.04 across ten policy-task pairs.
+These values provide context; differences in task suites, policy pools, and scoring protocols preclude direct
+comparison.
+Table 5 reports measured AG in both domains for the four policies with the highest success rates, together with
+the per-task gap AGmeas
+Sim −AGmeas
+S2R ; a positive gap means that the simulation measures a firmer grasp than
+the robot. Although the field- and image-based 𝜋0.5 NS policies trail the force-based models in success, their
+transfer results are smaller in the reference metrics. The measured values also differ from the predicted values;
+we attribute this difference to the gripper controller parameters.
+4.7. Execution of Force-Position Control
+To isolate the contribution of the low-level controller from the high-level policy, we evaluate on a mixture of the
+Tabero Dataset A and Taco special-task data, with 30 demonstrations per task collected by teleoperation. In
+Tabero, we use the best-performing Field+FS model and conduct four ablation studies on the gripper controller:
+(a) full force with hybrid control, (b) reduced force with hybrid control, (c) reduced force without feedforward
+term, and (d) reduced force without admittance component. Panels (a)–(d) of Fig. 11 demonstrate that both
+feedforward and admittance terms are essential for accurate force tracking; without closed-loop control, objects
+23
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Table 5: Measured grip force in simulation and on the robot for the four policies with the highest task success
+rates. S2R = Sim2Real; NS = no state input. F SR/G SR = firm/gentle success rate (%); F AG/G AG =
+measured average grip force (N); Gap = Sim −Sim2Real, so a positive value means the simulation measures a
+firmer grasp than the robot. The Mean row averages each column over the three tasks. Both simulation and
+real-robot AG are computed from the sum of the left and right fingertip-force magnitudes. Real-robot values
+are obtained from the Xense software development kit (SDK) and are subject to sensor estimation error.
+Sim
+Sim2Real
+Gap (Sim−S2R)
+Model
+Task
+F SR
+G SR
+F AG
+G AG
+F SR
+G SR
+F AG
+G AG
+F AG
+G AG
+Force D+FS (𝜋0)
+Vitasoy
+98.0
+96.0
+25.29
+9.00
+100.0
+100.0
+19.66
+13.23
++5.63
+-4.23
+Coca-Cola
+100.0
+100.0
+7.73
+4.54
+100.0
+100.0
+7.95
+6.42
+-0.22
+-1.88
+Cookie
+100.0
+100.0
+24.53
+7.46
+90.0
+100.0
+6.87
+6.27
++17.66
++1.19
+Mean
+99.3
+98.7
+19.18
+7.00
+96.7
+100.0
+11.49
+8.64
++7.69
+-1.64
+Force E+FS (𝜋0)
+Vitasoy
+98.0
+94.0
+26.42
+10.27
+100.0
+90.0
+10.81
+5.72
++15.61
++4.55
+Coca-Cola
+96.0
+100.0
+7.80
+4.70
+100.0
+100.0
+10.03
+8.25
+-2.23
+-3.55
+Cookie
+100.0
+100.0
+25.13
+8.22
+70.0
+95.0
+7.55
+3.08
++17.58
++5.14
+Mean
+98.0
+98.0
+19.78
+7.73
+90.0
+95.0
+9.46
+5.68
++10.32
++2.05
+Field+FS (𝜋0.5, NS)
+Vitasoy
+98.0
+94.0
+27.23
+10.05
+85.0
+95.0
+20.14
+10.29
++7.09
+-0.24
+Coca-Cola
+100.0
+100.0
+7.80
+4.74
+100.0
+100.0
+8.12
+7.47
+-0.32
+-2.73
+Cookie
+94.0
+94.0
+25.58
+8.43
+100.0
+100.0
+18.56
+10.37
++7.02
+-1.94
+Mean
+97.3
+96.0
+20.20
+7.74
+95.0
+98.3
+15.60
+9.38
++4.60
+-1.64
+Img+FS (𝜋0.5, NS)
+Vitasoy
+88.0
+88.0
+26.47
+10.69
+90.0
+80.0
+13.05
+10.60
++13.42
++0.09
+Coca-Cola
+100.0
+100.0
+7.78
+5.10
+100.0
+100.0
+10.46
+7.01
+-2.68
+-1.91
+Cookie
+100.0
+98.0
+25.36
+8.48
+80.0
+80.0
+18.90
+10.59
++6.46
+-2.11
+Mean
+96.0
+95.3
+19.87
+8.09
+90.0
+86.7
+14.14
+9.40
++5.73
+-1.31
+Fig. 10. Cross-domain agreement of simulated evaluations. (a) Pearson correlation between simulated
+and real-robot scores, higher is better; (b) Mean Maximum Rank Violation (MMRV), lower is better. Across
+eight policy variants, the success-only score gives 𝑟= 0.998 and MMRV= 0.010. Literature bars: PolaRiS
+𝑟= 0.83 (Jain et al., 2026), Ctrl-World MMRV= 0.23 (Jain et al., 2026), OpenViTac 𝑟= 0.967/MMRV=
+0.006 (Wu et al., 2026), SimFoundry 𝑟= 0.911/MMRV= 0.018 (Ranawaka et al., 2026), and SceneRig
+𝑟= 0.92/MMRV= 0.04 (Luo et al., 2026). Each literature value is reported on the corresponding benchmark
+and provides context only. Differences in task suites, policy pools, and scoring protocols preclude direct
+comparison.
+slip, causing task failure. Fig. 12 defines the base, end-effector, TCP, and tactile-sensor frames used to express
+these forces.
+We train and test the same marker-field model used in the preceding evaluation, Field+FS (𝜋0.5, no state),
+24
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+(a) 100% force
+(b) 25% force
+(c) 25%, no feedforward
+(d) 25%, no admittance
+(e) Blackboard 𝐹𝑧, off
+(f) Blackboard 𝐹𝑧, on
+(g) Card 𝐹𝑥, off
+(h) Card 𝐹𝑥, on
+(i) Card 𝐹𝑧, off
+(j) Card 𝐹𝑧, on
+(k) Fan 𝜏𝑧, off
+(l) Fan 𝜏𝑧, on
+Fig. 11. Gripper force control. Predicted (blue) and measured (red) forces; shaded bands show run-to-run
+standard deviation. (a)–(d) Simulated gripper-controller ablations: (a) full force under hybrid control; (b)
+reduced force under hybrid control; (c) reduced force without the feedforward term; (d) reduced force without
+the admittance term; GF denotes grip force and Slip marks object loss. (e)–(l) The same controller on the real
+robot: blackboard wiping (𝐹𝑧), card swiping (𝐹𝑥and 𝐹𝑧), and fan-knob turning (𝜏𝑧), each with the loop off
+and on; AF denotes applied force in the TCP panels. With the loop on, the measured force tracks the predicted
+command closely; with the loop off, the two diverge, and the card and fan trials drift off the trajectory.
+TCP {C}
+𝒚𝑪
+𝒛𝑪
+𝒚𝑹
+𝒙𝑪
+𝒛𝑹
+Base {B}
+EEF {E}
+Tactile {R}
+𝒙𝑩
+𝒚𝑬
+Tactile {L}
+Tactile {R}
+Tactile {L}
+𝒚𝑩
+𝒛𝑩
+𝒛𝑬
+𝒙𝑬
++𝒙𝑬
+𝒛𝑬
+𝒚𝑬
+𝒙𝑬
+EEF {E}
+𝒙𝑳𝒛𝑳
+𝒚𝑳
+𝒙𝑹
+⊙
+⊗
+⊗
+⊗
+Fig. 12. Coordinate frames used by the force controller. The robot base {𝐵}, end-effector {𝐸}, TCP {𝐶},
+and left and right tactile-sensor {𝐿}, {𝑅} frames. The figure’s TCP label {𝐶} corresponds to frame 𝑇in the
+text and is distinct from the Quest controller frame 𝐶; {𝐿} and {𝑅} correspond to 𝑆𝐿and 𝑆𝑅. TCP forces are
+expressed in 𝑇, and the grip force is computed from the sensor-frame contact reactions.
+25
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+on three new real-robot tasks: blackboard wiping, card swiping, and knob turning. Appendix B.2 defines
+their task-level success-score criteria, and Fig. 13 presents the test results judged by these criteria together
+with illustrative process frames. Blackboard wiping requires controlling the downward pressure along the
+𝑧-axis, card swiping requires maintaining a stable downward force along 𝑧and a normal applied force along 𝑥,
+and knob turning requires controlling the torsional torque. Panels (e)–(l) of Fig. 11 show the force-tracking
+performance for the three tasks under closed-loop-on and closed-loop-off conditions, with 10 trials per condition.
+With the closed-loop controller on, the measured TCP force stays closer to the predicted command, most clearly
+where the command changes fastest, and the overall task success score is higher; disabling the controller
+reduces tracking accuracy and task scores. Blackboard wiping drops to zero, and card swiping falls from 7 to 3
+points. Knob turning is less affected because gripper motion is relatively fixed and contact is concentrated on
+one side, although panels (k) and (l) of Fig. 11 still show the difference in tracking.
+Fig. 13. Real-robot task expansion. One row per task shows eight keyframes selected in time order and spaced
+so that adjacent frames show different stages of the motion. Scores at left are on a 10-point scale, computed
+over 10 trials for Field+FS (𝜋0.5, no state) with the loop on and off, using the scoring criteria in Appendix B.2.
+4.8. Data Synergy
+We evaluate whether the data augmentation and joint post-training workflow in Section 3.4.3 can combine the
+complementary strengths of sources with different costs and volumes. Teleoperation data cover fixed positions
+and objects. UMI data add variation in object position and approach path while retaining the same objects.
+Simulation data introduce variation in object instances or appearance at aligned task positions. Increasing the
+volume of a single source therefore increases sample density within its existing coverage; it does not directly add
+positions or object states absent from that source. Teleoperation data take longer to collect than UMI data, and
+simulation data have the lowest cost. Each data unit consists of 30 demonstrations for each of the six Taco base
+tasks, and each policy is trained directly on mixtures of different numbers of units using the same coordinate
+system, observation, action, timestep, and normalization interfaces. In the object-randomization tests, the
+physical objects differ entirely from the simulation training objects, as illustrated in Fig. 14; Appendix B.3 details
+the test setup. Table 6 reports six training mixes (only real, only umi, real+umi (1:1), sim+umi (5:1), real+sim
+(1:5), and real+sim+umi (1:5:1)) on the six original tasks, evaluated under position randomization and
+position+object randomization. All entries are firm/gentle success rates and the average grip force predicted
+by the policy on held-out real-robot scenes.
+Fig. 14 shows examples of the simulation training objects and real-robot test objects used to evaluate object
+generalization.
+26
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+(a) Simulation training objects
+(b) Real-robot test objects
+Fig. 14. Objects used for mixed-data evaluation. Simulation training assets (left) and physical test objects
+(right).
+Table 6: Co-training results for teleoperation, simulation, and UMI data on the six original tasks with back-
+ground disturbances. Each mix is evaluated under two randomization settings: position randomization, and
+position+object randomization. Training mixes are given as relative sample volumes; the UMI share is Tacumi
+demonstrations with object positions randomized within a range. F SR/G SR = success rates under firm/gentle
+force, reported as fractions; F AG/G AG = predicted average grip force (N) commanded by the policy, before
+real-robot tracking. A dash marks a condition with no recorded value. Bold and underlined values indicate the
+best and second-best results, respectively.
+Position
+randomized
+Position + object
+randomized
+Training Mix
+F SR
+G SR
+F AG (N)
+G AG (N)
+F SR
+G SR
+F AG (N)
+G AG (N)
+only real
+0.300
+0.333
+13.52
+7.81
+0.200
+0.200
+13.71
+9.17
+only umi
+0.000
+–
+–
+–
+0.000
+–
+–
+–
+real+umi (1:1)
+0.833
+0.700
+17.96
+8.44
+0.100
+0.100
+13.36
+10.60
+sim+umi (5:1)
+0.700
+0.633
+21.47
+9.15
+0.400
+0.400
+24.66
+9.34
+real+sim (1:5)
+0.433
+0.367
+21.57
+9.73
+0.200
+0.400
+25.84
+8.27
+real+sim+umi (1:5:1)
+0.567
+0.833
+22.04
+10.47
+0.600
+0.600
+24.08
+13.32
+Key findings.
+UMI-only training fails in the evaluated low-data setting, with 0% success under the firm condition in both
+randomization settings. UMI demonstrations contribute when combined with teleoperation or simulation
+trajectories, supporting their role as a source of spatial variation in mixed-data training. Under position
+randomization, every multi-source mixture improved on the real-only baseline. Mean success was highest for
+real+umi, whose data most closely match the test scenarios, followed by real+sim+umi. Adding UMI to real
+data raised firm success from 30.0% to 83.3% and gentle success from 33.3% to 70.0%. Under position+object
+randomization the ordering changed: real+umi and real-only both showed substantial drops, indicating that
+the distribution shift makes out-of-distribution tasks difficult, whereas sim+umi reached 40.0% mean success,
+real+sim 30.0%, and real+sim+umi 60.0%. The three-source mixture improved mean success over real-only
+by 38.3 and 40.0 percentage points in the two settings, the only multi-source mix with a mean gain above 30
+points in both settings. These results reflect the complementary coverage of the sources: UMI demonstrations
+supply object-position and approach variation, simulation supplies object-appearance and background variation,
+and real trajectories anchor the sensor and actuator statistics. Data volume also matters, but the setup and
+results of real+sim show that the capability gain does not rely solely on more data; the characteristics and
+diversity of the data themselves matter more.
+Every mixture with recorded force statistics predicts a higher mean force under firm than under gentle
+27
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+instructions in both settings. We attribute the larger separation mainly to increased data volume. In particular,
+adding substantial simulation data brings the force predictions closer to the original teleoperation labels.
+The three data sources form a data pyramid that balances data efficiency and collection effort. Their combination
+increases mean success on held-out real-robot tasks with randomized positions and out-of-distribution objects
+from 20.0% to 60.0%. In this low-data setting, UMI-only training fails, while UMI data are more effective
+when combined with other sources. The sim+umi mixture also performs well under randomized conditions
+without teleoperation data. These results demonstrate complementary contributions from the three sources
+and improved task performance through co-training with limited data.
+5. Conclusions
+We present Tacinf, a modular infrastructure for tactile foundation models in force-aware manipulation. Its
+policy interface predicts actions and fingertip-force targets from task language, vision, and touch, with optional
+language-conditioned force levels for tasks that require explicit force regulation. Our ablations distinguish
+the roles of force-target supervision, high-level tactile observations, and feedback during execution. In the
+evaluated simulation setting, force supervision and the force-target interface account for the main performance
+gains, while some tactile representations further improve task performance. Real-robot controller experiments
+demonstrate how feedback contributes to force tracking and task execution. Policies adapted solely on simulation
+data transfer to the real robot without further policy fine-tuning. Across eight paired policy variants and six
+task conditions (three tasks, each with firm and gentle force levels), simulation closely preserves the real-robot
+ranking by success rate, with a small gap in the reported force metrics. Co-training on teleoperation, simulation,
+and UMI data balances data efficiency and collection effort. The three-source mixture increases mean success
+on held-out real-robot tasks with randomized positions and out-of-distribution objects from 20.0% to 60.0%;
+this gain cannot be attributed solely to increased data volume. In this low-data setting, UMI-only training fails,
+but UMI data are more effective when combined with other sources. The sim+umi mixture also performs well
+under randomized conditions without teleoperation data.
+Limitations. Resource constraints limit the scale of the datasets and tasks in this study, and we do not evaluate
+large-scale training. Future work will expand the data pyramid and extend the system to additional robot
+embodiments and bimanual manipulation.
+28
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+A. Training and Interface Contract
+Detailed training hyperparameters and model configurations, including the complete configuration of each
+variant, will be released with the code. Table 7 lists the tactile input variants used in the ablations. The Xense
+values reported in this paper describe the observation interface available to the policy; they do not constitute a
+mechanically validated characterization of the sensor.
+Table 7: Tactile input variants used in the ablations. “Prefix” and “suffix” denote the injection location in the
+backbone; “FS” denotes force supervision.
+Variant
+Visual streams
+Tactile stream
+Adapter
+FS
+Img+FS
+3
+–
+–
+yes
+Img
+3
+–
+–
+no
+Force D+FS
+2
+suffix
+MLP
+yes
+Force E
+2
+prefix
+MLP
+no
+Force E+FS
+2
+prefix
+MLP
+yes
+Field+FS
+2
+prefix
+TCN
+yes
+Field
+2
+prefix
+TCN
+no
+FS
+2
+–
+–
+yes
+None
+2
+–
+–
+no
+B. Task Protocol
+B.1. Language-Conditioned Force Protocol
+For each base instruction, force-related adverbs are inserted either before or after the verb phrase and the
+insertion position is randomized. The in-domain pairs are “firmly/tightly” for the high-force condition and
+“gently/softly” for the low-force condition. Unseen adverbs such as “lightly” and “forcefully” are reserved for
+the generalization test and never enter training. Table 8 gives example templates.
+Table 8: Example instruction templates for force-language conditioning.
+Template
+Instruction
+Prefix-high
+firmly pick up the alphabet soup and place it in the basket
+Suffix-high
+pick up the alphabet soup and place it in the basket tightly
+Prefix-low
+softly pick up the alphabet soup and place it in the basket
+Suffix-low
+pick up the alphabet soup and place it in the basket gently
+The Tabero subset contains the nine base tasks listed in Table 9. The force adverbs are applied to every task
+using the protocol above.
+B.2. Task-Specific Success Criteria
+Blackboard Wiping.
+The score is computed from the amount of handwriting remaining after the wipe, compared against the
+demonstration data. If the residue reaches the level observed in human demonstrations, the score is 1; if minor
+residue remains (less than one third of the handwriting length), the score is 0.5; if significant residue remains,
+the score is 0.
+29
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Table 9: Base tasks in the Tabero subset.
+ID
+Task description
+0
+pick up the alphabet soup and place it in the basket
+1
+pick up the cream cheese and place it in the basket
+2
+pick up the salad dressing and place it in the basket
+3
+pick up the bbq sauce and place it in the basket
+4
+pick up the tomato sauce and place it in the basket
+5
+pick up the butter and place it in the basket
+6
+pick up the milk and place it in the basket
+7
+pick up the chocolate pudding and place it in the basket
+8
+pick up the orange juice and place it in the basket
+Card Swiping.
+A trial is considered successful when the card traverses the predefined path in the intended direction while
+remaining functionally engaged with the slot and correctly oriented. The card need not remain in contact
+with the bottom of the slot, but its lower edge should stay within the vertical range observed in human
+demonstrations. The swipe should proceed continuously, without sustained pauses or substantial reverse
+motion.
+Knob Turning.
+A trial is considered successful when the gripper maintains stable bilateral contact with the knob and continu-
+ously drives it with approximately steady rotational motion. Knob rotation should remain coupled with the
+end-effector motion throughout the manipulation. Fingertip slip or gripper rotation without corresponding knob
+motion is considered a failure. Rotation produced primarily through unilateral tangential pushing, incidental
+collision, or sliding against the knob is likewise treated as a failure. Minor variations in gripper position and
+orientation are acceptable if they remain within the demonstration-derived range.
+B.3. Position and Object Randomization Protocol
+The real-robot evaluation in Section 4.8 comprises six Taco tasks: three with randomized initial object positions
+and three with both randomized initial positions and object instances (Fig. 15).
+30
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+(a) Position randomization
+(b) Position and object randomization
+Fig. 15. Randomized task configurations. (a) Position variation with the original Vitasoy, Coca-Cola, and
+cookie objects. (b) Joint position and object variation. The basket remains the placement goal in both settings.
+B.4. Additional VR Teleoperation Tasks
+The six additional tabletop tasks we recorded using VR teleoperation were folding a towel diagonally, fitting a
+lid onto a box, writing on a mat with a brush, inserting a brush into a test tube, plugging a power adapter into
+a power strip, and inserting a USB plug into the strip’s USB port (Fig. 16).
+31
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Fig. 16. VR teleoperation demonstrations. Each row shows eight frames from one third-person recording,
+ordered from left to right with two frames per stage.
+C. Supplementary Evaluation
+C.1. Retention Summary
+We define retention as the fraction of replay episodes that complete the task successfully, 𝑅= 𝑁𝑠/𝑁𝑡, where
+𝑁𝑠is the number of episodes that complete the task and 𝑁𝑡is the number of replayed episodes.
+C.2. Semantic-Force Generalization
+Table 10 presents the in-domain and out-of-domain adverb evaluation.
+Table 10: Semantic-force understanding on Dataset B. Force values are in N.
+Adverb
+SR
+AG
+AA
+MG
+MA
+firmly, tightly
+0.86
+32.4
+1.5
+62.7
+6.9
+gently, softly
+0.52
+3.7
+0.4
+11.4
+5.1
+lightly (OOD)
+0.61
+14.5
+0.8
+40.8
+7.6
+forcefully (OOD)
+0.64
+18.1
+0.9
+49.7
+6.3
+This evaluation characterizes the relationship between language and force; it does not calibrate absolute
+force magnitudes.
+32
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+C.3. Img+FS Variants
+Table 11 reports the remaining Img+FS (𝜋0.5) variants under simulation.
+Table 11: Additional Img+FS (𝜋0.5) variants under simulation. The last column is the simulated firm–gentle
+force separation F AG −G AG.
+Model
+Sim SR (%)
+F AG −G AG (N)
+Img+FS (state)
+86.35
+16.21
+Img+FS (no state)
+90.65
+13.55
+Img+FS (state, 𝐻= 1)
+91.70
+16.74
+Img+FS (no state, 𝐻= 1)
+95.65
+15.39
+C.4. Sensor Measurement Validation
+The force components reported by each Xense fingertip sensor depend on contact location, contact asymmetry,
+and sensor estimation error. A single sensor’s output therefore cannot be treated as precise fingertip-force
+ground truth. We use the manufacturer’s SDK estimates and sum the left and right force magnitudes to obtain
+a bilateral grip-force proxy on the real robot. The grasp configurations in Fig. 17 are used to check whether
+this proxy varies plausibly with contact state.
+Fig. 17 compares the SDK-estimated resultant force components across five grasp configurations, some of which
+exhibit asymmetry between the fingertips. AG is computed using the approximation in Eq. (3). We therefore
+use real-robot force values to compare relative trends and changes in feedback during control.
+B
+A
+Left
+Right
+Left
+Right
+C
+Left
+Right
+D
+Left
+Right
+E
+Left
+Right
+(a) Grip force
+(b) Left sensor
+(c) Right sensor
+AG (N)
+Fig. 17. Fingertip force measurements. Top: configurations A–E and paired tactile images. Bottom: (a) grip
+force (AG), computed according to Eq. (3); (b,c) time-averaged components of the resultant force reported by
+the left and right tactile sensors.
+33
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+C.5. UMI Data Distribution Validation
+Fig. 18 compares UMI and teleoperation trajectories for three manipulation tasks. The comparison shows
+overlapping task paths and additional spatial variation in the UMI demonstrations.
+Fig. 18. Spatial coverage of UMI and teleoperation demonstrations. Rows: Vitasoy, Coca-Cola, and cookie
+tasks. Columns: UMI, teleoperation, and their overlay. Curves show trajectory projections onto the 𝑋–𝑌plane.
+Purple denotes teleoperation and green denotes UMI; color shade encodes height 𝑍. All coordinates are in
+millimeters.
+D. Tactile Real2Sim Calibration
+We calibrate the tactile observation interface for contact onset, patch persistence, force scale, marker response,
+and channel and temporal conventions.
+D.1. Depth-to-Indentation Mapping
+At each tactile update, the camera produces a depth map 𝐷(𝑢, 𝑣) in meters. We express the same map in
+millimeters as 𝑍(𝑢, 𝑣) = 1000 𝐷(𝑢, 𝑣). Let 𝑑min = min𝑢,𝑣𝐷(𝑢, 𝑣), 𝑑ref be the camera-to-gel reference distance,
+and ℎ𝑔the effective gel thickness, all in meters. The distance offset 𝛿(meters) and shared indentation depth
+ℎin (millimeters) are
+𝛿= max(0, 𝑑min −𝑑ref) ,
+ℎin =
+{︃
+(ℎ𝑔−𝛿) 1000,
+𝛿≤ℎ𝑔,
+0,
+𝛿> ℎ𝑔.
+(14)
+The estimated indentation is positive when 𝑑min < 𝑑ref + ℎ𝑔and saturates at 1000ℎ𝑔for 𝑑min ≤𝑑ref. The
+relative depth field used to compute gel deformation is 𝑍′(𝑢, 𝑣) = 𝑍(𝑢, 𝑣) −min𝑢,𝑣𝑍(𝑢, 𝑣) −ℎin.
+34
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+D.2. Taxim and FOTS Interface
+Taxim Si and Yuan (2022) uses calibrated polynomials to map local gradients of the deformed gel and normalized
+image positions to RGB intensity changes, which are added to the real no-contact background. Pixels outside
+the contact mask retain the background. The output uses RGB ordering and no additional shadow term.
+FOTS Zhao et al. (2024) uses the same relative depth field 𝑍′ and derived contact mask to approximate normal
+expansion, shear, and planar torsion with Gaussian spatial decay kernels
+𝑔𝑘(𝑥, 𝑦) = exp
+[︀
+−𝜆𝑘
+(︀
+(𝑥−𝑐𝑥)2 + (𝑦−𝑐𝑦)2)︀]︀
+,
+(15)
+where marker positions (𝑥, 𝑦) and kernel centers (𝑐𝑥, 𝑐𝑦) are in image coordinates, and 𝜆𝑘controls the decay
+of component 𝑘. Contact-centroid changes provide the tangential cue, and relative sensor-object yaw provides
+the rotational cue. Marker displacements are expressed in sensor image coordinates. With zero indentation,
+the trajectory is cleared and markers return to their reference grid.
+D.3. Calibration and Scope
+The calibration bundle contains the real no-contact background, polynomial coefficients fitted for each gradient
+bin using real sphere-contact images, and the gel reference map. Camera geometry, pad dimensions, marker
+scale, spatial decay coefficients, and update settings are specified in the released simulator configuration. The
+virtual camera pose and depth clipping range align simulated observations with the operating depth range.
+They do not specify the physical sensor’s internal geometry.
+Policy observations follow the 20 Hz sampling convention and configured history length 𝐻. Force labels for the
+Taxim-FOTS backend come from Isaac contact sensors and follow Eq. (4); real-robot force measurements use
+the manufacturer’s Xense calibration.
+E. Tacinf-Tacumi Calibration and Synchronization
+This section describes the spatial calibration and temporal convention of the handheld data collection system in
+Section 3.3. Spatial calibration maps the tracked Quest controller pose to the gripper center, while a common
+host time base relates the visual, tactile, pose, and motor-state streams.
+E.1. Hand-Eye Calibration
+We estimate the rigid transformation between the Quest controller frame and the gripper-center frame using a
+robot-assisted optical hand-eye calibration procedure. The controller is rigidly mounted on the robot, and 20
+paired poses are collected from the Quest tracking system and the robot. The gripper center defines the TCP
+frame 𝑇used for the recorded manipulation trajectory. This calibration follows the geometric formulation used
+in controller-based handheld acquisition Li et al. (2025a).
+Fig. 19 illustrates the calibration setup and the coordinate-frame relationships.
+Let 𝑊, 𝐵, 𝐶, and 𝑇denote the Quest tracking reference frame, robot base frame, controller frame, and
+gripper-center TCP frame, respectively. A transformation T𝐴
+𝐵maps coordinates from frame 𝐵to frame 𝐴. For
+calibration pose 𝑖, let Q𝑖= T𝑊
+𝐶,𝑖be the tracked controller pose and P𝑖= T𝐵
+𝑇,𝑖be the corresponding robot-side
+pose expressed at the TCP. The unknown fixed extrinsic X = T𝐶
+𝑇between the TCP and controller frames and
+the fixed reference-frame transformation Z = T𝑊
+𝐵satisfy
+Q𝑖X = ZP𝑖,
+𝑖= 1, . . . , 20.
+(16)
+35
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Fig. 19. Hand-eye calibration setup and coordinate frames of Tacinf-Tacumi. The Quest controller is
+rigidly mounted with the gripper on an xArm 7. The magenta curve marks the fixed transform between the
+gripper-center TCP (labeled 𝐶) and the VR controller (labeled Vc). In the calibration equations, 𝑇denotes the
+TCP frame, 𝐶the controller frame, and 𝑊the Quest tracking frame labeled Vw in the figure. The robot base
+is labeled 𝐵.
+Eliminating Z between two observations in Eq. (16) yields the relative-motion hand-eye equation
+Q−1
+𝑗Q𝑖
+⏟ ⏞ 
+A𝑗𝑖
+X = X P−1
+𝑗P𝑖
+⏟ ⏞ 
+B𝑗𝑖
+,
+(17)
+which has the standard form AX = XB. We solve for the fixed transformation X in Eq. (17) from the
+collected pose pairs. The notation assumes that the two pose streams are expressed using consistent coordinate
+conventions and length units.
+During handheld collection, the calibrated transformation converts each controller pose to the TCP pose as
+T𝑊
+𝑇(𝑡) = T𝑊
+𝐶(𝑡)X, matching the TCP transformation in Section 3.3. This mapping accounts for both the
+translational offset and rotational alignment between the controller and the grasping tool. The calibration
+remains applicable while their relative mounting geometry is unchanged; changing that geometry requires
+updating the extrinsic transformation.
+E.2. Multimodal Temporal Synchronization
+The collection system acquires Quest controller poses, visual images, tactile observations, and gripper motor
+states at different native rates, as summarized in Table 12. Timestamps for all four streams are generated on
+the same host computer, providing a common temporal reference for recording the demonstrations.
+For modality 𝑚, the recorded stream is represented as 𝒟𝑚= {(𝑡𝑚,𝑘, z𝑚,𝑘)}𝑘, where 𝑡𝑚,𝑘is the host-generated
+timestamp and z𝑚,𝑘denotes the corresponding measurement. Because the sampling rates differ, sample indices
+do not directly identify simultaneous observations across modalities. The shared timestamp reference provides
+the basis for associating gripper motion and motor state with visual and tactile observations.
+A common host time base establishes timestamp comparability but does not by itself establish simultaneous
+physical acquisition. Sensor acquisition, transport, and buffering can introduce modality-dependent delays; prior
+handheld systems explicitly distinguish timestamp alignment from per-modality latency compensation Li et al.
+36
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Table 12: Native acquisition rates of Tacinf-Tacumi. All streams use timestamps generated on the same host
+computer. These are data acquisition rates; policy execution uses a separate frequency.
+Data stream
+Acquisition rate (Hz)
+Quest controller pose
+72
+Visual camera
+30
+Tactile sensor
+100
+Gripper motor state
+200
+(2025a). Accordingly, the common-clock convention described here does not imply a measured synchronization-
+error bound.
+37
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+References
+Bo Ai, Stephen Tian, Haochen Shi, Yixuan Wang, Cheston Tan, Yunzhu Li, and Jiajun Wu. RoboPack: Learning
+Tactile-Informed Dynamics Models for Dense Packing. In Proceedings of Robotics: Science and Systems, Delft,
+Netherlands, 2024. doi: 10.15607/rss.2024.xx.130. URL https://doi.org/10.15607/rss.2024.xx.130.
+5
+Iretiayo Akinola, Jie Xu, Jan Carius, Dieter Fox, and Yashraj Narang. TacSL: A Library for Visuotactile Sensor
+Simulation and Learning. IEEE Transactions on Robotics, 41:2645–2661, 2025. doi: 10.1109/tro.2025.
+3547267. URL https://doi.org/10.1109/tro.2025.3547267. 3
+Manish Bhardwaj. Sensored field oriented control of 3-phase permanent magnet synchronous motors. Technical
+Report SPRABQ2, Texas Instruments, 2013. URL https://www.ti.com/lit/an/sprabq2/sprabq2.pdf. 12
+Jianxin Bi, Kevin Yuchen Ma, Ce Hao, Mike Shou Zheng, and Harold Soh. VLA-Touch: Enhancing Vision-
+Language-Action Model With Dual-Level Tactile Feedback. IEEE Robotics and Automation Letters, 11(7):
+8487–8494, 2026. doi: 10.1109/lra.2026.3692345. URL https://doi.org/10.1109/lra.2026.3692345.
+5
+Kevin Black, Noah Brown, James Darpinian, Karan Dhabalia, Danny Driess, Adnan Esmail, Michael Robert
+Equi, Chelsea Finn, Niccolo Fusai, Manuel Y. Galliker, Dibya Ghosh, Lachy Groom, Karol Hausman, brian
+ichter, Szymon Jakubczak, Tim Jones, Liyiming Ke, Devin LeBlanc, Sergey Levine, Adrian Li-Bell, Mohith
+Mothukuri, Suraj Nair, Karl Pertsch, Allen Z. Ren, Lucy Xiaoyang Shi, Laura Smith, Jost Tobias Springenberg,
+Kyle Stachowicz, James Tanner, Quan Vuong, Homer Walke, Anna Walling, Haohuan Wang, Lili Yu, and
+Ury Zhilinsky. 𝜋0.5: A Vision-Language-Action Model with Open-World Generalization. In Joseph Lim,
+Shuran Song, and Hae-Won Park, editors, Proceedings of The 9th Conference on Robot Learning, volume 305
+of Proceedings of Machine Learning Research, pages 17–40. PMLR, 2025a. URL https://proceedings.mlr.
+press/v305/black25a.html. 5, 8
+Kevin Black, Noah Brown, Danny Driess, Adnan Esmail, Michael Robert Equi, Chelsea Finn, Niccolo Fusai,
+Lachy Groom, Karol Hausman, Brian Ichter, Szymon Jakubczak, Tim Jones, Liyiming Ke, Sergey Levine,
+Adrian Li-Bell, Mohith Mothukuri, Suraj Nair, Karl Pertsch, Lucy Xiaoyang Shi, Laura Smith, James Tanner,
+Quan Vuong, Anna Walling, Haohuan Wang, and Ury Zhilinsky. 𝜋0: A Vision-Language-Action Flow Model
+for General Robot Control. In Proceedings of Robotics: Science and Systems, LosAngeles, CA, USA, 2025b. doi:
+10.15607/rss.2025.xxi.010. URL https://doi.org/10.15607/rss.2025.xxi.010. 5, 8, 11
+Baijun Chen, Weijie Wan, Tianxing Chen, Xianda Guo, Congsheng Xu, Yuanyang Qi, Haojie Zhang, Longyan
+Wu, Tianling Xu, Zixuan Li, Yizhe Wu, Rui Li, Xiaokang Yang, Ping Luo, Wei Sui, and Yao Mu. UniVTAC: A
+Unified Simulation Platform for Visuo-Tactile Manipulation Data Generation, Learning, and Benchmarking.
+CoRR, abs/2602.10093, 2026. URL https://arxiv.org/abs/2602.10093. 3
+Tianxing Chen, Zanxin Chen, Baijun Chen, Zijian Cai, Yibin Liu, Zixuan Li, Qiwei Liang, Xianliang Lin, Yiheng
+Ge, Zhenyu Gu, Weiliang Deng, Yubin Guo, Tian Nian, Xuanbing Xie, Qiangyu Chen, Kailun Su, Tianling
+Xu, Guodong Liu, Mengkang Hu, Huan-ang Gao, Kaixuan Wang, Zhixuan Liang, Yusen Qin, Xiaokang
+Yang, Ping Luo, and Yao Mu. RoboTwin 2.0: A Scalable Data Generator and Benchmark with Strong
+Domain Randomization for Robust Bimanual Robotic Manipulation. CoRR, abs/2506.18088, 2025. URL
+https://arxiv.org/abs/2506.18088. 3
+Tailai Cheng, Kejia Chen, Lingyun Chen, Liding Zhang, Yue Zhang, Yao Ling, Mahdi Hamad, Zhenshan Bing,
+Fan Wu, Karan Sharma, and Alois Knoll. TacUMI: A Multi-Modal Universal Manipulation Interface for
+Contact-Rich Tasks. CoRR, abs/2601.14550, 2026a. URL https://arxiv.org/abs/2601.14550. 5, 13
+38
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Zhengxue Cheng, Yiqian Zhang, Anni Tang, Keyu Wang, Wenkang Zhang, Haoyu Li, Hengdi Zhang, and
+Li Song. OmniVTLA: Vision-Tactile-Language-Action Models With Semantic-Aligned Tactile Sensing. IEEE
+Robotics and Automation Letters, 11(9):10146–10153, 2026b.
+doi: 10.1109/lra.2026.3710060.
+URL
+https://doi.org/10.1109/lra.2026.3710060. 5
+Cheng Chi, Zhenjia Xu, Chuer Pan, Eric Cousineau, Benjamin Burchfiel, Siyuan Feng, Russ Tedrake, and
+Shuran Song. Universal Manipulation Interface: In-The-Wild Robot Teaching Without In-The-Wild Robots.
+In Proceedings of Robotics: Science and Systems, Delft, Netherlands, 2024. doi: 10.15607/rss.2024.xx.045.
+URL https://doi.org/10.15607/rss.2024.xx.045. 4, 11, 13
+Hojung Choi, Yifan Hou, Chuer Pan, Seongheon Hong, Austin Patel, Xiaomeng Xu, Mark R. Cutkosky, and
+Shuran Song. In-the-Wild Compliant Manipulation with UMI-FT. CoRR, abs/2601.09988, 2026. URL
+https://arxiv.org/abs/2601.09988. 5, 8
+An Thanh Dang, Jayjun Lee, Mustafa Mukadam, X. Alice Wu, Bernadette Bucher, Manikantan Nambi, and
+Nima Fazeli. HydroShear: Hydroelastic Shear Simulation for Tactile Sim-to-Real Reinforcement Learning. In
+Proceedings of Robotics: Science and Systems, Sydney, Australia, 2026. doi: 10.15607/rss.2026.xxii.155. URL
+https://doi.org/10.15607/rss.2026.xxii.155. 4
+Shengliang Deng, Mi Yan, Songlin Wei, Haixin Ma, Yuxin Yang, Jiayi Chen, Zhiqi Zhang, Taoyu Yang, Xuheng
+Zhang, Heming Cui, Zhizheng Zhang, and He Wang. GraspVLA: a Grasping Foundation Model Pre-trained
+on Billion-scale Synthetic Action Data. In Joseph Lim, Shuran Song, and Hae-Won Park, editors, Proceedings
+of The 9th Conference on Robot Learning, volume 305 of Proceedings of Machine Learning Research, pages
+1004–1029. PMLR, 2025. URL https://proceedings.mlr.press/v305/deng25a.html. 3
+Ruoxuan Feng, Jiangyu Hu, Wenke Xia, Tianci Gao, Ao Shen, Yuhao Sun, Bin Fang, and Di Hu.
+Any-
+Touch: Learning Unified Static-Dynamic Representation across Multiple Visuo-tactile Sensors. In Y. Yue,
+A. Garg, N. Peng, F. Sha, and R. Yu, editors, International Conference on Learning Representations, volume
+2025, pages 31265–31285, 2025. URL https://proceedings.iclr.cc/paper_files/paper/2025/file/
+4d893f766ab60e5337659b9e71883af4-Paper-Conference.pdf. 5
+Ruoxuan Feng, Yuxuan Zhou, Siyu Mei, Dongzhan Zhou, Pengwei Wang, Shaowei Cui, Bin Fang, Guocai Yao,
+and Di Hu. AnyTouch 2: General Optical Tactile Representation Learning For Dynamic Tactile Perception.
+In C. Vondrick, B. Hariharan, C. Raffel, L. Pinto, D. Yang, and A. Faust, editors, International Conference
+on Learning Representations, volume 2026, pages 3543–3577, 2026. URL https://proceedings.iclr.cc/
+paper_files/paper/2026/file/073c8584ef86bee26fe9d639ec648e28-Paper-Conference.pdf. 5
+Martin A. Fischler and Robert C. Bolles. Random sample consensus: a paradigm for model fitting with
+applications to image analysis and automated cartography. Communications of the ACM, 24(6):381–395,
+1981. doi: 10.1145/358669.358692. URL https://doi.org/10.1145/358669.358692. 15
+Kipp Freud, Yijiong Lin, and Nathan F. Lepora. SimShear: Sim-to-Real Shear-based Tactile Servoing. In
+Joseph Lim, Shuran Song, and Hae-Won Park, editors, Proceedings of The 9th Conference on Robot Learning,
+volume 305 of Proceedings of Machine Learning Research, pages 3401–3412. PMLR, 2025. URL https:
+//proceedings.mlr.press/v305/freud25a.html. 4, 15
+Caelan Reed Garrett, Ajay Mandlekar, Bowen Wen, and Dieter Fox. SkillMimicGen: Automated Demonstration
+Generation for Efficient Skill Learning and Deployment. In Pulkit Agrawal, Oliver Kroemer, and Wolfram
+Burgard, editors, Proceedings of The 8th Conference on Robot Learning, volume 270 of Proceedings of Ma-
+chine Learning Research, pages 2750–2790. PMLR, 2025. URL https://proceedings.mlr.press/v270/
+garrett25a.html. 3
+39
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Haoran Geng, Feishi Wang, Songlin Wei, Yuyang Li, Bangjun Wang, Boshi An, Haozhe Lou, Charlie Tianyue
+Cheng, Peihao Li, Haozhe Chen, Yutong Liang, Yuxi Qian, Jiageng Mao, Weikang Wan, Yiran Geng, Mingtong
+Zhang, Jiangran Lyu, Siheng Zhao, Jiazhao Zhang, Chaoyi Xu, Jialiang Zhang, Chengyang Zhao, Haoran Lu,
+Yufei Ding, Ran Gong, Yuran Wang, Yuxuan Kuang, Ruihai Wu, Baoxiong Jia, Hao Dong, Siyuan Huang,
+Yue Wang, Jitendra Malik, and Pieter Abbeel. RoboVerse: A Unified Platform, Benchmark and Dataset for
+Scalable and Generalizable Robot Learning. In Proceedings of Robotics: Science and Systems, LosAngeles, CA,
+USA, 2025. doi: 10.15607/rss.2025.xxi.022. URL https://doi.org/10.15607/rss.2025.xxi.022. 3
+Diandian Gu, Jing Lin, Gaohong Liu, Jiahang Liu, Su Ma, Guang Shi, Jun Wang, Qinlong Wang, Qianyi Wu,
+Zhongcong Xu, Xuanyu Yi, Zihao Yu, Jianfeng Zhang, Zhuolin Zheng, Yifan Zhu, Rui Chen, Hengkai Guo,
+Xiaoyang Guo, Mingcong Han, Xu Han, Xiu Li, Yixun Liang, Weiqiang Lou, Junzhe Lu, Guan Luo, Minghan
+Qin, Shuguang Wang, and Yuang Wang. Seed3D 2.0: Advancing High-Fidelity Simulation-Ready 3D Content
+Generation. CoRR, abs/2605.13862, 2026. URL https://arxiv.org/abs/2605.13862. 3, 15
+Yanjiang Guo, Lucy Shi, Jianyu Chen, and Chelsea Finn.
+Ctrl-World:
+A Controllable Genera-
+tive World Model for Robot Manipulation.
+In C. Vondrick, B. Hariharan, C. Raffel, L. Pinto,
+D. Yang,
+and A. Faust,
+editors,
+International Conference on Learning Representations,
+volume
+2026, pages 6121–6138, 2026. URL https://proceedings.iclr.cc/paper_files/paper/2026/file/
+0ae94013da7cd459402fd77874e09ee3-Paper-Conference.pdf. 3
+Harsh Gupta, Yuchen Mo, Shengmiao Jin, and Wenzhen Yuan. Sensor-Invariant Tactile Representation. In Y. Yue,
+A. Garg, N. Peng, F. Sha, and R. Yu, editors, International Conference on Learning Representations, volume
+2025, pages 96515–96538, 2025. URL https://proceedings.iclr.cc/paper_files/paper/2025/file/
+f05a11e682bf9c57ab62f7cff08fbe5b-Paper-Conference.pdf. 5
+Peng Hao, Chaofan Zhang, Dingzhe Li, Xiaoge Cao, Xiaoshuai Hao, Shaowei Cui, and Shuo Wang. TLA: tactile-
+language-action model for contact-rich manipulation. Robot Learning, 3(1), 2026. doi: 10.55092/rl20260001.
+URL https://doi.org/10.55092/rl20260001. 5
+Carolina Higuera, Akash Sharma, Chaithanya Krishna Bodduluri, Taosha Fan, Patrick Lancaster, Mrinal Kalakr-
+ishnan, Michael Kaess, Byron Boots, Mike Lambeta, Tingfan Wu, and Mustafa Mukadam. Sparsh: Self-
+supervised touch representations for vision-based tactile sensing. In Pulkit Agrawal, Oliver Kroemer, and
+Wolfram Burgard, editors, Proceedings of The 8th Conference on Robot Learning, volume 270 of Proceedings of
+Machine Learning Research, pages 885–915. PMLR, 2025a. URL https://proceedings.mlr.press/v270/
+higuera25a.html. 5
+Carolina Higuera, Akash Sharma, Taosha Fan, Chaithanya Krishna Bodduluri, Byron Boots, Michael Kaess,
+Mike Lambeta, Tingfan Wu, Zixi Liu, Francois Robert Hogan, and Mustafa Mukadam. Tactile Beyond Pixels:
+Multisensory Touch Representations for Robot Manipulation. In Joseph Lim, Shuran Song, and Hae-Won Park,
+editors, Proceedings of The 9th Conference on Robot Learning, volume 305 of Proceedings of Machine Learning
+Research, pages 105–123. PMLR, 2025b. URL https://proceedings.mlr.press/v305/higuera25a.html.
+5
+Neville Hogan. Impedance Control: An Approach to Manipulation: Part I—Theory. Journal of Dynamic Systems,
+Measurement, and Control, 107(1):1–7, 1985. doi: 10.1115/1.3140702. URL https://doi.org/10.1115/
+1.3140702. 7
+HTC
+VIVE.
+VIVE
+Tracker
+(3.0),
+n.d.
+URL
+https://shop-us.vive.com/products/
+vive-tracker-3-0-full-body-tracking.
+Official product documentation. Accessed November 5,
+2026. 13
+Edward J Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean Wang, Lu Wang, and Weizhu
+Chen. LoRA: Low-Rank Adaptation of Large Language Models. In International Conference on Learning
+Representations, 2022. URL https://openreview.net/forum?id=nZeVKeeFYf9. 20
+40
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Binghao Huang, Yixuan Wang, Xinyi Yang, Yiyue Luo, and Yunzhu Li. 3D-ViTac: Learning Fine-Grained
+Manipulation with Visuo-Tactile Sensing. In Pulkit Agrawal, Oliver Kroemer, and Wolfram Burgard, editors,
+Proceedings of The 8th Conference on Robot Learning, volume 270 of Proceedings of Machine Learning Research,
+pages 2557–2578. PMLR, 2025a. URL https://proceedings.mlr.press/v270/huang25e.html. 4
+Binghao Huang, Jie Xu, Iretiayo Akinola, Wei Yang, Balakumar Sundaralingam, Rowland O’Flaherty, Dieter Fox,
+Xiaolong Wang, Arsalan Mousavian, Yu-Wei Chao, and Yunzhu Li. VT-Refine: Learning Bimanual Assembly
+with Visuo-Tactile Feedback via Simulation Fine-Tuning. In Joseph Lim, Shuran Song, and Hae-Won Park,
+editors, Proceedings of The 9th Conference on Robot Learning, volume 305 of Proceedings of Machine Learning
+Research, pages 2484–2500. PMLR, 2025b. URL https://proceedings.mlr.press/v305/huang25b.html.
+4
+Jialei Huang, Shuo Wang, Fanqi Lin, Yihang Hu, Chuan Wen, and Yang Gao. Tactile-VLA: Unlocking Vision-
+Language-Action Model’s Physical Knowledge for Tactile Generalization. CoRR, abs/2507.09160, 2025c.
+URL https://arxiv.org/abs/2507.09160. 5, 7, 19
+Arhan Jain, Mingtong Zhang, Kanav Arora, William Chen, Marcel Torne, Muhammad Zubair Irshad, Sergey
+Zakharov, Yue Wang, Sergey Levine, Chelsea Finn, Wei-Chiu Ma, Dhruv Shah, Abhishek Gupta, and Karl
+Pertsch. PolaRiS: Scalable Real-to-Sim Evaluations for Generalist Robot Policies. In Proceedings of Robotics:
+Science and Systems, Sydney, Australia, 2026. doi: 10.15607/rss.2026.xxii.062. URL https://doi.org/10.
+15607/rss.2026.xxii.062. 3, 15, 21, 22, 23, 24
+Bowen Jing, Mingxin Wang, Ruiyang Hao, Chenchen Ge, Hanwen Shen, Junjie He, Yang Cui, Yiming Hou,
+Weitao Zhou, Jiawei Wang, Minglei Li, Dandan Zhang, Ding Zhao, Houde Liu, Xiaofan Li, Si Liu, Ping Luo, and
+Haibao Yu. SoftVTBench: A Deformation-Aware Visuo-Tactile Dataset and Benchmark for Deformable-Object
+Manipulation. CoRR, abs/2608.18701, 2026. URL https://arxiv.org/abs/2608.18701. 3, 8
+Micah K. Johnson and Edward H. Adelson. Retrographic sensing for the measurement of surface texture and
+shape. In 2009 IEEE Conference on Computer Vision and Pattern Recognition, pages 1070–1077. IEEE, 2009.
+doi: 10.1109/cvpr.2009.5206534. URL https://doi.org/10.1109/cvpr.2009.5206534. 6
+Bernhard Kerbl, Georgios Kopanas, Thomas Leimkuehler, and George Drettakis. 3D Gaussian Splatting for Real-
+Time Radiance Field Rendering. ACM Transactions on Graphics, 42(4):1–14, 2023. doi: 10.1145/3592433.
+URL https://doi.org/10.1145/3592433. 15
+O. Khatib. A unified approach for motion and force control of robot manipulators: The operational space
+formulation. IEEE Journal on Robotics and Automation, 3(1):43–53, 1987. doi: 10.1109/jra.1987.1087068.
+URL https://doi.org/10.1109/jra.1987.1087068. 6
+Alexander Khazatsky, Karl Pertsch, Suraj Nair, Ashwin Balakrishna, Sudeep Dasari, Siddharth Karamcheti,
+Soroush Nasiriany, Mohan Kumar Srirama, Lawrence Yunliang Chen, Kirsty Ellis, Peter David Fagan, Joey
+Hejna, Masha Itkina, Marion Lepert, Yecheng Jason Ma, Patrick Tree Miller, Jimmy Wu, Suneel Belkhale,
+Shivin Dass, Huy Ha, Arhan Jain, Abraham Lee, Youngwoon Lee, Marius Memmel, Sungjae Park, Ilija
+Radosavovic, Kaiyuan Wang, Albert Zhan, Kevin Black, Cheng Chi, Kyle Beltran Hatch, Shan Lin, Jingpei Lu,
+Jean Mercat, Abdul Rehman, Pannag R Sanketi, Archit Sharma, Cody Simpson, Quan Vuong, Homer Rich
+Walke, Blake Wulfe, Ted Xiao, Jonathan Heewon Yang, Arefeh Yavary, Tony Z. Zhao, Christopher Agia,
+Rohan Baijal, Mateo Guaman Castro, Daphne Chen, Qiuyu Chen, Trinity Chung, Jaimyn Drake, Ethan Paul
+Foster, Jensen Gao, David Antonio Herrera, Minho Heo, Kyle Hsu, Jiaheng Hu, Donovon Jackson, Charlotte
+Le, Yunshuang Li, Roy Lin, Zehan Ma, Abhiram Maddukuri, Suvir Mirchandani, Daniel Morton, Tony
+Nguyen, Abigail O’Neill, Rosario Scalise, Derick Seale, Victor Son, Stephen Tian, Emi Tran, Andrew E. Wang,
+Yilin Wu, Annie Xie, Jingyun Yang, Patrick Yin, Yunchu Zhang, Osbert Bastani, Glen Berseth, Jeannette
+Bohg, Ken Goldberg, Abhinav Gupta, Abhishek Gupta, Dinesh Jayaraman, Joseph J Lim, Jitendra Malik,
+41
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Roberto Martín-Martín, Subramanian Ramamoorthy, Dorsa Sadigh, Shuran Song, Jiajun Wu, Michael C.
+Yip, Yuke Zhu, Thomas Kollar, Sergey Levine, and Chelsea Finn. DROID: A Large-Scale In-The-Wild Robot
+Manipulation Dataset. In Proceedings of Robotics: Science and Systems, Delft, Netherlands, 2024. doi:
+10.15607/rss.2024.xx.120. URL https://doi.org/10.15607/rss.2024.xx.120. 4
+Moo Jin Kim, Chelsea Finn, and Percy Liang. Fine-Tuning Vision-Language-Action Models: Optimizing
+Speed and Success. In Proceedings of Robotics: Science and Systems, LosAngeles, CA, USA, 2025a. doi:
+10.15607/rss.2025.xxi.017. URL https://doi.org/10.15607/rss.2025.xxi.017. 5
+Moo Jin Kim, Karl Pertsch, Siddharth Karamcheti, Ted Xiao, Ashwin Balakrishna, Suraj Nair, Rafael Rafailov,
+Ethan P Foster, Pannag R Sanketi, Quan Vuong, Thomas Kollar, Benjamin Burchfiel, Russ Tedrake, Dorsa
+Sadigh, Sergey Levine, Percy Liang, and Chelsea Finn. OpenVLA: An Open-Source Vision-Language-Action
+Model. In Pulkit Agrawal, Oliver Kroemer, and Wolfram Burgard, editors, Proceedings of The 8th Conference
+on Robot Learning, volume 270 of Proceedings of Machine Learning Research, pages 2679–2713. PMLR, 2025b.
+URL https://proceedings.mlr.press/v270/kim25c.html. 5, 18
+Dale A. Lawrence. Stability and transparency in bilateral teleoperation. IEEE Transactions on Robotics and
+Automation, 9(5):624–637, 1993. doi: 10.1109/70.258054. URL https://doi.org/10.1109/70.258054.
+12
+Luc Le Tien, Alin Albu-Schäffer, Alessandro De Luca, and Gerd Hirzinger. Friction observer and compensation
+for control of robots with joint torque measurement. In 2008 IEEE/RSJ International Conference on Intelligent
+Robots and Systems, pages 3789–3795, 2008. URL https://elib.dlr.de/55742/. 12
+Chuanyu Li, Chaoyi Liu, Daotan Wang, Shuyu Zhang, Lusong Li, Zecui Zeng, Fangchen Liu, Jing Xu, and
+Rui Chen. ViTaMIn-B: A Reliable and Efficient Visuo-Tactile Bimanual Manipulation Interface. CoRR,
+abs/2511.05858, 2025a. URL https://arxiv.org/abs/2511.05858. 4, 13, 35, 36
+Xuanlin Li, Kyle Hsu, Jiayuan Gu, Oier Mees, Karl Pertsch, Homer Rich Walke, Chuyuan Fu, Ishikaa Lunawat,
+Isabel Sieh, Sean Kirmani, Sergey Levine, Jiajun Wu, Chelsea Finn, Hao Su, Quan Vuong, and Ted Xiao.
+Evaluating Real-World Robot Manipulation Policies in Simulation. In Pulkit Agrawal, Oliver Kroemer, and
+Wolfram Burgard, editors, Proceedings of The 8th Conference on Robot Learning, volume 270 of Proceedings
+of Machine Learning Research, pages 3705–3728. PMLR, 2025b. URL https://proceedings.mlr.press/
+v270/li25c.html. 3, 15, 22
+Yichen Li, Yilun Du, Chao Liu, Francis Williams, Michael Foshey, Benjamin Eckart, Jan Kautz, Joshua B
+Tenenbaum, Antonio Torralba, and Wojciech Matusik. Learning to Jointly Understand Visual and Tactile
+Signals. In B. Kim, Y. Yue, S. Chaudhuri, K. Fragkiadaki, M. Khan, and Y. Sun, editors, International Conference
+on Learning Representations, volume 2024, pages 13153–13169, 2024. URL https://proceedings.iclr.
+cc/paper_files/paper/2024/file/3848bc3112429079af85dedb7d369ef4-Paper-Conference.pdf. 5
+Yuyang Li, Wenxin Du, Chang Yu, Puhao Li, Zihang Zhao, Tengyu Liu, Chenfanfu Jiang, Yixin Zhu, and
+Siyuan Huang. Taccel: Scaling Up Vision-based Tactile Robotics via High-performance GPU Simulation. In
+D. Belgrave, C. Zhang, H. Lin, R. Pascanu, P. Koniusz, M. Ghassemi, and N. Chen, editors, Advances in Neural
+Information Processing Systems, volume 38, Main Conference, pages 94577–94604. Curran Associates, Inc.,
+2025c. doi: 10.52202/085713-3162. URL https://doi.org/10.52202/085713-3162. 4
+Bo Liu, Yifeng Zhu, Chongkai Gao, Yihao Feng, Qiang Liu, Yuke Zhu, and Peter Stone. LIBERO: Benchmarking
+Knowledge Transfer for Lifelong Robot Learning. In A. Oh, T. Naumann, A. Globerson, K. Saenko, M. Hardt,
+and S. Levine, editors, Advances in Neural Information Processing Systems, volume 36, pages 44776–44791. Cur-
+ran Associates, Inc., 2023. doi: 10.52202/075280-1939. URL https://doi.org/10.52202/075280-1939.
+3
+42
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Fangchen Liu, Chuanyu Li, Yihua Qin, Jing Xu, Pieter Abbeel, and Rui Chen. ViTaMIn: Learning Contact-
+Rich Tasks Through Robot-Free Visuo-Tactile Manipulation Interface. CoRR, abs/2504.06156, 2025a. URL
+https://arxiv.org/abs/2504.06156. 4
+Qingtao Liu, Yu Cui, Zhengnan Sun, Gaofeng Li, Jiming Chen, and Qi Ye. VTDexManip: A Dataset and
+Benchmark for Visual-tactile Pretraining and Dexterous Manipulation with Reinforcement Learning. In
+Y. Yue, A. Garg, N. Peng, F. Sha, and R. Yu, editors, International Conference on Learning Representations,
+volume 2025, pages 90582–90607, 2025b. URL https://proceedings.iclr.cc/paper_files/paper/
+2025/file/e19b6f65791e350347bcff8a3955cb5b-Paper-Conference.pdf. 3
+Songming Liu, Lingxuan Wu, Bangguo Li, Hengkai Tan, Huayu Chen, Zhengyi Wang, Ke Xu, Hang
+Su, and Jun Zhu.
+RDT-1B: a Diffusion Foundation Model for Bimanual Manipulation.
+In Y. Yue,
+A. Garg, N. Peng, F. Sha, and R. Yu, editors, International Conference on Learning Representations, vol-
+ume 2025, pages 29982–30009, 2025c. URL https://proceedings.iclr.cc/paper_files/paper/2025/
+file/49f80e4d2471ad4f2edf4f5f1ab62339-Paper-Conference.pdf. 5
+Rundong Luo, Yunong Liu, Di Cao, Matthew Tancik, Shyamal Buch, Colton Stearns, and Wenqi Xian. SceneRig:
+An Agentic System for Simulation-Ready 3D Scene Reconstruction from Single Images. CoRR, abs/2610.28585,
+2026. URL https://arxiv.org/abs/2610.28585. 3, 23, 24
+Oier Mees, Lukas Hermann, Erick Rosete-Beas, and Wolfram Burgard. CALVIN: A Benchmark for Language-
+Conditioned Policy Learning for Long-Horizon Robot Manipulation Tasks. IEEE Robotics and Automation
+Letters, 7(3):7327–7334, 2022. doi: 10.1109/lra.2022.3180108. URL https://doi.org/10.1109/lra.
+2022.3180108. 3
+Yao Mu, Tianxing Chen, Zanxin Chen, Shijia Peng, Zhiqian Lan, Zeyu Gao, Zhixuan Liang, Qiaojun Yu, Yude
+Zou, Mingkun Xu, Lunkai Lin, Zhiqiang Xie, Mingyu Ding, and Ping Luo. RoboTwin: Dual-Arm Robot
+Benchmark with Generative Digital Twins. In Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), pages 27649–27660, 2025. 3
+Soroush Nasiriany, Abhiram Maddukuri, Lance Zhang, Adeet Parikh, Aaron Lo, Abhishek Joshi, Ajay Mandlekar,
+and Yuke Zhu. RoboCasa: Large-Scale Simulation of Household Tasks for Generalist Robots. In Proceedings
+of Robotics: Science and Systems, Delft, Netherlands, 2024. doi: 10.15607/rss.2024.xx.050. URL https:
+//doi.org/10.15607/rss.2024.xx.050. 3
+Michal Nazarczuk, Karla Stepanova, Jan Kristof Behrens, Matej Hoffmann, and Krystian Mikolajczyk. MuBlE:
+MuJoCo and Blender simulation Environment and Benchmark for Task Planning in Robot Manipulation.
+CoRR, abs/2503.02834, 2025. URL https://arxiv.org/abs/2503.02834. 3
+Duc Huy Nguyen, Tim Schneider, Guillaume Duret, Alap Kshirsagar, Boris Belousov, and Jan Peters. TacEx:
+GelSight Tactile Simulation in Isaac Sim – Combining Soft-Body and Visuotactile Simulators.
+CoRR,
+abs/2411.04776, 2024. URL https://arxiv.org/abs/2411.04776. 3
+NVIDIA, Johan Bjorck, Fernando Castañeda, Nikita Cherniadev, Xingye Da, Runyu Ding, Linxi "Jim" Fan,
+Yu Fang, Dieter Fox, Fengyuan Hu, Spencer Huang, Joel Jang, Zhenyu Jiang, Jan Kautz, Kaushil Kundalia,
+Lawrence Lao, Zhiqi Li, Zongyu Lin, Kevin Lin, Guilin Liu, Edith Llontop, Loic Magne, Ajay Mandlekar, Avnish
+Narayan, Soroush Nasiriany, Scott Reed, You Liang Tan, Guanzhi Wang, Zu Wang, Jing Wang, Qi Wang,
+Jiannan Xiang, Yuqi Xie, Yinzhen Xu, Zhenjia Xu, Seonghyeon Ye, Zhiding Yu, Ao Zhang, Hao Zhang, Yizhou
+Zhao, Ruijie Zheng, and Yuke Zhu. GR00T N1: An Open Foundation Model for Generalist Humanoid Robots.
+CoRR, abs/2503.14734, 2025a. URL https://arxiv.org/abs/2503.14734. 5
+NVIDIA, Mayank Mittal, Pascal Roth, James Tigue, Antoine Richard, Octi Zhang, Peter Du, Antonio Serrano-
+Muñoz, Xinjie Yao, René Zurbrügg, Nikita Rudin, Lukasz Wawrzyniak, Milad Rakhsha, Alain Denzler, Eric
+43
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Heiden, Ales Borovicka, Ossama Ahmed, Iretiayo Akinola, Abrar Anwar, Mark T. Carlson, Ji Yuan Feng,
+Animesh Garg, Renato Gasoto, Lionel Gulich, Yijie Guo, M. Gussert, Alex Hansen, Mihir Kulkarni, Chenran
+Li, Wei Liu, Viktor Makoviychuk, Grzegorz Malczyk, Hammad Mazhar, Masoud Moghani, Adithyavairavan
+Murali, Michael Noseworthy, Alexander Poddubny, Nathan Ratliff, Welf Rehberg, Clemens Schwarke, Ritvik
+Singh, James Latham Smith, Bingjie Tang, Ruchik Thaker, Matthew Trepte, Karl Van Wyk, Fangzhou Yu, Alex
+Millane, Vikram Ramasamy, Remo Steiner, Sangeeta Subramanian, Clemens Volk, CY Chen, Neel Jawale,
+Ashwin Varghese Kuruttukulam, Michael A. Lin, Ajay Mandlekar, Karsten Patzwaldt, John Welsh, Huihua
+Zhao, Fatima Anes, Jean-Francois Lafleche, Nicolas Moënne-Loccoz, Soowan Park, Rob Stepinski, Dirk
+Van Gelder, Chris Amevor, Jan Carius, Jumyung Chang, Anka He Chen, Pablo de Heras Ciechomski, Gilles
+Daviet, Mohammad Mohajerani, Julia von Muralt, Viktor Reutskyy, Michael Sauter, Simon Schirm, Eric L.
+Shi, Pierre Terdiman, Kenny Vilella, Tobias Widmer, Gordon Yeoman, Tiffany Chen, Sergey Grizan, Cathy
+Li, Lotus Li, Connor Smith, Rafael Wiltz, Kostas Alexis, Yan Chang, David Chu, Linxi "Jim" Fan, Farbod
+Farshidian, Ankur Handa, Spencer Huang, Marco Hutter, Yashraj Narang, Soha Pouya, Shiwei Sheng, Yuke
+Zhu, Miles Macklin, Adam Moravanszky, Philipp Reist, Yunrong Guo, David Hoeller, and Gavriel State. Isaac
+Lab: A GPU-Accelerated Simulation Framework for Multi-Modal Robot Learning. CoRR, abs/2511.04831,
+2025b. URL https://arxiv.org/abs/2511.04831. 3, 6
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry,
+Amanda Askell, Pamela Mishkin, Jack Clark, Gretchen Krueger, and Ilya Sutskever. Learning Transferable
+Visual Models From Natural Language Supervision. In International Conference on Machine Learning, volume
+139 of Proceedings of Machine Learning Research, pages 8748–8763. PMLR, 2021. URL https://proceedings.
+mlr.press/v139/radford21a.html. 21
+Nadun Ranawaka, Josiah Wong, Wei-Lin Pai, Wei-Teng Chu, Tianyuan Dai, Masoud Moghani, Hang Yin, Yunfan
+Jiang, Wesley Durbano, Brandon Huynh, Yu Fang, Danfei Xu, Ruohan Zhang, Li Fei-Fei, Linxi Fan, Bowen
+Wen, Ajay Mandlekar, and Yuke Zhu. SimFoundry: Modular and Automated Scene Generation for Policy
+Learning and Evaluation. CoRR, abs/2606.28276, 2026. URL https://arxiv.org/abs/2606.28276. 3, 6,
+23, 24
+Samanta Rodriguez, Yiming Dou, Miquel Oller, Andrew Owens, and Nima Fazeli. Cross-Sensor Touch Generation.
+In Joseph Lim, Shuran Song, and Hae-Won Park, editors, Proceedings of The 9th Conference on Robot
+Learning, volume 305 of Proceedings of Machine Learning Research, pages 152–167. PMLR, 2025. URL
+https://proceedings.mlr.press/v305/rodriguez25a.html. 4
+Johannes L. Schonberger and Jan-Michael Frahm. Structure-From-Motion Revisited. In Proceedings of the IEEE
+Conference on Computer Vision and Pattern Recognition (CVPR), 2016. 15
+Zilin Si and Wenzhen Yuan.
+Taxim: An Example-Based Simulation Model for GelSight Tactile Sensors.
+IEEE Robotics and Automation Letters, 7(2):2361–2368, 2022. doi: 10.1109/lra.2022.3142412. URL
+https://doi.org/10.1109/lra.2022.3142412. 3, 6, 16, 35
+Zilin Si, Gu Zhang, Qingwei Ben, Branden Romero, Zhou Xian, Chao Liu, and Chuang Gan. DIFFTACTILE:
+A Physics-based Differentiable Tactile Simulator for Contact-rich Robotic Manipulation. In B. Kim, Y. Yue,
+S. Chaudhuri, K. Fragkiadaki, M. Khan, and Y. Sun, editors, International Conference on Learning Representa-
+tions, volume 2024, pages 7164–7183, 2024. URL https://proceedings.iclr.cc/paper_files/paper/
+2024/file/1cc70be9fb6a83bc46cf4ac21a91e0b0-Paper-Conference.pdf. 4
+Stone Tao, Fanbo Xiang, Arth Shukla, Yuzhe Qin, Xander Hinrichsen, Xiaodi Yuan, Chen Bao, Xinsong Lin,
+Yulin Liu, Tse-Kai Chan, Yuan Gao, Xuanlin Li, Tongzhou Mu, Nan Xiao, Arnav Gurha, Viswesh Nagaswamy
+Rajesh, Yong Woo Choi, Yen-Ru Chen, Zhiao Huang, Roberto Calandra, Rui Chen, Shan Luo, and Hao
+Su. Demonstrating GPU Parallelized Robot Simulation and Rendering for Generalizable Embodied AI with
+44
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+ManiSkill3. In Proceedings of Robotics: Science and Systems, LosAngeles, CA, USA, 2025. doi: 10.15607/rss.
+2025.xxi.021. URL https://doi.org/10.15607/rss.2025.xxi.021. 3
+Shaoxiong Wang, Mike Lambeta, Po-Wei Chou, and Roberto Calandra. TACTO: A Fast, Flexible, and Open-Source
+Simulator for High-Resolution Vision-Based Tactile Sensors. IEEE Robotics and Automation Letters, 7(2):
+3930–3937, 2022. doi: 10.1109/lra.2022.3146945. URL https://doi.org/10.1109/lra.2022.3146945.
+3
+Lai Wei, Jiahua Ma, Yibo Hu, and Ruimao Zhang. Ensuring Force Safety in Vision-Guided Robotic Manipulation
+via Implicit Tactile Calibration. In Joseph Lim, Shuran Song, and Hae-Won Park, editors, Proceedings of The
+9th Conference on Robot Learning, volume 305 of Proceedings of Machine Learning Research, pages 1049–1062.
+PMLR, 2025. URL https://proceedings.mlr.press/v305/wei25a.html. 3, 8
+Youngsun Wi, Jessica Yin, Elvis Xiang, Akash Sharma, Jitendra Malik, Mustafa Mukadam, Nima Fazeli, and
+Tess Hellebrekers. TactAlign: Human-to-Robot Policy Transfer via Tactile Alignment. In Proceedings of
+Robotics: Science and Systems, Sydney, Australia, 2026. doi: 10.15607/rss.2026.xxii.006. URL https:
+//doi.org/10.15607/rss.2026.xxii.006. 13
+Longyan Wu, Checheng Yu, Jieji Ren, Li Chen, Yufei Jiang, Ran Huang, Guoying Gu, and Hongyang Li. FreeTac-
+Man: Robot-free Visuo-Tactile Data Collection System for Contact-rich Manipulation. CoRR, abs/2506.01941,
+2025a. URL https://arxiv.org/abs/2506.01941. 5
+Mingdong Wu, Long Yang, Jin Liu, Weiyao Huang, Lehong Wu, Zelin Chen, Daolin Ma, and Hao Dong.
+UniTac2Pose: A Unified Approach Learned in Simulation for Category-level Visuotactile In-hand Pose
+Estimation. In Joseph Lim, Shuran Song, and Hae-Won Park, editors, Proceedings of The 9th Conference on
+Robot Learning, volume 305 of Proceedings of Machine Learning Research, pages 4367–4384. PMLR, 2025b.
+URL https://proceedings.mlr.press/v305/wu25d.html. 4
+Yifan Wu, Qin Li, Nan Min, Guojin Zhong, Haoyu Zhao, Zhiyuan Li, Houze Xu, Shengqi Xu, Xingyao Lin,
+Zijie Diao, Zhaoxiang Liu, Shiguo Lian, Shunlin Lu, Shihao Zhao, Ziyi Ye, Zuxuan Wu, and Yu-Gang Jiang.
+OpenViTac: Learning and Benchmarking Visuo-Tactile Policies in a Unified Sim-and-Real Framework. CoRR,
+abs/2610.10384, 2026. URL https://arxiv.org/abs/2610.10384. 3, 23, 24
+Mengda Xu, Han Zhang, Yifan Hou, Zhenjia Xu, Linxi Fan, Manuela Veloso, and Shuran Song. DexUMI:
+Using Human Hand as the Universal Manipulation Interface for Dexterous Manipulation. In Joseph Lim,
+Shuran Song, and Hae-Won Park, editors, Proceedings of The 9th Conference on Robot Learning, volume 305
+of Proceedings of Machine Learning Research, pages 437–459. PMLR, 2025a. URL https://proceedings.
+mlr.press/v305/xu25b.html. 13
+Yue Xu, Litao Wei, Pengyu An, Qingyu Zhang, and Yong-Lu Li. exUMI: Extensible Robot Teaching System with
+Action-aware Task-agnostic Tactile Representation. In Joseph Lim, Shuran Song, and Hae-Won Park, editors,
+Proceedings of The 9th Conference on Robot Learning, volume 305 of Proceedings of Machine Learning Research,
+pages 2536–2554. PMLR, 2025b. URL https://proceedings.mlr.press/v305/xu25e.html. 5
+Han Xue, Jieji Ren, Wendi Chen, Gu Zhang, Fang Yuan, Guoying Gu, Huazhe Xu, and Cewu Lu. Reactive
+Diffusion Policy: Slow-Fast Visual-Tactile Policy Learning for Contact-Rich Manipulation. In Proceedings
+of Robotics: Science and Systems, LosAngeles, CA, USA, 2025.
+doi: 10.15607/rss.2025.xxi.052.
+URL
+https://doi.org/10.15607/rss.2025.xxi.052. 5, 11
+Fengyu Yang, Chao Feng, Ziyang Chen, Hyoungseob Park, Daniel Wang, Yiming Dou, Ziyao Zeng, Xien Chen, Rit
+Gangopadhyay, Andrew Owens, and Alex Wong. Binding Touch to Everything: Learning Unified Multimodal
+Tactile Representations. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition
+(CVPR), pages 26340–26353, 2024. 5
+45
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Max Yang, chenghua lu, Alex Church, Yijiong Lin, Christopher J. Ford, Haoran Li, Efi Psomopoulou, David A.W.
+Barton, and Nathan F. Lepora. AnyRotate: Gravity-Invariant In-Hand Object Rotation with Sim-to-Real
+Touch. In Pulkit Agrawal, Oliver Kroemer, and Wolfram Burgard, editors, Proceedings of The 8th Conference
+on Robot Learning, volume 270 of Proceedings of Machine Learning Research, pages 4727–4747. PMLR, 2025.
+URL https://proceedings.mlr.press/v270/yang25c.html. 4, 15
+Kelin Yu, Yunhai Han, Qixian Wang, Vaibhav Saxena, Danfei Xu, and Ye Zhao. MimicTouch: Leveraging Multi-
+modal Human Tactile Demonstrations for Contact-rich Manipulation. In Pulkit Agrawal, Oliver Kroemer, and
+Wolfram Burgard, editors, Proceedings of The 8th Conference on Robot Learning, volume 270 of Proceedings
+of Machine Learning Research, pages 4844–4865. PMLR, 2025a. URL https://proceedings.mlr.press/
+v270/yu25c.html. 13
+Samson Yu, Lin Kelvin, Anxing Xiao, Jiafei Duan, and Harold Soh. Octopi: Object Property Reasoning with
+Large Tactile-Language Models. In Proceedings of Robotics: Science and Systems, Delft, Netherlands, 2024.
+doi: 10.15607/rss.2024.xx.066. URL https://doi.org/10.15607/rss.2024.xx.066. 5
+Samson Yu, Lin Kelvin, and Harold Soh. Demonstrating the Octopi-1.5 Visual-Tactile-Language Model. In
+Proceedings of Robotics: Science and Systems, LosAngeles, CA, USA, 2025b. doi: 10.15607/rss.2025.xxi.058.
+URL https://doi.org/10.15607/rss.2025.xxi.058. 5
+Wenzhen Yuan, Siyuan Dong, and Edward Adelson. GelSight: High-Resolution Robot Tactile Sensors for
+Estimating Geometry and Force. Sensors, 17(12):2762, 2017. doi: 10.3390/s17122762. URL https:
+//doi.org/10.3390/s17122762. 4, 6
+Chaofan Zhang, Peng Hao, Xiaoge Cao, Xiaoshuai Hao, Shaowei Cui, and Shuo Wang. VTLA: Vision-Tactile-
+Language-Action model with preference learning for insertion manipulation. Biomimetic Intelligence and
+Robotics, page 100333, 2026. doi: 10.1016/j.birob.2026.100333. URL https://doi.org/10.1016/j.
+birob.2026.100333. 5, 11, 19
+Di Zhang, Chengbo Yuan, Chuan Wen, Hai Zhang, Junqiao Zhao, and Yang Gao. KineDex: Learning Tactile-
+Informed Visuomotor Policies via Kinesthetic Teaching for Dexterous Manipulation. In Joseph Lim, Shuran
+Song, and Hae-Won Park, editors, Proceedings of The 9th Conference on Robot Learning, volume 305 of
+Proceedings of Machine Learning Research, pages 4123–4138. PMLR, 2025a. URL https://proceedings.
+mlr.press/v305/zhang25l.html. 13
+Zongzheng Zhang, Haobo Xu, Zhuo Yang, Chenghao Yue, Zehao Lin, Huan-ang Gao, Ziwei Wang, and Hao
+Zhao. Elucidating the Design Space of Torque-aware Vision-Language-Action Models. In Joseph Lim, Shuran
+Song, and Hae-Won Park, editors, Proceedings of The 9th Conference on Robot Learning, volume 305 of
+Proceedings of Machine Learning Research, pages 4019–4037. PMLR, 2025b. URL https://proceedings.
+mlr.press/v305/zhang25k.html. 5, 20
+Jialiang Zhao, Naveen Kuppuswamy, Siyuan Feng, Benjamin Burchfiel, and Edward Adelson. PolyTouch:
+A Robust Multi-Modal Tactile Sensor for Contact-Rich Manipulation Using Tactile-Diffusion Policies. In
+2025 IEEE International Conference on Robotics and Automation (ICRA), pages 104–110. IEEE, 2025a. doi:
+10.1109/icra55743.2025.11128816. URL https://doi.org/10.1109/icra55743.2025.11128816. 4
+Jialiang Zhao, Yuxiang Ma, Lirui Wang, and Edward Adelson. Transferable Tactile Transformers for Represen-
+tation Learning Across Diverse Sensors and Tasks. In Pulkit Agrawal, Oliver Kroemer, and Wolfram Burgard,
+editors, Proceedings of The 8th Conference on Robot Learning, volume 270 of Proceedings of Machine Learning
+Research, pages 3766–3779. PMLR, 2025b. URL https://proceedings.mlr.press/v270/zhao25c.html.
+5
+46
+
+
+Tacinf: A Unified Tactile Infrastructure for Robot Manipulation
+Yongqiang Zhao, Kun Qian, Boyi Duan, and Shan Luo. FOTS: A Fast Optical Tactile Simulator for Sim2Real
+Learning of Tactile-Motor Robot Manipulation Skills. IEEE Robotics and Automation Letters, 9(6):5647–5654,
+2024. doi: 10.1109/lra.2024.3396665. URL https://doi.org/10.1109/lra.2024.3396665. 3, 6, 16, 35
+Zhaxizhuom Zhaxizhuoma, Kehui Liu, Chuyue Guan, Zhongjie Jia, Ziniu Wu, Xin Liu, Tianyu Wang, Shuai
+Liang, Pengan CHEN, Pingrui Zhang, Haoming Song, Delin Qu, Dong Wang, Zhigang Wang, Nieqing Cao,
+Yan Ding, Bin Zhao, and Xuelong Li. FastUMI: A Scalable and Hardware-Independent Universal Manipulation
+Interface with Dataset. In Joseph Lim, Shuran Song, and Hae-Won Park, editors, Proceedings of The 9th
+Conference on Robot Learning, volume 305 of Proceedings of Machine Learning Research, pages 3069–3093.
+PMLR, 2025. URL https://proceedings.mlr.press/v305/zhaxizhuoma25a.html. 4
+Jiayu Zhou, Qiwei Wu, Jian Li, Zhe Chen, Xiaogang Xiong, and Renjing Xu. Gentle Manipulation Policy
+Learning via Demonstrations from VLM Planned Atomic Skills.
+In Proceedings of the AAAI Conference
+on Artificial Intelligence, volume 40, pages 18855–18863, 2026. doi: 10.1609/aaai.v40i22.38955. URL
+https://doi.org/10.1609/aaai.v40i22.38955. 8
+Yuke Zhu, Josiah Wong, Ajay Mandlekar, Roberto Martín-Martín, Abhishek Joshi, Kevin Lin, Abhiram Maddukuri,
+Soroush Nasiriany, and Yifeng Zhu. robosuite: A Modular Simulation Framework and Benchmark for Robot
+Learning. CoRR, abs/2009.12293, 2020. URL https://arxiv.org/abs/2009.12293. 3
+47
