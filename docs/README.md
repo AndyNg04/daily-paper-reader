@@ -48,17 +48,17 @@
 <section class="dpr-home-dashboard-card dpr-home-report-card">
   <div class="dpr-home-dashboard-header">
     <div>
-      <span class="dpr-home-dashboard-kicker">2026-11-26</span>
+      <span class="dpr-home-dashboard-kicker">2026-11-27</span>
       <h3 class="dpr-home-dashboard-title">今日汇总</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">共 34 篇</strong>
+    <strong class="dpr-home-dashboard-count">共 35 篇</strong>
   </div>
   <dl class="dpr-home-dashboard-stats">
     <div class="dpr-home-dashboard-stat"><dt>累计更新</dt><dd>1 次</dd></div>
     <div class="dpr-home-dashboard-stat"><dt>精读</dt><dd>15</dd></div>
-    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>19</dd></div>
+    <div class="dpr-home-dashboard-stat"><dt>速读</dt><dd>20</dd></div>
   </dl>
-  <p class="dpr-home-dashboard-body">最近更新：2026-11-26 23:50:17 UTC<br>状态：成功</p>
+  <p class="dpr-home-dashboard-body">最近更新：2026-11-27 22:39:47 UTC<br>状态：成功</p>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-brief-card">
   <div class="dpr-home-dashboard-header">
@@ -69,9 +69,9 @@
     <strong class="dpr-home-dashboard-count">AI</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<p>11 月 26 日论文日报：共筛选 34 篇，精读 15 篇、速读 19 篇，焦点是 AI 如何应对没说清的需求。</p>
-<p>两篇 9.0 分精读最值得看：EA-Bench 衡量指令不完善时的信息与行动效率，另一篇聚焦如何让大模型识别用户没明说的意图。</p>
-<p>如果只读一篇，先看隐藏意图研究，再拿一条自己常用的模糊指令试试：AI 会先追问，还是直接猜？</p>
+<p>11 月 27 日论文日报：精读 15 篇、速读 20 篇，共 35 篇。</p>
+<p>两篇 9.0 分精读最值得看：一篇关注大模型如何随持续输入调整权重以实现个性化，另一篇探讨如何在没有外部参考标注的情况下评估用户模拟器的角色一致性。</p>
+<p>不妨先读角色一致性那篇，带着一个问题看：没有标准答案，怎么判断模型有没有“出戏”？</p>
   </div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-deep-card">
@@ -83,9 +83,9 @@
     <strong class="dpr-home-dashboard-count">15 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="EA-Bench: Measuring information and action efficiency under imperfect instructions">EA-Bench: Measuring information and action efficiency under imperfect instructions</span></li><li><span class="dpr-home-dashboard-paper-title" title="Do You Even Know What I Want? Improving LLMs Ability to Detect Hidden User Intent">Do You Even Know What I Want? Improving LLMs Ability to Detect Hidden User Intent</span></li><li><span class="dpr-home-dashboard-paper-title" title="Do LLM Agents Compromise Like Humans? Risk and Responsibility in Dyadic Decision-Making">Do LLM Agents Compromise Like Humans? Risk and Responsibility in Dyadic Decision-Making</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="WASP: Continual Weight Adaptation for Streaming LLM Personalization">WASP: Continual Weight Adaptation for Streaming LLM Personalization</span></li><li><span class="dpr-home-dashboard-paper-title" title="Evaluating Persona Consistency in LLM User Simulators Without External Reference Annotations">Evaluating Persona Consistency in LLM User Simulators Without External Reference Annotations</span></li><li><span class="dpr-home-dashboard-paper-title" title="Exploring Multi-Player Social Games as Verifiable Training Grounds for Large Language Models">Exploring Multi-Player Social Games as Verifiable Training Grounds for Large Language Models</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">ai-social-psych <strong>4</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>3</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>2</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>3</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>3</strong></span><span class="dpr-home-dashboard-tag">human-ai <strong>2</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>2</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span></div>
 </section>
 <section class="dpr-home-dashboard-card dpr-home-skim-card">
   <div class="dpr-home-dashboard-header">
@@ -93,12 +93,12 @@
       <span class="dpr-home-dashboard-kicker">今日累计</span>
       <h3 class="dpr-home-dashboard-title">速读推荐</h3>
     </div>
-    <strong class="dpr-home-dashboard-count">19 篇</strong>
+    <strong class="dpr-home-dashboard-count">20 篇</strong>
   </div>
   <div class="dpr-home-dashboard-body">
-<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Tether: Verified Stateful Policy Engine for System-Level Monitoring of Agents">Tether: Verified Stateful Policy Engine for System-Level Monitoring of Agents</span></li><li><span class="dpr-home-dashboard-paper-title" title="Embodied Human-Data Interaction">Embodied Human-Data Interaction</span></li><li><span class="dpr-home-dashboard-paper-title" title="When Agents Play Differently: Localizing Human--Agent Behavioral Divergence with Conditional Distributional Testing">When Agents Play Differently: Localizing Human--Agent Behavioral Divergence with Conditional Distributional Testing</span></li></ul>
+<ul class="dpr-home-dashboard-paper-list"><li><span class="dpr-home-dashboard-paper-title" title="Testing for Coordination Failures in Cooperative Multi-Agent Reinforcement Learning">Testing for Coordination Failures in Cooperative Multi-Agent Reinforcement Learning</span></li><li><span class="dpr-home-dashboard-paper-title" title="mini-psych-agent: Evaluating Human-Like Behavior in LLM Agents through Interactive Psychological Environments">mini-psych-agent: Evaluating Human-Like Behavior in LLM Agents through Interactive Psychological Environments</span></li><li><span class="dpr-home-dashboard-paper-title" title="COGENT: A Modular Cognitive Architecture for Agentic User Simulation">COGENT: A Modular Cognitive Architecture for Agentic User Simulation</span></li></ul>
   </div>
-  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>4</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>4</strong></span><span class="dpr-home-dashboard-tag">social-computing <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-social-psych <strong>1</strong></span><span class="dpr-home-dashboard-tag">ba <strong>1</strong></span></div>
+  <div class="dpr-home-dashboard-tags"><span class="dpr-home-dashboard-tag">human-ai <strong>5</strong></span><span class="dpr-home-dashboard-tag">llm-social-sim <strong>5</strong></span><span class="dpr-home-dashboard-tag">personal-agent <strong>5</strong></span><span class="dpr-home-dashboard-tag">social-rl <strong>2</strong></span><span class="dpr-home-dashboard-tag">ai-hci-mh <strong>1</strong></span><span class="dpr-home-dashboard-tag">interaction <strong>1</strong></span></div>
 </section>
 </div>
 
